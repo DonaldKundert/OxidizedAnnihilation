@@ -2,6 +2,7 @@
 //! game binary.
 
 mod archive_cmds;
+mod model_cmd;
 mod report;
 mod survey;
 
@@ -55,6 +56,13 @@ enum Cmd {
         #[arg(default_value = "")]
         prefix: String,
     },
+    /// Export a 3DO model as OBJ + MTL + JSON piece tree. Keep the output outside the repo.
+    DumpModel {
+        /// VFS path (`objects3d/araknigh.3do`) or bare model name (`araknigh`).
+        path: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Inventory archive contents by extension and magic.
     Census {
         #[arg(long)]
@@ -78,6 +86,7 @@ fn main() -> ExitCode {
                 let out = out.unwrap_or_else(|| std::env::temp_dir().join("tak-census"));
                 archive_cmds::census(vfs, &out)
             }
+            Cmd::DumpModel { path, out } => model_cmd::dump_model(vfs, &path, &out),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
