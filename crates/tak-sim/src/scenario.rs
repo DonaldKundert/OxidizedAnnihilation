@@ -72,6 +72,9 @@ pub struct Scenario {
     pub unit_defs: Vec<UnitDef>,
     /// Player slots; entry `i` is `PlayerId(i)`.
     pub players: Vec<PlayerSpec>,
+    /// Economy rules and sacred sites (WP-N). Optional in JSON.
+    #[serde(default)]
+    pub economy: Box<crate::economy::EconomySetup>,
 }
 
 impl Scenario {
@@ -99,6 +102,7 @@ impl Scenario {
         for d in &self.unit_defs {
             d.validate()?;
         }
+        self.economy.validate()?;
         if self.players.len() > MAX_PLAYERS {
             return Err(ScenarioError::Invalid("too many players".into()));
         }
