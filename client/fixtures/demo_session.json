@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "tick": 1,
+      "player": 0,
+      "seq": 0,
+      "command": {
+        "type": "build",
+        "units": [
+          {
+            "index": 0,
+            "generation": 0
+          }
+        ],
+        "def": 2,
+        "at": {
+          "x": 125829120,
+          "y": 22020096
+        },
+        "queue": "replace"
+      }
+    },
+    {
+      "tick": 1,
+      "player": 0,
+      "seq": 1,
+      "command": {
+        "type": "attack",
+        "units": [
+          {
+            "index": 0,
+            "generation": 0
+          }
+        ],
+        "target": {
+          "unit": {
+            "index": 1,
+            "generation": 0
+          }
+        },
+        "queue": "append"
+      }
+    },
+    {
+      "tick": 1,
+      "player": 1,
+      "seq": 0,
+      "command": {
+        "type": "attack",
+        "units": [
+          {
+            "index": 1,
+            "generation": 0
+          }
+        ],
+        "target": {
+          "unit": {
+            "index": 0,
+            "generation": 0
+          }
+        },
+        "queue": "replace"
+      }
+    }
+  ]
+}
