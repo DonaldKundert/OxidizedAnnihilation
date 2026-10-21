@@ -100,6 +100,27 @@ impl Sim {
         crate::lifecycle::script_ctx(&self.world, id)
     }
 
+    /// Pre-placed units for setups and tests (e.g. a skirmish): spawn a unit
+    /// with its script between ticks, exactly as
+    /// [`crate::lifecycle::spawn_unit`] does mid-tick. Deterministic, but not
+    /// a command: replays must repeat the same calls at the same ticks.
+    pub fn spawn_unit(
+        &mut self,
+        def: crate::UnitDefId,
+        owner: crate::PlayerId,
+        pos: crate::WorldPos,
+        heading: tak_math::Angle,
+    ) -> Option<UnitId> {
+        crate::lifecycle::spawn_unit(
+            &mut self.world,
+            self.scripts.as_mut(),
+            def,
+            owner,
+            pos,
+            heading,
+        )
+    }
+
     /// The script host's diagnostics (not part of the hash).
     pub fn script_stats(&self) -> ScriptStats {
         self.scripts.stats()
