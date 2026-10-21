@@ -1,6 +1,7 @@
 //! Inspection tools for Total Annihilation: Kingdoms data. Not shipped in the
 //! game binary.
 
+mod anim_cmd;
 mod archive_cmds;
 mod disasm_cmd;
 mod keys_cmd;
@@ -78,6 +79,31 @@ enum Cmd {
         #[arg(long)]
         stats: bool,
     },
+    /// Run a unit's COB script headless: per-tick piece transforms (JSON) and a PNG strip.
+    Anim {
+        /// Unit name (`arasword`); resolves its script and model via `units/<unit>.fbi`.
+        unit: String,
+        /// Entry function to start.
+        #[arg(long, default_value = "Create")]
+        script: String,
+        /// Ticks to record (30 per second).
+        #[arg(long, default_value_t = 90)]
+        ticks: u32,
+        /// Pin an engine port, PORT=VALUE (repeatable). `--set 29=10` fakes movement.
+        #[arg(long = "set")]
+        set: Vec<String>,
+        /// Ticks to run before recording.
+        #[arg(long, default_value_t = 0)]
+        warmup: u32,
+        /// Frames in the PNG strip, sampled evenly across the recorded ticks.
+        #[arg(long, default_value_t = 8)]
+        frames: u32,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Output folder. Keep it outside the repo.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Write every frame of a GAF/TAF/GAO or PCX as PNG. Keep the output outside the repo.
     DumpSprite {
         path: String,
@@ -133,6 +159,28 @@ fn main() -> ExitCode {
                 piece,
             } => map_cmd::dump_map(vfs, &path, &out, palette.as_deref(), piece),
             Cmd::Keys(args) => keys_cmd::keys(vfs, args),
+            Cmd::Anim {
+                unit,
+                script,
+                ticks,
+                set,
+                warmup,
+                frames,
+                seed,
+                out,
+            } => anim_cmd::run(
+                vfs,
+                &anim_cmd::AnimArgs {
+                    unit: &unit,
+                    script: &script,
+                    ticks,
+                    set: &set,
+                    warmup,
+                    frames,
+                    seed,
+                    out: &out,
+                },
+            ),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };

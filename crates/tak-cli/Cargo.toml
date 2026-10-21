@@ -13,6 +13,7 @@ workspace = true
 tak-vfs.workspace = true
 tak-formats.workspace = true
 tak-script.workspace = true
+tak-math.workspace = true
 tak-headless.workspace = true
 clap.workspace = true
 serde.workspace = true
