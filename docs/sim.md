@@ -295,6 +295,11 @@ OTA `[UNITS]` is the campaign loader's job (not built).
   `ZONHUNT` placed face to face on Adamantine Gate with their scripts,
   ordered to attack each other: the Zhon monarch dies, the match is over at
   tick 939 with `winners [0]`, player 1 defeated, zero VM errors.
+- OTA corpus (same file): all 310 OTAs parse; 74 author conditions, giving
+  53 victory and 68 defeat conditions. Unsupported: only the 6
+  `useonlyunits` entries (they name build-restriction TDFs). 2 type names
+  do not resolve against the base ruleset (the `takx18_ph` placeholder
+  `takx`).
 
 ## Unknown / open
 

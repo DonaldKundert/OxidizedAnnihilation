@@ -78,3 +78,45 @@ fn victory_real_map_monarch_duel_has_the_right_winner() {
     assert_eq!(s.world().victory().decided_at(), Some(end));
     assert!(s.script_stats().errors.is_empty());
 }
+
+/// Every OTA in the install parses into mission rules and only
+/// `useonlyunits` is left unsupported. Type names that the base ruleset
+/// does not define are counted (they match nothing).
+#[test]
+fn victory_real_map_every_ota_condition_parses() {
+    let Some(dir) = tak_vfs::testing::data_dir_or_skip("victory_ota_corpus") else {
+        return;
+    };
+    let vfs = tak_vfs::open_kingdoms(&dir).expect("open install");
+    let rs = tak_content::Ruleset::load(&vfs, tak_content::RulesetKind::Base);
+    let defs: Vec<tak_sim::UnitDef> = rs
+        .units
+        .values()
+        .map(tak_sim::content::unit_def_from_fbi)
+        .collect();
+    let (mut files, mut with, mut victory, mut defeat, mut unresolved) = (0, 0, 0, 0, 0);
+    let mut unsupported = Vec::new();
+    for f in vfs.list("") {
+        if !f.path.ends_with(".ota") {
+            continue;
+        }
+        files += 1;
+        let ota = tak_content::OtaDef::load(&vfs, &f.path).expect("ota");
+        let m = tak_sim::victory::MissionRules::from_conditions(&ota.conditions, &defs);
+        with += usize::from(!ota.conditions.is_empty());
+        victory += m.victory.len();
+        defeat += m.defeat.len();
+        unresolved += format!("{m:?}").matches("def: None").count();
+        unsupported.extend(m.unsupported);
+    }
+    eprintln!(
+        "{files} OTAs, {with} with conditions: {victory} victory, {defeat} defeat, \
+         {unresolved} unresolved type names, unsupported {unsupported:?}"
+    );
+    assert!(files >= 300);
+    assert!(victory + defeat > 100);
+    assert!(
+        unsupported.iter().all(|u| u.starts_with("useonlyunits=")),
+        "{unsupported:?}"
+    );
+}
