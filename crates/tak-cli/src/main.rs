@@ -2,6 +2,7 @@
 //! game binary.
 
 mod archive_cmds;
+mod keys_cmd;
 mod report;
 mod survey;
 
@@ -60,6 +61,8 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Census of TDF keys: files, distinct values, value shapes, examples.
+    Keys(keys_cmd::KeysArgs),
 }
 
 fn main() -> ExitCode {
@@ -78,6 +81,7 @@ fn main() -> ExitCode {
                 let out = out.unwrap_or_else(|| std::env::temp_dir().join("tak-census"));
                 archive_cmds::census(vfs, &out)
             }
+            Cmd::Keys(args) => keys_cmd::keys(vfs, args),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
