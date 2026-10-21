@@ -186,16 +186,53 @@ impl ViewGeom {
 /// plane).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MinimapGeom {
-    /// `(left, top, width, height)` in logical pixels.
+    /// The image: `(left, top, width, height)` in logical pixels.
     pub rect: [f32; 4],
+    /// The panel around it (frame included), same units. Clicks anywhere
+    /// on it belong to the minimap.
+    pub panel: [f32; 4],
     /// Map size in world units (cells × 16).
     pub map: [f32; 2],
 }
 
+/// Largest minimap panel as a share of the viewport (width, height)
+/// (**Chosen**: about TA:K's sidebar minimap at 640×480, a quarter of the
+/// width; a third of the height keeps it clear of the HUD panel).
+pub const MINIMAP_SHARE: [f32; 2] = [0.24, 0.36];
+/// Panel size limits, logical pixels: never smaller than this box ...
+pub const MINIMAP_MIN: [f32; 2] = [200.0, 160.0];
+/// ... nor larger than this one.
+pub const MINIMAP_MAX: [f32; 2] = [560.0, 560.0];
+/// Gap between the panel and the window edge.
+pub const MINIMAP_MARGIN: f32 = 8.0;
+/// Frame between the panel edge and the image.
+pub const MINIMAP_PAD: f32 = 3.0;
+
 impl MinimapGeom {
-    /// Whether a screen pixel is on the minimap.
+    /// Lay the minimap out in the bottom-right corner of a `view`-sized
+    /// window: the image (`image` pixels, any aspect: retail maps run from
+    /// 512×107 to 129×431) is scaled to fit the largest box the window
+    /// allows ([`MINIMAP_SHARE`], clamped to [`MINIMAP_MIN`] /
+    /// [`MINIMAP_MAX`]) keeping its aspect, and the panel is the image plus
+    /// a [`MINIMAP_PAD`] frame.
+    pub fn fit(view: [f32; 2], image: (u32, u32), map: [f32; 2]) -> Self {
+        let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+        let bh = (view[1] * MINIMAP_SHARE[1]).clamp(MINIMAP_MIN[1], MINIMAP_MAX[1]);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let s = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * s).round().max(1.0), (ih * s).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = (view[0] - pw - MINIMAP_MARGIN, view[1] - ph - MINIMAP_MARGIN);
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
+    /// Whether a screen pixel is on the minimap panel.
     pub fn contains(&self, sx: f32, sy: f32) -> bool {
-        let [l, t, w, h] = self.rect;
+        let [l, t, w, h] = self.panel;
         sx >= l && sy >= t && sx < l + w && sy < t + h
     }
 
@@ -299,6 +336,7 @@ mod tests {
     fn minimap_round_trip_and_view_rect() {
         let m = MinimapGeom {
             rect: [1000.0, 500.0, 200.0, 100.0],
+            panel: [1000.0, 500.0, 200.0, 100.0],
             map: [3000.0, 1500.0],
         };
         assert!(m.contains(1100.0, 550.0) && !m.contains(990.0, 550.0));
@@ -317,6 +355,36 @@ mod tests {
         assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
         assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
         assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn minimap_fits_every_aspect() {
+        // Square, the widest and the tallest retail minimaps, at three
+        // window sizes: the image keeps its aspect, stays inside the box
+        // and the window, and one side fills the box.
+        for view in [[1280.0, 720.0], [1920.0, 1080.0], [3456.0, 2160.0]] {
+            for image in [(446, 431), (512, 107), (129, 431), (432, 432)] {
+                let m = MinimapGeom::fit(view, image, [3072.0, 3072.0]);
+                let [l, t, w, h] = m.rect;
+                let a = image.0 as f32 / image.1 as f32;
+                assert!((w / h - a).abs() / a < 0.03, "{view:?} {image:?} {w}x{h}");
+                let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+                let bh = (view[1] * MINIMAP_SHARE[1]).clamp(MINIMAP_MIN[1], MINIMAP_MAX[1]);
+                let inner = [bw - 2.0 * MINIMAP_PAD, bh - 2.0 * MINIMAP_PAD];
+                assert!(w <= inner[0] + 0.5 && h <= inner[1] + 0.5);
+                assert!(w >= inner[0] - 1.0 || h >= inner[1] - 1.0);
+                assert!(l > 0.0 && t > 0.0);
+                assert!((l + w + MINIMAP_PAD + MINIMAP_MARGIN - view[0]).abs() < 1e-3);
+                assert!((t + h + MINIMAP_PAD + MINIMAP_MARGIN - view[1]).abs() < 1e-3);
+                assert!(m.contains(m.panel[0] + 1.0, m.panel[1] + 1.0));
+                // The map's corners land on the image's corners.
+                let c = m.to_mini(m.map[0], m.map[1]);
+                assert!((c[0] - w).abs() < 1e-3 && (c[1] - h).abs() < 1e-3);
+            }
+        }
+        // 1280x720, square map: about 260 px (was a fixed 230-px width).
+        let m = MinimapGeom::fit([1280.0, 720.0], (446, 431), [3072.0, 3072.0]);
+        assert!(m.rect[3] > 240.0, "{:?}", m.rect);
     }
 
     #[test]

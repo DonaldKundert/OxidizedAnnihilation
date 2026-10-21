@@ -340,9 +340,18 @@ Findings and choices:
 - Not done: build sparkles (`sidedata` `buildsparklygaf`), dust when
   walking, Remote Effect rings (`radiusart*`), weapon `shadowart`, sound.
 
-### Minimap (WP-R)
+### Minimap (WP-R, WP-T)
 
-Bottom right, 230 px wide: the TNT's large minimap in the OTA kingdom's
+Bottom right, in a framed panel fitted to the window (WP-T,
+`MinimapGeom::fit`, tested for every aspect): the image is scaled to the
+largest box of 24 % of the window width × 36 % of its height (clamped to
+200×160 … 560×560 px; **Chosen**), keeping its aspect, so a square 6×6
+map is about 260 px at 1280×720 and the extremes (Waterworks 512×107,
+Ghost Shipping 129×431) neither shrink to a strip nor run off screen.
+Fog, unit dots and the camera rectangle are children of the image node,
+so they scale with it. It was a fixed 230 px wide with the height taken
+from the image (wide maps a strip, tall maps off screen, and small on big
+windows: the window's scale factor is forced to 1). It is the TNT's large minimap in the OTA kingdom's
 palette (`palettes/<kingdom>.pcx`, as `tak-cli dump-map` draws it). Like
 the terrain mosaic it is screen-space art covering the whole map, so it
 maps linearly to projected coordinates `(x, z − height/2)`; a camera
@@ -376,7 +385,11 @@ sim's job.
   minimap dots). Features and the player's own units always are (under
   the overlay).
 - The minimap gets the same fog as a texture, one texel per cell
-  (heights ignored, so edges can sit a few pixels off on hills).
+  (heights ignored, so edges can sit a few pixels off on hills), except
+  that unexplored cells are dark (opacity 205/255) rather than black
+  (**Chosen**, WP-T: with black, the minimap at the start was a black
+  panel with the start area as a small patch in one corner; the map's
+  shape now reads from the first tick, and enemy dots there stay hidden).
 - `--no-fog` starts with it off; F9 toggles it.
 
 ### HUD and overlays

@@ -2888,7 +2888,7 @@ fn fog_system(
         for z in 0..i64::from(gh) {
             for x in 0..i64::from(gw) {
                 let a = match grid.cell(x, z) {
-                    crate::fog::FogCell::Unexplored => 255,
+                    crate::fog::FogCell::Unexplored => MINIMAP_UNEXPLORED_ALPHA,
                     crate::fog::FogCell::Explored => 140,
                     crate::fog::FogCell::Seen => 0,
                 };
@@ -2898,6 +2898,12 @@ fn fog_system(
         im.data = Some(px);
     }
 }
+
+/// Minimap fog opacity over unexplored cells (**Chosen**): dark but not
+/// black, so the map's shape reads from the first tick (TA:K-style: the
+/// minimap is a map, not a scouting record; units there stay hidden).
+/// 255 would match the main view's black.
+const MINIMAP_UNEXPLORED_ALPHA: u8 = 205;
 
 /// Whether the local player can see a world point (always, with the fog
 /// off).
@@ -2914,11 +2920,6 @@ const FOG_MIN_SIGHT: f32 = 32.0;
 /// for the overlay cost about 3 fps on lavapipe.
 const FOG_SORT_BIAS: f32 = 100_000.0;
 
-/// Minimap width on screen, logical pixels (height follows the image).
-const MINIMAP_W: f32 = 230.0;
-/// Gap to the window edge.
-const MINIMAP_MARGIN: f32 = 8.0;
-
 /// Minimap layout and pointer state.
 #[derive(Resource, Default)]
 struct MinimapState {
@@ -2934,23 +2935,18 @@ struct MinimapState {
 }
 
 impl MinimapState {
-    /// Where the minimap is for a viewport (bottom-right corner).
+    /// Where the minimap is for a viewport (bottom-right corner, fitted
+    /// to the window keeping the image's aspect: [`MinimapGeom::fit`]).
     fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
-        let (iw, ih) = self.image?;
-        let w = MINIMAP_W;
-        let h = w * ih as f32 / iw.max(1) as f32;
-        Some(MinimapGeom {
-            rect: [
-                view[0] - w - MINIMAP_MARGIN,
-                view[1] - h - MINIMAP_MARGIN,
-                w,
-                h,
-            ],
-            map: self.map,
-        })
+        Some(MinimapGeom::fit(view, self.image?, self.map))
     }
 }
 
+/// The minimap panel (frame).
+#[derive(Component)]
+struct MinimapPanel;
+/// The minimap image; fog, dots and the camera rectangle are its children,
+/// so they scale with it.
 #[derive(Component)]
 struct MinimapRoot;
 #[derive(Component)]
@@ -2991,19 +2987,30 @@ fn setup_minimap(
     };
     mm.image = Some((*w, *h));
     let img = images.add(rgba_image(*w, *h, rgba.clone()));
-    let mh = MINIMAP_W * *h as f32 / (*w).max(1) as f32;
+    // Sizes and places are set every frame from `MinimapGeom::fit`.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+        BorderColor::all(Color::srgb(0.45, 0.4, 0.3)),
+        MinimapPanel,
+    ));
     let root = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(MINIMAP_MARGIN),
-                bottom: Val::Px(MINIMAP_MARGIN),
-                width: Val::Px(MINIMAP_W),
-                height: Val::Px(mh),
                 overflow: Overflow::clip(),
                 ..default()
             },
-            ImageNode::new(img),
+            ImageNode {
+                image: img,
+                image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                ..default()
+            },
+            ZIndex(1),
             MinimapRoot,
         ))
         .id();
@@ -3027,8 +3034,17 @@ fn minimap_system(
     cam: Res<CamState>,
     mm: Res<MinimapState>,
     fog: Res<FogRes>,
-    root: Query<Entity, With<MinimapRoot>>,
-    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>)>,
+    mut root: Query<(Entity, &mut Node), With<MinimapRoot>>,
+    mut panel: Query<
+        &mut Node,
+        (
+            With<MinimapPanel>,
+            Without<MinimapRoot>,
+            Without<MinimapView>,
+            Without<MinimapDot>,
+        ),
+    >,
+    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>, Without<MinimapRoot>)>,
     mut dots: Query<
         (
             &MinimapDot,
@@ -3036,13 +3052,25 @@ fn minimap_system(
             &mut BackgroundColor,
             &mut Visibility,
         ),
-        Without<MinimapView>,
+        (Without<MinimapView>, Without<MinimapRoot>),
     >,
 ) {
-    let Ok(root) = root.single() else { return };
+    let Ok((root, mut root_node)) = root.single_mut() else {
+        return;
+    };
     let Some(g) = mm.geom(cam.geom.size) else {
         return;
     };
+    let place = |n: &mut Node, r: [f32; 4]| {
+        let want = (Val::Px(r[0]), Val::Px(r[1]), Val::Px(r[2]), Val::Px(r[3]));
+        if (n.left, n.top, n.width, n.height) != want {
+            (n.left, n.top, n.width, n.height) = want;
+        }
+    };
+    place(&mut root_node, g.rect);
+    if let Ok(mut n) = panel.single_mut() {
+        place(&mut n, g.panel);
+    }
     if let Ok(mut n) = view.single_mut() {
         let r = g.view_rect(&cam.geom);
         n.left = Val::Px(r[0]);
