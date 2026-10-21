@@ -255,7 +255,9 @@ impl CombatDef {
         h.fx(self.heal_rate);
         h.i32(self.sight);
         h.i32(self.leash);
-        h.option(self.damage_category.as_deref(), |h, s| h.bytes(s.as_bytes()));
+        h.option(self.damage_category.as_deref(), |h, s| {
+            h.bytes(s.as_bytes())
+        });
         h.i32(self.radius);
         h.len(self.weapons.len());
         for w in &self.weapons {
@@ -303,7 +305,13 @@ pub fn area_damage(base: i32, d: i32, r: i32, edge: Fx) -> i32 {
 
 /// FBI unit → combat stats.
 pub fn combat_def_from_fbi(u: &tak_content::UnitDef) -> CombatDef {
-    let footprint = i32::from(u.footprint.x.unwrap_or(1).max(u.footprint.z.unwrap_or(1)).max(1));
+    let footprint = i32::from(
+        u.footprint
+            .x
+            .unwrap_or(1)
+            .max(u.footprint.z.unwrap_or(1))
+            .max(1),
+    );
     let sight = u.sight_distance.unwrap_or(0).max(0);
     CombatDef {
         max_damage: u.max_damage.max(0),
@@ -326,9 +334,12 @@ pub fn combat_def_from_fbi(u: &tak_content::UnitDef) -> CombatDef {
     }
 }
 
-/// FBI `reloadtime` (seconds, 16.16) → ticks: `trunc(s × 30)`, at least 1.
+/// FBI `reloadtime` (seconds, 16.16) → ticks: `trunc(s × 30)`, at least 1
+/// (TA). The decimal was rounded to 16.16 when parsed (error at most half a
+/// raw step, 15 raw steps after × 30), so 16 raw steps are added back before
+/// truncating: `1.7` gives 51 like TA's single-precision `1.7 × 30`, not 50.
 pub fn reload_ticks(seconds: Fx) -> u32 {
-    let t = i64::from(seconds.raw()) * i64::from(TICKS_PER_SECOND) / i64::from(Fx::ONE_RAW);
+    let t = (i64::from(seconds.raw()) * i64::from(TICKS_PER_SECOND) + 16) / i64::from(Fx::ONE_RAW);
     t.clamp(1, i64::from(u16::MAX)) as u32
 }
 
@@ -342,14 +353,25 @@ fn weapon_from_fbi(w: &tak_content::WeaponDef) -> WeaponStats {
     multipliers.sort_by(|a, b| a.0.cmp(&b.0));
     multipliers.dedup_by(|a, b| a.0 == b.0);
     multipliers.truncate(64);
-    let damage_kind = match w.damage_type.as_deref().map(str::to_ascii_lowercase).as_deref() {
+    let damage_kind = match w
+        .damage_type
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("fire") => kind::FIRE,
         Some("explosion") => kind::EXPLOSION,
         Some("paralyzer") => kind::PARALYZER,
         _ => kind::NORMAL,
     };
     WeaponStats {
-        name: w.name.clone().unwrap_or_default().chars().take(64).collect(),
+        name: w
+            .name
+            .clone()
+            .unwrap_or_default()
+            .chars()
+            .take(64)
+            .collect(),
         kind: WeaponKind::from_fbi(w.kind.as_deref()),
         range: w.range.unwrap_or(0).max(0),
         min_range: w.min_range.unwrap_or(0).max(0),
