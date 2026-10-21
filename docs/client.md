@@ -165,13 +165,59 @@ projectiles); rendering lerps between the last two with
 `terrain.rs`: the TNT's tile grid assembled into 1024-px chunk textures
 exactly as `tak-cli dump-map` builds its mosaic (tile `(x, y)` shows the
 32×32 piece `(col, row)` of `terrain/<id>.jpg`), on a heightfield mesh with
-vertices on cell corners (mean of the touching cells). Unlit, no
-tonemapping, so the JPEG colours are shown as is. Sea level is a
-translucent plane; on Adamantine Gate it tints exactly the ponds and the
-sea seen in the terrain art. Map features (from the `MapDef`) are
-translucent footprint boxes (green = blocking). Corpses and wrecks from the
-sim's feature layer are drawn with their 3DO when the feature def names one
-(none spawned in the demo: the Zhon monarch leaves no corpse feature).
+vertices on cell corners (mean of the touching cells), sampled with the
+oblique shift (see Camera). Unlit, no tonemapping, so the JPEG colours are
+shown as is. Sea level is a translucent plane; it tints exactly the ponds,
+canals and sea painted in the terrain art. Rows north of the map edge
+(visible because heights lift the top rows) are black.
+
+### Map features, corpses and wrecks (WP-R)
+
+`sprites.rs` + `app::spawn_feature_art`. A feature TDF names either
+`object` (a 3DO: drawn like a unit at rest pose, static; corpses keep the
+unit's heading, map features use the file's orientation) or `filename` +
+`seqname` (a GAF sequence in `anims/<filename>.gaf`) with `seqnameshad`
+as its shadow. Every placed feature is drawn, in two groups:
+
+- Gameplay-relevant ones (the sim keeps them: blocking, reclaimable,
+  damageable, sacred sites) and corpses/wrecks come from `World.features`
+  and disappear when the sim removes them.
+- Pure scenery (`FeatureDef::matters()` false) is drawn once from the
+  `MapDef` (on the maps checked every placed feature matters, so this group
+  is usually empty).
+
+Findings and choices:
+
+- **Palette (Believed)**: feature GAFs have no sibling PCX; they decode
+  correctly with `palettes/<kingdom>_features.pcx` (the OTA `kingdom`):
+  trees, rocks, henges, crops and huts show natural colours, while
+  `<kingdom>.pcx` gives noise.
+- **Placement (Believed, TA rule)**: the frame's `(x_offset, y_offset)`
+  pixel sits on the footprint centre at its terrain height. Sprites are
+  1:1 (one pixel per world unit at zoom 1). The quad lies in the screen
+  plane (`ViewGeom::screen_up`), lifted toward the viewer along the view
+  ray by `0.4·(pixels below the anchor) + 6` height units so its lower
+  edge does not sink into the ground (`sprites::lift_for`); this moves
+  nothing on screen, and things north of the base are hidden behind it
+  while things south of it draw in front, like TA's painter order. Trees,
+  henges and rocks sit on their painted spots and cast their shadows to
+  the right, as drawn.
+- **Shadows (Chosen level)**: `seqnameshad` frames are black silhouettes;
+  they are alpha-blended at 0.85 opacity, which in Bevy's linear-light
+  blending darkens the ground to roughly half brightness. TA's exact
+  `shadtrans` level is Unknown. (A material alpha below about 0.6 is
+  barely visible on lavapipe for that reason.)
+- **Animation (Believed)**: `animating=1` sequences (lodestone glows) play
+  by sim tick with each frame's duration word as ticks per frame (TA), so
+  they pause with the game and are deterministic in screenshots; each
+  instance gets a phase from its cell so neighbours do not pulse in step
+  (**Chosen**).
+- **Batching**: every instance of a sequence frame shares one quad mesh
+  and one material, so Bevy batches them; Grimm Farms (1,160 features)
+  draws at 7.6 fps at zoom 1 and 4.5 fps at zoom 2.5 with hundreds of crops,
+  trees and huts on screen (lavapipe, 1280×720).
+- 1×1-pixel sequences (`TarNoise01`, sound emitters) draw as nothing
+  visible.
 
 ### Units: models and textures
 
@@ -265,7 +311,6 @@ slots next to the cursor from `Mapper::wheel()`.
 - Effects: no TAF/GAF sprites for weapon hits, deaths, build sparkles or
   dust yet; projectiles are spheres. Units under construction draw fully
   built (no TA:K build-up effect), with a progress bar.
-- Map features are boxes, not their GAF sprites or 3DOs; no shadows.
 - No minimap, no fog of war, no audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet

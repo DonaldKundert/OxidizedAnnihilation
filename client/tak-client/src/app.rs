@@ -29,8 +29,10 @@ use tak_input::{
 use tak_vfs::Vfs;
 
 use crate::cli::{Args, Focus, parse_focus};
+use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
+use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
 use crate::view::{SimView, ViewGeom, f, pick_radius};
 
@@ -42,6 +44,9 @@ const TICK_DT: f32 = 1.0 / 30.0;
 pub struct Content {
     vfs: Vfs,
     tex: TextureIndex,
+    sprites: SpriteStore,
+    /// The map's OTA `kingdom` (picks the feature palette).
+    kingdom: Option<String>,
 }
 
 /// The match, its two most recent snapshots and the tick accumulator.
@@ -127,9 +132,9 @@ struct UnitVis {
 #[derive(Resource, Default)]
 struct UnitEntities(BTreeMap<UnitId, Entity>);
 
-/// Rendered corpses and wrecks (sim features with a corpse origin).
+/// Rendered live sim features (gameplay map features, corpses, wrecks).
 #[derive(Resource, Default)]
-struct CorpseEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
+struct FeatureEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
 
 #[derive(Component)]
 struct HudTop;
@@ -164,6 +169,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         ground.missing,
         t0.elapsed().as_secs_f32()
     );
+    let kingdom = session.map.kingdom.clone();
     let (w, h) = args.window_size();
     let focus = parse_focus(&args.focus).ok_or("bad --focus")?;
     let snap = session.snapshot();
@@ -186,7 +192,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         ..default()
     }))
     .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.07)))
-    .insert_non_send(Content { vfs, tex })
+    .insert_non_send(Content {
+        vfs,
+        tex,
+        sprites: SpriteStore::default(),
+        kingdom,
+    })
     .insert_non_send(SimRes {
         session,
         prev: snap.clone(),
@@ -210,8 +221,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     })
     .init_resource::<ModelCache>()
     .init_resource::<UnitEntities>()
-    .init_resource::<CorpseEntities>()
-    .add_systems(Startup, (setup_scene, setup_hud, setup_gizmos))
+    .init_resource::<FeatureEntities>()
+    .init_resource::<SpriteCache>()
+    .add_systems(
+        Startup,
+        (setup_scene, setup_hud, setup_gizmos, spawn_scenery),
+    )
     .add_systems(
         Update,
         (
@@ -220,7 +235,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             sim_driver,
             camera_system,
             units_system,
-            corpses_system,
+            features_system,
+            animate_sprites,
             showcase_system,
             hud_system,
             gizmo_system,
@@ -353,7 +369,6 @@ fn rgba_image(w: u32, h: u32, data: Vec<u8>) -> Image {
 fn setup_scene(
     mut commands: Commands,
     ground: Res<Ground>,
-    sim: NonSend<SimRes>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -404,42 +419,6 @@ fn setup_scene(
         MeshMaterial3d(water),
         Transform::from_xyz(mw / 2.0, t.sea_level, mh / 2.0),
     ));
-    // Feature markers.
-    let blocking = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.15, 0.35, 0.12, 0.4),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-    let open = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.5, 0.45, 0.3, 0.3),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-    let mut cubes: BTreeMap<(u8, u8, u32), Handle<Mesh>> = BTreeMap::new();
-    for fb in &sim.session.features {
-        let (w, d) = (
-            f32::from(fb.footprint.0) * 16.0,
-            f32::from(fb.footprint.1) * 16.0,
-        );
-        let mesh = cubes
-            .entry((fb.footprint.0, fb.footprint.1, fb.height as u32))
-            .or_insert_with(|| meshes.add(Cuboid::new(w * 0.8, fb.height, d * 0.8)))
-            .clone();
-        let x = fb.cell.0 as f32 * 16.0 + w / 2.0;
-        let z = fb.cell.1 as f32 * 16.0 + d / 2.0;
-        let y = t.height_at(x, z) + fb.height / 2.0;
-        commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(if fb.blocking {
-                blocking.clone()
-            } else {
-                open.clone()
-            }),
-            Transform::from_xyz(x, y, z),
-        ));
-    }
 }
 
 fn setup_gizmos(mut store: ResMut<GizmoConfigStore>) {
@@ -1197,27 +1176,21 @@ fn units_system(
     }
 }
 
-/// Corpses and wrecks from the sim's feature layer, drawn with their 3DO
-/// (`<unit>_dead`) at rest pose, or a box when the feature has no model.
-/// Map-placed features keep the static markers from `setup_scene`.
-fn corpses_system(
+/// Live features from the sim's feature layer: gameplay-relevant map
+/// features (henges, rocks, trees that block or can be reclaimed) and
+/// corpses/wrecks, drawn with their art ([`spawn_feature_art`]) and removed
+/// when the sim removes them. Scenery the sim does not keep is drawn once
+/// by [`spawn_scenery`].
+fn features_system(
     mut commands: Commands,
     sim: NonSend<SimRes>,
     content: NonSend<Content>,
     ground: Res<Ground>,
-    mut cache: ResMut<ModelCache>,
-    mut ents: ResMut<CorpseEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut art_assets: ArtAssets,
+    mut ents: ResMut<FeatureEntities>,
 ) {
-    use tak_sim::features::Origin;
     let fs = &sim.session.sim.world().features;
-    let live: Vec<_> = fs
-        .iter()
-        .filter(|(_, f)| matches!(f.origin, Origin::Corpse(_)))
-        .collect();
-    let keep: std::collections::BTreeSet<_> = live.iter().map(|(id, _)| *id).collect();
+    let keep: std::collections::BTreeSet<_> = fs.iter().map(|(id, _)| id).collect();
     let gone: Vec<_> = ents
         .0
         .keys()
@@ -1229,50 +1202,364 @@ fn corpses_system(
             commands.entity(e).despawn();
         }
     }
-    for (id, feat) in live {
+    for (id, feat) in fs.iter() {
         if ents.0.contains_key(&id) {
             continue;
         }
         let r = feat.rect;
         let x = (r.x as f32 + r.w as f32 / 2.0) * 16.0;
         let z = (r.z as f32 + r.h as f32 / 2.0) * 16.0;
-        let tf = Transform::from_xyz(x, ground.0.height_at(x, z), z)
-            .with_rotation(heading_rotation(angle_rad(feat.heading.raw())));
-        let object = fs
+        let name = fs
             .def(feat)
-            .and_then(|d| d.object.clone())
-            .map(|o| o.to_ascii_lowercase());
-        let root = commands.spawn((tf, Visibility::default())).id();
-        let assets = object.and_then(|o| {
-            cache
-                .models
-                .entry((o.clone(), 0))
-                .or_insert_with(|| {
-                    load_model(&content.vfs, &content.tex, &o, 0).ok().map(|b| {
-                        Arc::new(upload_model(&b, &mut meshes, &mut images, &mut materials))
-                    })
-                })
-                .clone()
+            .map(|d| d.name.to_ascii_lowercase())
+            .unwrap_or_default();
+        let art = sim
+            .session
+            .feature_art
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| FeatureArt {
+                object: fs.def(feat).and_then(|d| d.object.clone()),
+                ..FeatureArt::default()
+            });
+        let heading = match feat.origin {
+            tak_sim::features::Origin::Corpse(_) => Some(angle_rad(feat.heading.raw())),
+            tak_sim::features::Origin::Map => None,
+        };
+        let pos = Vec3::new(x, ground.0.height_at(x, z), z);
+        let root = spawn_feature_art(
+            &mut commands,
+            &content,
+            &mut art_assets,
+            &art,
+            pos,
+            heading,
+            (r.x as u32)
+                .wrapping_mul(7)
+                .wrapping_add((r.z as u32).wrapping_mul(13)),
+        )
+        .unwrap_or_else(|| {
+            // No art: a low box over the footprint.
+            let (w, d) = (r.w as f32 * 16.0, r.h as f32 * 16.0);
+            let mat = art_assets.materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.22, 0.15),
+                unlit: true,
+                ..default()
+            });
+            let root = commands
+                .spawn((Transform::from_translation(pos), Visibility::default()))
+                .id();
+            commands.spawn((
+                Mesh3d(art_assets.meshes.add(Cuboid::new(w * 0.7, 6.0, d * 0.7))),
+                MeshMaterial3d(mat),
+                Transform::from_xyz(0.0, 3.0, 0.0),
+                ChildOf(root),
+            ));
+            root
         });
-        match assets {
-            Some(a) => spawn_static_pieces(&mut commands, &a, root),
-            None => {
-                let (w, d) = (r.w as f32 * 16.0, r.h as f32 * 16.0);
-                let mat = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.3, 0.22, 0.15),
-                    unlit: true,
-                    ..default()
-                });
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(w * 0.7, 6.0, d * 0.7))),
-                    MeshMaterial3d(mat),
-                    Transform::from_xyz(0.0, 3.0, 0.0),
-                    ChildOf(root),
-                ));
-            }
-        }
         ents.0.insert(id, root);
     }
+}
+
+/// Asset stores the feature and effect spawners share.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ArtAssets<'w> {
+    models: ResMut<'w, ModelCache>,
+    sprites: ResMut<'w, SpriteCache>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    images: ResMut<'w, Assets<Image>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+}
+
+/// GPU assets of one sprite sequence: a quad and a material per frame,
+/// shared by every instance (so Bevy batches them).
+struct SpriteAssets {
+    frames: Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+    /// Durations only (pixels dropped), for [`SpriteSeq::frame_at`].
+    timing: SpriteSeq,
+}
+
+/// How a sprite is blended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SpriteBlend {
+    /// Cut out at alpha 0.5 (feature and unit art).
+    Mask,
+    /// Shadow: the silhouette at half opacity (`shadtrans=1`).
+    Shadow,
+}
+
+/// Sprite assets by (file, sequence, lift in 1/4 units, blend).
+#[derive(Resource, Default)]
+struct SpriteCache(BTreeMap<(String, String, i32, SpriteBlend), Option<Arc<SpriteAssets>>>);
+
+/// Opacity of feature shadows (**Chosen**; TA draws `shadtrans` shadows
+/// translucent, the exact level is Unknown).
+const SHADOW_ALPHA: f32 = 0.85;
+
+fn sprite_assets(
+    art: &mut ArtAssets,
+    seq: &SpriteSeq,
+    key: (String, String, i32, SpriteBlend),
+) -> Option<Arc<SpriteAssets>> {
+    if let Some(a) = art.sprites.0.get(&key) {
+        return a.clone();
+    }
+    let lift = key.2 as f32 / 4.0;
+    let blend = key.3;
+    let frames = seq
+        .frames
+        .iter()
+        .map(|fr| {
+            let (pos, uv, idx) = billboard(fr, lift);
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos.to_vec());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.to_vec());
+            mesh.insert_indices(Indices::U32(idx.to_vec()));
+            let mut px = fr.rgba.clone();
+            if blend == SpriteBlend::Shadow {
+                // Shadow opacity baked into the texture (a material alpha
+                // below 0.5 did not show on lavapipe).
+                let a = (SHADOW_ALPHA * 255.0) as u8;
+                for p in px.chunks_exact_mut(4) {
+                    p[3] = p[3].min(a);
+                }
+            }
+            let img = art.images.add(rgba_image(fr.w, fr.h, px));
+            let material = match blend {
+                SpriteBlend::Mask => StandardMaterial {
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Mask(0.5),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+                SpriteBlend::Shadow => StandardMaterial {
+                    base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+            };
+            (art.meshes.add(mesh), art.materials.add(material))
+        })
+        .collect();
+    let mut timing = seq.clone();
+    for f in &mut timing.frames {
+        f.rgba = Vec::new();
+    }
+    let a = Some(Arc::new(SpriteAssets { frames, timing }));
+    art.sprites.0.insert(key, a.clone());
+    a
+}
+
+/// A sprite that plays its sequence.
+#[derive(Component)]
+struct Animated {
+    assets: Arc<SpriteAssets>,
+    phase: u32,
+    shown: usize,
+}
+
+/// Step animated sprites by sim tick.
+fn animate_sprites(
+    sim: NonSend<SimRes>,
+    mut q: Query<(
+        &mut Animated,
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    let tick = sim.session.tick().0;
+    for (mut a, mut mesh, mut mat) in &mut q {
+        let i = a.assets.timing.frame_at(tick.wrapping_add(a.phase));
+        if i != a.shown {
+            a.shown = i;
+            let (m, t) = &a.assets.frames[i];
+            mesh.0 = m.clone();
+            mat.0 = t.clone();
+        }
+    }
+}
+
+/// Spawn a feature's art at `pos` (footprint centre on the ground): its 3DO
+/// when it names one (rest pose, rotated by `heading` if given), else its
+/// GAF sequence as a billboard with its shadow, animated when `animating`.
+/// Returns the root entity, or `None` when the feature has no drawable art.
+fn spawn_feature_art(
+    commands: &mut Commands,
+    content: &Content,
+    art_assets: &mut ArtAssets,
+    art: &FeatureArt,
+    pos: Vec3,
+    heading: Option<f32>,
+    phase: u32,
+) -> Option<Entity> {
+    if let Some(o) = &art.object {
+        let o = o.to_ascii_lowercase();
+        let ArtAssets {
+            models,
+            meshes,
+            images,
+            materials,
+            ..
+        } = art_assets;
+        let assets = models
+            .models
+            .entry((o.clone(), 0))
+            .or_insert_with(|| {
+                load_model(&content.vfs, &content.tex, &o, 0)
+                    .ok()
+                    .map(|b| Arc::new(upload_model(&b, meshes, images, materials)))
+            })
+            .clone();
+        if let Some(a) = assets {
+            let rot = heading.map_or(Quat::IDENTITY, heading_rotation);
+            let root = commands
+                .spawn((
+                    Transform::from_translation(pos).with_rotation(rot),
+                    Visibility::default(),
+                ))
+                .id();
+            spawn_static_pieces(commands, &a, root);
+            return Some(root);
+        }
+    }
+    let file = art.filename.as_ref()?;
+    let seqname = art.seqname.as_ref()?;
+    let path = format!("anims/{file}.gaf");
+    let pal = content
+        .sprites
+        .feature_palette(&content.vfs, &path, content.kingdom.as_deref());
+    let seq = content.sprites.seq(&content.vfs, &path, seqname, &pal)?;
+    let shadow = art
+        .seqname_shadow
+        .as_ref()
+        .and_then(|sn| content.sprites.seq(&content.vfs, &path, sn, &pal));
+    let below = seq
+        .max_below()
+        .max(shadow.as_ref().map_or(0, SpriteSeq::max_below));
+    let lift = lift_for(below, 6.0);
+    let q = |l: f32| (l * 4.0).round() as i32;
+    let root = commands
+        .spawn((Transform::from_translation(pos), Visibility::default()))
+        .id();
+    let obj = sprite_assets(
+        art_assets,
+        &seq,
+        (
+            path.clone(),
+            seqname.to_ascii_lowercase(),
+            q(lift),
+            SpriteBlend::Mask,
+        ),
+    )?;
+    let animate = art.animating && obj.frames.len() > 1;
+    let (m, t) = obj.frames[0].clone();
+    let child = commands
+        .spawn((
+            Mesh3d(m),
+            MeshMaterial3d(t),
+            Transform::default(),
+            ChildOf(root),
+        ))
+        .id();
+    if animate {
+        commands.entity(child).insert(Animated {
+            assets: obj.clone(),
+            phase,
+            shown: 0,
+        });
+    }
+    if let (Some(sh), Some(sn)) = (shadow, &art.seqname_shadow)
+        && let Some(sa) = sprite_assets(
+            art_assets,
+            &sh,
+            (
+                path.clone(),
+                sn.to_ascii_lowercase(),
+                q(lift - 3.0),
+                SpriteBlend::Shadow,
+            ),
+        )
+    {
+        let (m, t) = sa.frames[0].clone();
+        let child = commands
+            .spawn((
+                Mesh3d(m),
+                MeshMaterial3d(t),
+                Transform::default(),
+                ChildOf(root),
+            ))
+            .id();
+        if art.animating && sa.frames.len() > 1 {
+            commands.entity(child).insert(Animated {
+                assets: sa.clone(),
+                phase,
+                shown: 0,
+            });
+        }
+    }
+    Some(root)
+}
+
+/// Map features the sim does not keep (pure scenery): drawn once, never
+/// removed. The rest come from the sim's feature layer
+/// ([`features_system`]).
+fn spawn_scenery(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    mut art_assets: ArtAssets,
+) {
+    let t0 = std::time::Instant::now();
+    let mut n = 0;
+    for fb in &sim.session.features {
+        if fb.in_sim {
+            continue;
+        }
+        let Some(art) = fb.def.as_ref().and_then(|d| sim.session.feature_art.get(d)) else {
+            continue;
+        };
+        let (w, d) = (
+            f32::from(fb.footprint.0) * 16.0,
+            f32::from(fb.footprint.1) * 16.0,
+        );
+        let x = fb.cell.0 as f32 * 16.0 + w / 2.0;
+        let z = fb.cell.1 as f32 * 16.0 + d / 2.0;
+        let pos = Vec3::new(x, ground.0.height_at(x, z), z);
+        let phase = fb
+            .cell
+            .0
+            .wrapping_mul(7)
+            .wrapping_add(fb.cell.1.wrapping_mul(13));
+        if spawn_feature_art(
+            &mut commands,
+            &content,
+            &mut art_assets,
+            art,
+            pos,
+            None,
+            phase,
+        )
+        .is_some()
+        {
+            n += 1;
+        }
+    }
+    eprintln!(
+        "scenery: {n} of {} placed features drawn as scenery in {:.2}s",
+        sim.session.features.len(),
+        t0.elapsed().as_secs_f32()
+    );
 }
 
 /// Spawn a model's pieces at rest pose under `root`.

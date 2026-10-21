@@ -12,5 +12,6 @@ pub mod app;
 pub mod cli;
 pub mod game;
 pub mod models;
+pub mod sprites;
 pub mod terrain;
 pub mod view;

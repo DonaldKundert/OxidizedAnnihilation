@@ -191,12 +191,14 @@ fn chunk_images(vfs: &Vfs, tiles: &TileGrid) -> (Vec<ChunkImage>, usize) {
         for tx in (0..tiles.width).step_by(CHUNK_TILES as usize) {
             let cw = CHUNK_TILES.min(tiles.width - tx);
             let ch = CHUNK_TILES.min(tiles.height - ty);
-            let margin = MARGIN_TILES.min(ty);
+            // Rows north of the map stay black (nothing is painted there).
+            let margin = MARGIN_TILES;
             let (iw, ih) = (cw * p, (ch + margin) * p);
             let mut rgba = vec![0u8; (iw * ih * 4) as usize];
             for y in 0..ch + margin {
                 for x in 0..cw {
-                    let Some((id, col, row)) = tiles.get(tx + x, ty - margin + y) else {
+                    let src = (ty + y).checked_sub(margin);
+                    let Some((id, col, row)) = src.and_then(|sy| tiles.get(tx + x, sy)) else {
                         if y >= margin {
                             missing += 1;
                         }
@@ -261,7 +263,7 @@ pub fn chunk_mesh(t: &TerrainData, chunk: &ChunkImage) -> ChunkMesh {
         indices: Vec::new(),
     };
     let (iw, ih) = chunk.image_size();
-    let top = (chunk.tile0.1 - chunk.margin) as f32 * PIECE_PX as f32;
+    let top = (chunk.tile0.1 as f32 - chunk.margin as f32) * PIECE_PX as f32;
     for z in 0..=nz {
         for x in 0..=nx {
             let (cx, cz) = (cx0 + x, cz0 + z);

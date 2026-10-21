@@ -6,6 +6,7 @@
 //! to the same hashes there. Orders from the input layer go into the same
 //! log, stamped with the tick they will execute on.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use tak_commands::{CommandLog, PlayerId, SimCommand, Tick, UnitDefId, UnitId};
@@ -62,15 +63,40 @@ pub struct Session {
     pub map: MapDef,
     /// Map VFS path without extension.
     pub map_name: String,
-    /// Placed map features, for markers.
+    /// Placed map features (all of them, scenery included).
     pub features: Vec<FeatureBox>,
+    /// Art of every feature definition in the ruleset, by lowercase name.
+    pub feature_art: BTreeMap<String, FeatureArt>,
 }
 
-/// A placed map feature as a marker box.
+/// How a feature is drawn (from its TDF).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FeatureArt {
+    /// `object`: a 3DO under `objects3d/`.
+    pub object: Option<String>,
+    /// `filename`: sprite file `anims/<filename>.gaf`.
+    pub filename: Option<String>,
+    /// `seqname`: the sequence in `filename`.
+    pub seqname: Option<String>,
+    /// `seqnameshad`: its shadow sequence.
+    pub seqname_shadow: Option<String>,
+    /// `animating=1`: play the sequence.
+    pub animating: bool,
+    /// Footprint in cells.
+    pub footprint: (u8, u8),
+}
+
+/// A placed map feature.
 #[derive(Clone, Debug)]
 pub struct FeatureBox {
     /// Feature name.
     pub name: String,
+    /// Lowercase definition name (key of `Session::feature_art`), if the
+    /// definition exists.
+    pub def: Option<String>,
+    /// The sim keeps it as a live feature (it matters to gameplay); the
+    /// renderer draws those from the sim's feature layer instead.
+    pub in_sim: bool,
     /// Anchor cell (top-left, **Chosen** as in `tak-content`).
     pub cell: (u32, u32),
     /// Footprint in cells.
@@ -129,11 +155,32 @@ impl Session {
                 let fd = rs.feature(pf.def.as_deref().unwrap_or(&pf.name));
                 FeatureBox {
                     name: pf.name.clone(),
+                    def: fd.map(|d| d.name.to_ascii_lowercase()),
+                    in_sim: fd
+                        .is_some_and(|d| tak_sim::features::FeatureDef::from_content(d).matters()),
                     cell: (pf.x, pf.z),
                     footprint: fd.map_or((1, 1), |d| (d.footprint_x.max(1), d.footprint_z.max(1))),
                     blocking: fd.is_some_and(|d| d.blocking),
                     height: fd.and_then(|d| d.height).unwrap_or(12).clamp(4, 60) as f32,
                 }
+            })
+            .collect();
+        let feature_art = rs
+            .features
+            .values()
+            .map(|d| {
+                let nonempty = |v: &Option<String>| v.clone().filter(|s| !s.trim().is_empty());
+                (
+                    d.name.to_ascii_lowercase(),
+                    FeatureArt {
+                        object: nonempty(&d.object),
+                        filename: nonempty(&d.filename),
+                        seqname: nonempty(&d.seqname),
+                        seqname_shadow: nonempty(&d.seqname_shadow),
+                        animating: d.extra.get("animating").is_some_and(|v| v.trim() == "1"),
+                        footprint: (d.footprint_x.max(1), d.footprint_z.max(1)),
+                    },
+                )
             })
             .collect();
         let sim = Sim::with_scripts(&m.scenario, Box::new(m.scripts)).map_err(err)?;
@@ -147,6 +194,7 @@ impl Session {
             map: m.map,
             map_name: map.to_string(),
             features,
+            feature_art,
         })
     }
 
