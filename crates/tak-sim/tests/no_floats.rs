@@ -88,6 +88,13 @@ fn no_floats_in_src() {
     let mut files = Vec::new();
     rust_files(&src, &mut files);
     assert!(!files.is_empty());
+    // The integration modules (COB host, content conversion) are covered.
+    for module in ["cob.rs", "content.rs", "script.rs", "map.rs", "systems.rs"] {
+        assert!(
+            files.iter().any(|f| f.ends_with(module)),
+            "{module} not scanned"
+        );
+    }
     let mut hits = Vec::new();
     for f in files {
         let text = std::fs::read_to_string(&f).expect("read source");
@@ -107,6 +114,23 @@ fn no_floats_in_src() {
         "floating point in tak-sim src:\n{}",
         hits.join("\n")
     );
+}
+
+/// Sim state types hold no floats: every field of the state the COB host
+/// keeps or exposes is integer. This is a compile-time-ish check by
+/// construction: build the stats and context types from integers only.
+#[test]
+fn script_side_state_is_integer() {
+    let stats = tak_sim::ScriptStats::default();
+    let _: u64 = stats.speed_reads_moving;
+    let _: u64 = stats.pose_ticks;
+    let _: std::collections::BTreeMap<i32, u64> = stats.unknown_reads;
+    let sc = tak_sim::testing::example_scenario(1, 1);
+    let mut sim = tak_sim::Sim::new(&sc).unwrap();
+    sim.step(&[]);
+    let u = sim.world().unit(tak_sim::UnitId::new(0, 0)).unwrap();
+    let _: tak_math::Fx = u.ground;
+    let _: u8 = u.terrain;
 }
 
 #[test]

@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use tak_commands::CommandLog;
 use tak_headless::{
-    Error, MAX_TICKS, first_mismatch, format_hashes, load_log, load_scenario, parse_hashes, run,
-    write,
+    Error, MAX_TICKS, first_mismatch, format_hashes, load_log, load_map, load_scenario,
+    parse_hashes, run, run_match, write,
 };
-use tak_sim::testing::{example_scenario, random_log};
+use tak_sim::Match;
+use tak_sim::testing::{example_scenario, random_log, walk_log};
 
 /// Headless Oxidized Annihilation sim: runs scenarios and replays, prints
 /// per-tick state hashes.
@@ -17,13 +19,88 @@ struct Cli {
     cmd: Cmd,
 }
 
+/// Where the match comes from: a synthetic scenario JSON (`--scenario`), or
+/// a real map from an install (`--map`, with `--data` or `$TAK_DATA_DIR`).
+#[derive(Args)]
+struct Source {
+    /// Scenario JSON (synthetic match, no scripts).
+    #[arg(long, conflicts_with = "map")]
+    scenario: Option<PathBuf>,
+    /// Real map: VFS path without extension, e.g. "kmap/Adamantine Gate".
+    #[arg(long)]
+    map: Option<String>,
+    /// Kingdoms install directory (for --map).
+    #[arg(long, env = "TAK_DATA_DIR")]
+    data: Option<PathBuf>,
+    /// Sides for --map, comma-separated, by prefix or name (one monarch each).
+    #[arg(long, default_value = "ARA,ZON")]
+    players: String,
+    /// World RNG seed for --map.
+    #[arg(long, default_value_t = 1)]
+    world_seed: u64,
+    /// Run a --map match without its COB scripts.
+    #[arg(long)]
+    no_scripts: bool,
+}
+
+enum Loaded {
+    Synthetic(tak_sim::Scenario),
+    Map(Box<Match>, bool),
+}
+
+impl Loaded {
+    fn scenario(&self) -> &tak_sim::Scenario {
+        match self {
+            Loaded::Synthetic(s) => s,
+            Loaded::Map(m, _) => &m.scenario,
+        }
+    }
+
+    /// Run and return hashes; real-map runs report timing and script
+    /// stats on stderr.
+    fn run(self, log: &CommandLog, ticks: u32) -> Result<Vec<u64>, Error> {
+        match self {
+            Loaded::Synthetic(s) => run(&s, log, ticks),
+            Loaded::Map(m, scripts) => {
+                let r = run_match(*m, log, ticks, scripts)?;
+                eprint!("{}", r.report());
+                Ok(r.hashes)
+            }
+        }
+    }
+}
+
+impl Source {
+    fn load(&self) -> Result<Loaded, Error> {
+        match (&self.scenario, &self.map) {
+            (Some(p), _) => Ok(Loaded::Synthetic(load_scenario(p)?)),
+            (None, Some(map)) => {
+                let data = self
+                    .data
+                    .as_ref()
+                    .ok_or_else(|| Error::Setup("--map needs --data or $TAK_DATA_DIR".into()))?;
+                let m = load_map(data, map, &self.players, self.world_seed)?;
+                Ok(Loaded::Map(Box::new(m), !self.no_scripts))
+            }
+            (None, None) => Err(Error::Setup("pass --scenario or --map".into())),
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LogKind {
+    /// Fuzz: valid and invalid orders mixed (soak tests).
+    Random,
+    /// Every player's monarch walks to a random point every `--every` ticks.
+    Walk,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Run a scenario and print (or write) the per-tick hashes.
     Run {
-        /// Scenario JSON.
-        #[arg(long)]
-        scenario: PathBuf,
+        #[command(flatten)]
+        source: Source,
         /// Command log JSON (omit for no commands).
         #[arg(long)]
         log: Option<PathBuf>,
@@ -37,9 +114,8 @@ enum Cmd {
     /// Re-run a scenario and log and compare against a hash file. Exits 1 on
     /// the first mismatch.
     Verify {
-        /// Scenario JSON.
-        #[arg(long)]
-        scenario: PathBuf,
+        #[command(flatten)]
+        source: Source,
         /// Command log JSON (omit for no commands).
         #[arg(long)]
         log: Option<PathBuf>,
@@ -56,17 +132,22 @@ enum Cmd {
         #[arg(long, default_value_t = 2)]
         players: usize,
     },
-    /// Write a random fuzz command log for a scenario (for soak tests).
+    /// Write a command log for a scenario or real map (fuzz or walks).
     GenLog {
-        /// Scenario JSON.
-        #[arg(long)]
-        scenario: PathBuf,
+        #[command(flatten)]
+        source: Source,
         /// Ticks the log should span.
         #[arg(long)]
         ticks: u32,
         /// Generator seed.
         #[arg(long, default_value_t = 1)]
         seed: u64,
+        /// Kind of log.
+        #[arg(long, value_enum, default_value_t = LogKind::Random)]
+        kind: LogKind,
+        /// Ticks between walk orders (`--kind walk`).
+        #[arg(long, default_value_t = 600)]
+        every: u32,
         /// Output path (stdout if omitted).
         #[arg(long)]
         out: Option<PathBuf>,
@@ -86,14 +167,14 @@ fn main() -> ExitCode {
 fn real_main() -> Result<ExitCode, Error> {
     match Cli::parse().cmd {
         Cmd::Run {
-            scenario,
+            source,
             log,
             ticks,
             hashes,
         } => {
-            let sc = load_scenario(&scenario)?;
+            let loaded = source.load()?;
             let log = load_log(log.as_deref())?;
-            let text = format_hashes(&run(&sc, &log, ticks)?);
+            let text = format_hashes(&loaded.run(&log, ticks)?);
             match hashes {
                 Some(p) => write(&p, &text)?,
                 None => print!("{text}"),
@@ -101,18 +182,18 @@ fn real_main() -> Result<ExitCode, Error> {
             Ok(ExitCode::SUCCESS)
         }
         Cmd::Verify {
-            scenario,
+            source,
             log,
             hashes,
         } => {
-            let sc = load_scenario(&scenario)?;
+            let loaded = source.load()?;
             let log = load_log(log.as_deref())?;
             let text = std::fs::read_to_string(&hashes).map_err(|source| Error::Io {
                 path: hashes.display().to_string(),
                 source,
             })?;
             let expected = parse_hashes(&text)?;
-            let actual = run(&sc, &log, expected.len() as u32)?;
+            let actual = loaded.run(&log, expected.len() as u32)?;
             match first_mismatch(&expected, &actual) {
                 None => {
                     let last = actual.last().map(|h| format!(" (final {h:016x})"));
@@ -134,13 +215,20 @@ fn real_main() -> Result<ExitCode, Error> {
             Ok(ExitCode::SUCCESS)
         }
         Cmd::GenLog {
-            scenario,
+            source,
             ticks,
             seed,
+            kind,
+            every,
             out,
         } => {
-            let sc = load_scenario(&scenario)?;
-            let json = random_log(&sc, ticks, seed).to_json_pretty();
+            let loaded = source.load()?;
+            let sc = loaded.scenario();
+            let log = match kind {
+                LogKind::Random => random_log(sc, ticks, seed),
+                LogKind::Walk => walk_log(sc, ticks, every, seed),
+            };
+            let json = log.to_json_pretty();
             match out {
                 Some(p) => write(&p, &json)?,
                 None => println!("{json}"),

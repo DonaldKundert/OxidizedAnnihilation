@@ -4,7 +4,7 @@ use tak_commands::{CommandLog, LoggedCommand, Tick};
 
 use crate::hash::StateHasher;
 use crate::scenario::{Scenario, ScenarioError};
-use crate::script::{NoScripts, ScriptCtx, ScriptHost};
+use crate::script::{NoScripts, ScriptCtx, ScriptHost, ScriptStats};
 use crate::systems;
 use crate::world::World;
 use crate::{TICKS_PER_SECOND, UnitId};
@@ -56,7 +56,7 @@ impl Sim {
         if tick == Tick(0) {
             for id in systems::spawn_start_units(&mut self.world) {
                 if let Some(ctx) = self.ctx(tick, id) {
-                    self.scripts.on_create(&ctx);
+                    self.scripts.create_unit(&ctx, &mut self.world.rng);
                 }
             }
         }
@@ -65,7 +65,7 @@ impl Sim {
         systems::movement(&mut self.world);
         for id in self.world.unit_ids() {
             if let Some(ctx) = self.ctx(tick, id) {
-                self.scripts.on_tick(&ctx);
+                self.scripts.tick_unit(&ctx, &mut self.world.rng);
             }
         }
         self.world.tick = tick.next();
@@ -100,11 +100,18 @@ impl Sim {
             def: u.def,
             owner: u.owner,
             pos: u.pos,
-            ground_height: self.world.map().height_at(u.pos),
+            ground_height: u.ground,
+            terrain: u.terrain,
             heading: u.heading,
             speed: u.speed,
             moving: !u.orders.is_empty(),
+            fire_state: u.fire_state,
         })
+    }
+
+    /// The script host's diagnostics (not part of the hash).
+    pub fn script_stats(&self) -> ScriptStats {
+        self.scripts.stats()
     }
 }
 

@@ -64,13 +64,27 @@ pub struct Unit {
     pub fire_state: FireState,
     /// Order queue; the front is the active order.
     pub orders: VecDeque<Order>,
+    /// Terrain height under `pos` (height units, Believed 1 world unit per
+    /// step), refreshed whenever the unit moves.
+    pub ground: Fx,
+    /// Terrain flags under `pos` ([`crate::map::terrain`]), refreshed with
+    /// `ground`.
+    pub terrain: u8,
 }
 
 impl Unit {
+    /// Refresh `ground` and `terrain` from the map.
+    pub(crate) fn sample_terrain(&mut self, map: &MapInfo) {
+        self.ground = map.height_at(self.pos);
+        self.terrain = map.terrain_at(self.pos);
+    }
+
     fn hash(&self, h: &mut StateHasher) {
         h.unit_def(self.def);
         h.player(self.owner);
         h.vec2(self.pos);
+        h.fx(self.ground);
+        h.u8(self.terrain);
         h.angle(self.heading);
         h.fx(self.speed);
         h.u8(match self.fire_state {
@@ -248,7 +262,7 @@ impl World {
         heading: Angle,
     ) -> Option<UnitId> {
         self.defs.get(def)?;
-        let unit = Unit {
+        let mut unit = Unit {
             def,
             owner,
             pos: self.map.clamp(pos),
@@ -256,7 +270,10 @@ impl World {
             speed: Fx::ZERO,
             fire_state: FireState::default(),
             orders: VecDeque::new(),
+            ground: Fx::ZERO,
+            terrain: 0,
         };
+        unit.sample_terrain(&self.map);
         if let Some(i) = self.slots.iter().position(|s| s.unit.is_none()) {
             let slot = &mut self.slots[i];
             slot.unit = Some(unit);
@@ -286,16 +303,16 @@ impl World {
 
     /// Feed the canonical serialization of the world into `h`.
     ///
-    /// Layout (all little-endian): magic `b"OXASIM"`, format `u32 = 1`,
+    /// Layout (all little-endian): magic `b"OXASIM"`, format `u32 = 2`,
     /// tick `u32`, RNG state (two `u64`: state, increment), static digest
     /// `u64`, player count `u32` then per player `id u8, start (x, y) i32
     /// raw, monarch_def u32, monarch option`, slot count `u32` then per slot
     /// `generation u32, occupied u8` and, if occupied, `def u32, owner u8,
-    /// pos x,y i32 raw, heading u16, speed i32 raw, fire_state u8, order
+    /// pos x,y i32 raw, ground i32 raw, terrain u8, heading u16, speed i32 raw, fire_state u8, order
     /// count u32, orders (tag u8 + payload)`.
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.bytes(b"OXASIM");
-        h.u32(1);
+        h.u32(2);
         h.tick(self.tick);
         self.rng.hash(&mut LeHasher(h));
         h.u64(self.static_digest);
