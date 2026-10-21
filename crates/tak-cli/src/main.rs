@@ -3,6 +3,7 @@
 
 mod archive_cmds;
 mod disasm_cmd;
+mod keys_cmd;
 mod map_cmd;
 mod model_cmd;
 mod report;
@@ -100,6 +101,8 @@ enum Cmd {
         #[arg(long, default_value_t = 16)]
         piece: u32,
     },
+    /// Census of TDF keys: files, distinct values, value shapes, examples.
+    Keys(keys_cmd::KeysArgs),
 }
 
 fn main() -> ExitCode {
@@ -129,6 +132,7 @@ fn main() -> ExitCode {
                 palette,
                 piece,
             } => map_cmd::dump_map(vfs, &path, &out, palette.as_deref(), piece),
+            Cmd::Keys(args) => keys_cmd::keys(vfs, args),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
