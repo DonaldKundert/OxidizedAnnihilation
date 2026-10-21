@@ -404,12 +404,16 @@ Bottom-left panel (WP-R): the first selected unit's name, def and order
 count; bars for health (for a frame, a dim segment under it shows the
 health its progress has earned), the unit's own mana pool
 (`economy::unit_mana`, spellcasters) and build progress (frames); then
-clickable buttons: orders (Stop, Patrol, Guard, Spell, Hold / Return /
-Fire, the active fire state and order mode highlighted) for own units,
-and the build menu (F1–F8 with costs, the option in placement mode
-highlighted) for own builders. A button presses the key the
-mouse/keyboard profile binds to that action, so it does exactly what the
-key and the wheel slot do. Clicks on the panel never select or order
+clickable buttons: orders (Stop, Patrol, Guard, Hold / Return / Fire,
+the active fire state and order mode highlighted) for own units; one
+button per spell of the selection's caster (WP-T: `^F1 Meteor (200)`,
+the weapon's name and `manapershot`, greyed while the caster's own mana
+is short, highlighted in its cast mode); and the whole build menu (F1–F8
+then S-F1… for Shift+F1–F8, with costs, the option in placement mode
+highlighted) for own builders. A button presses the key (and modifier)
+the mouse/keyboard profile binds to that action, so it does exactly what
+the key and the wheel slot do. While casting, the status line names the
+spell and its cost, and the cursor is the game's cast cursor. Clicks on the panel never select or order
 behind it; with a gamepad, A with the virtual cursor over a button does
 the same. Below: the placement hint while placing. A red line under the
 top bar shows the local player's latest refused build for 5 s
@@ -440,7 +444,7 @@ the controller buttons for the current context (WP-S, `controller.md`).
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No audio, no spell UI beyond the cast mode; build buttons stop at F8
-  (the profile's bindings).
+- No audio. Spell and build buttons are text, not the game's button art
+  (`buttonimageup` etc. in the weapon/unit data).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies around tick 1,700. Behaviour is the sim's.

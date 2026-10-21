@@ -221,7 +221,9 @@ struct HudBarText(BarKind);
 enum ButtonKind {
     /// `ORDER_BUTTONS[i]`.
     Order(usize),
-    /// Build option `i` (key `f<i+1>`).
+    /// Spell `i` of the selection's caster (Ctrl+F<i+1>).
+    Spell(usize),
+    /// Build option `i` (F1-F8, then Shift+F1-F8).
     Build(usize),
 }
 
@@ -229,26 +231,61 @@ enum ButtonKind {
 struct HudButtonLabel;
 
 /// Order buttons: label and the mouse/keyboard profile's key.
-const ORDER_BUTTONS: [(&str, &str); 7] = [
+const ORDER_BUTTONS: [(&str, &str); 6] = [
     ("Stop", "s"),
     ("Patrol", "p"),
     ("Guard", "g"),
-    ("Spell", "c"),
     ("Hold", "h"),
     ("Return", "r"),
     ("Fire", "f"),
 ];
 
-/// Build buttons (the profile binds F1-F8).
-const BUILD_BUTTONS: usize = 8;
+/// Spell buttons (the profile binds Ctrl+F1-F3; no retail unit has more
+/// than three spells).
+const SPELL_BUTTONS: usize = 3;
+
+/// Build buttons: the profile binds F1-F8 and Shift+F1-F8 (retail menus
+/// have at most 9 entries; the build wheel shows up to 16).
+const BUILD_BUTTONS: usize = 16;
 
 impl ButtonKind {
-    fn key(self) -> String {
+    /// The key (and modifier held with it) the mouse/keyboard profile
+    /// binds to this button's action.
+    fn key(self) -> (Option<&'static str>, String) {
         match self {
-            ButtonKind::Order(i) => ORDER_BUTTONS[i].1.to_string(),
-            ButtonKind::Build(i) => format!("f{}", i + 1),
+            ButtonKind::Order(i) => (None, ORDER_BUTTONS[i].1.to_string()),
+            ButtonKind::Spell(i) => (Some("ctrl"), format!("f{}", i + 1)),
+            ButtonKind::Build(i) if i < 8 => (None, format!("f{}", i + 1)),
+            ButtonKind::Build(i) => (Some("shift"), format!("f{}", i - 7)),
         }
     }
+
+    /// The key as shown on the button.
+    fn key_label(self) -> String {
+        let (m, k) = self.key();
+        let k = k.to_ascii_uppercase();
+        match m {
+            Some("ctrl") => format!("^{k}"),
+            Some("shift") => format!("S-{k}"),
+            _ => k,
+        }
+    }
+}
+
+/// A HUD button's key press: modifier down, key down and up, modifier up.
+fn key_events((m, k): (Option<&'static str>, String)) -> Vec<EventKind> {
+    let mut v = Vec::new();
+    if let Some(m) = m {
+        v.push(EventKind::KeyDown { key: Key(m.into()) });
+    }
+    v.push(EventKind::KeyDown {
+        key: Key(k.clone()),
+    });
+    v.push(EventKind::KeyUp { key: Key(k) });
+    if let Some(m) = m {
+        v.push(EventKind::KeyUp { key: Key(m.into()) });
+    }
+    v
 }
 
 fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
@@ -803,6 +840,10 @@ fn setup_hud(mut commands: Commands) {
     for i in 0..ORDER_BUTTONS.len() {
         spawn_button(&mut commands, orders, ButtonKind::Order(i), 92.0);
     }
+    let spells = grid(&mut commands, panel);
+    for i in 0..SPELL_BUTTONS {
+        spawn_button(&mut commands, spells, ButtonKind::Spell(i), 190.0);
+    }
     let builds = grid(&mut commands, panel);
     for i in 0..BUILD_BUTTONS {
         spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
@@ -958,10 +999,7 @@ fn shot_driver(
                     world: sim.session.sim.world(),
                     local: sim.session.local,
                 };
-                for kind in [
-                    EventKind::KeyDown { key: Key(k.key()) },
-                    EventKind::KeyUp { key: Key(k.key()) },
-                ] {
+                for kind in key_events(k.key()) {
                     let outs = input
                         .mapper
                         .handle(&InputEvent::new(2_000_000, kind), &view, tick);
@@ -1211,7 +1249,7 @@ fn input_system(
     }
     // HUD panel and buttons: a click there presses the button's key (the
     // same action as the keyboard) and never reaches the world.
-    let mut pressed_keys: Vec<String> = Vec::new();
+    let mut pressed_keys: Vec<(Option<&'static str>, String)> = Vec::new();
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
@@ -1312,10 +1350,7 @@ fn input_system(
         }
     }
     for k in pressed_keys {
-        events.push(EventKind::KeyDown {
-            key: Key(k.clone()),
-        });
-        events.push(EventKind::KeyUp { key: Key(k) });
+        events.extend(key_events(k));
     }
     for ev in wheel.read() {
         let steps = match ev.unit {
@@ -3286,7 +3321,7 @@ fn hud_widgets_system(
         ),
         Without<HudAlert>,
     >,
-    mut labels: Query<&mut Text, (With<HudButtonLabel>, Without<HudAlert>)>,
+    mut labels: Query<(&mut Text, &mut TextColor), (With<HudButtonLabel>, Without<HudAlert>)>,
     mut alert: Query<(&mut Text, &mut Visibility), (With<HudAlert>, Without<ButtonKind>)>,
 ) {
     let s = &sim.session;
@@ -3363,6 +3398,17 @@ fn hud_widgets_system(
                     "Place {}: RMB / X on the map, Esc / B cancels",
                     s.def(d).map_or("?", |d| d.display.as_str())
                 ),
+                Mode::CastSpell(sp) => {
+                    let info = crate::view::caster_spells(w, s.local, input.mapper.selection())
+                        .and_then(|(_, v)| v.into_iter().find(|x| x.id == sp));
+                    match info {
+                        Some(i) => format!(
+                            "Cast {} ({} mana): RMB / X on the target, Esc / B cancels",
+                            i.name, i.cost
+                        ),
+                        None => "Cast: RMB / X on the target, Esc / B cancels".into(),
+                    }
+                }
                 m => format!("mode: {m:?}"),
             };
         }
@@ -3373,16 +3419,21 @@ fn hud_widgets_system(
         .and_then(|(_, u)| w.defs().get(u.def))
         .map(|d| d.build.canbuild.clone())
         .unwrap_or_default();
+    let spells = own
+        .and_then(|_| crate::view::caster_spells(w, s.local, input.mapper.selection()))
+        .map(|(_, sp)| sp)
+        .unwrap_or_default();
     for (kind, mut vis, mut node, mut bg, children) in &mut buttons {
+        let mut usable = true;
         let (label, shown, active) = match *kind {
             ButtonKind::Order(i) => {
                 let fs = own.map(|(_, u)| u.fire_state);
                 let active = match i {
                     1 => mode == Mode::Patrol,
                     2 => mode == Mode::Guard,
-                    4 => fs == Some(tak_commands::FireState::HoldFire),
-                    5 => fs == Some(tak_commands::FireState::ReturnFire),
-                    6 => fs == Some(tak_commands::FireState::FireAtWill),
+                    3 => fs == Some(tak_commands::FireState::HoldFire),
+                    4 => fs == Some(tak_commands::FireState::ReturnFire),
+                    5 => fs == Some(tak_commands::FireState::FireAtWill),
                     _ => false,
                 };
                 (
@@ -3395,11 +3446,22 @@ fn hud_widgets_system(
                     active,
                 )
             }
+            ButtonKind::Spell(i) => match spells.get(i) {
+                Some(sp) => {
+                    usable = sp.ready;
+                    (
+                        format!("{} {} ({})", kind.key_label(), sp.name, sp.cost),
+                        true,
+                        mode == Mode::CastSpell(sp.id),
+                    )
+                }
+                None => (String::new(), false, false),
+            },
             ButtonKind::Build(i) => match opts.get(i) {
                 Some(&o) => (
                     format!(
-                        "F{} {} ({})",
-                        i + 1,
+                        "{} {} ({})",
+                        kind.key_label(),
                         s.def(o).map_or("?", |d| d.display.as_str()),
                         w.defs().get(o).map_or(0, |d| d.build.buildcost)
                     ),
@@ -3424,14 +3486,21 @@ fn hud_widgets_system(
         }
         bg.0 = if active {
             Color::srgb(0.45, 0.36, 0.12)
+        } else if !usable {
+            Color::srgb(0.1, 0.1, 0.1)
         } else {
             Color::srgb(0.16, 0.14, 0.11)
         };
         for c in children.iter() {
-            if let Ok(mut t) = labels.get_mut(c)
-                && t.0 != label
-            {
-                t.0 = label.clone();
+            if let Ok((mut t, mut col)) = labels.get_mut(c) {
+                if t.0 != label {
+                    t.0 = label.clone();
+                }
+                col.0 = if usable {
+                    Color::srgb(0.95, 0.92, 0.85)
+                } else {
+                    Color::srgb(0.5, 0.48, 0.45)
+                };
             }
         }
     }
