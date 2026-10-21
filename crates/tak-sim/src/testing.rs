@@ -25,6 +25,7 @@ pub fn monarch_def(name: &str) -> UnitDef {
         economy: Default::default(),
         build: Default::default(),
         combat: Default::default(),
+        motion: Default::default(),
     }
 }
 

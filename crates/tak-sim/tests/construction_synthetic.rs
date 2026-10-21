@@ -239,8 +239,10 @@ fn factory_builds_a_queue_of_two_that_walk_out() {
         .collect();
     // First product waits one tick for the script's INBUILDSTANCE.
     assert_eq!(created[0], 302);
-    // 27 ticks each; the second waits for the first to clear the exit.
-    assert!(created[1] > 302 + 27, "{created:?}");
+    // 27 ticks each; the second can only start once the first has cleared
+    // the exit. With pathfinding (WP-L) the first walks out within its own
+    // build time, so the second starts right on time or later.
+    assert!(created[1] >= 302 + 27, "{created:?}");
     assert_eq!(l.calls_of(keep, "StartBuilding"), created);
     let stops = l.calls_of(keep, "StopBuilding");
     assert_eq!(stops[0], 302 + 26);

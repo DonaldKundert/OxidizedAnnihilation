@@ -69,7 +69,21 @@ pub fn unit_def_from_fbi(u: &tak_content::UnitDef) -> UnitDef {
         economy: crate::economy::economy_def_from_fbi(u),
         build: crate::construction::build_def_from_fbi(u),
         combat: crate::combat::combat_def_from_fbi(u),
+        motion: crate::pathfinding::Motion::from_fbi(u, None),
     }
+}
+
+/// [`unit_def_from_fbi`] plus the unit's movement class from the ruleset
+/// (`gamedata/moveinfo.tdf`), which supplies its pathing footprint and
+/// terrain limits (WP-L, `docs/pathfinding.md`).
+pub fn unit_def_from_ruleset(u: &tak_content::UnitDef, rs: &Ruleset) -> UnitDef {
+    let class = u
+        .movement_class
+        .as_deref()
+        .and_then(|c| rs.move_classes.get(&c.to_ascii_lowercase()));
+    let mut d = unit_def_from_fbi(u);
+    d.motion = crate::pathfinding::Motion::from_fbi(u, class);
+    d
 }
 
 /// World position of a TNT attribute cell: its centre, `16 c + 8`
@@ -208,7 +222,7 @@ impl Scenario {
             {
                 Some(d) => d,
                 None => {
-                    unit_defs.push(unit_def_from_fbi(fbi));
+                    unit_defs.push(unit_def_from_ruleset(fbi, rs));
                     unit_defs.len() - 1
                 }
             };

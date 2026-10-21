@@ -46,6 +46,11 @@ pub struct UnitDef {
     /// Combat stats (WP-M); empty = not part of combat.
     #[serde(default, skip_serializing_if = "crate::combat::CombatDef::is_empty")]
     pub combat: crate::combat::CombatDef,
+    /// Pathing and terrain-speed data (WP-L): movement class limits,
+    /// flight, road/water speed factors. Defaults to a `GROUND2`-like
+    /// walker, so synthetic scenarios may omit it.
+    #[serde(default)]
+    pub motion: crate::pathfinding::Motion,
 }
 
 impl UnitDef {
@@ -89,6 +94,7 @@ impl UnitDef {
         self.economy.hash(h);
         self.build.hash(h);
         self.combat.hash(h);
+        self.motion.hash(h);
     }
 }
 

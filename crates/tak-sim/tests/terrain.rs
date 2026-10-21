@@ -1,6 +1,7 @@
-//! Terrain in movement on a synthetic map (no game data): blocked cells halt
-//! a unit and drop its order, water does not, and ground height and terrain
-//! flags follow the unit into scripts and the hash.
+//! Terrain in movement on a synthetic map (no game data): a goal behind an
+//! unbroken wall is unreachable, so the unit stops at the nearest reachable
+//! point and drops the order; water does not block; ground height and
+//! terrain flags follow the unit into scripts and the hash.
 
 use tak_commands::{LoggedCommand, PlayerId, QueueMode, SimCommand, Tick, UnitId, UnitSet};
 use tak_math::{Fx, Vec2};
@@ -67,9 +68,12 @@ fn walls_halt_units_and_drop_the_order() {
     let u = sim.world().unit(U0).unwrap().clone();
     assert!(saw_water, "walked through the (passable) water strip");
     assert!(u.orders.is_empty(), "the blocked order was dropped");
+    assert_eq!(u.path.outcome, tak_sim::pathfinding::Outcome::Unreachable);
     assert_eq!(u.speed, Fx::ZERO);
+    // The 2x2 footprint (centred on the unit) stops just short of the wall
+    // cell at x = 480.
     assert!(
-        u.pos.x > Fx::from_int(470),
+        u.pos.x > Fx::from_int(456),
         "halted right at the wall: {:?}",
         u.pos
     );

@@ -442,6 +442,7 @@ mod tests {
                 economy: Default::default(),
                 build: Default::default(),
                 combat: Default::default(),
+                motion: Default::default(),
             }],
             players: vec![PlayerSpec {
                 start: 0,

@@ -1,6 +1,6 @@
 //! Real data (gated on `TAK_DATA_DIR`): Adamantine Gate with an Aramon and
 //! a Taros monarch, original COB scripts running. Monarchs spawn on the
-//! map's start markers, walk under their FBI stats, halt at impassable
+//! map's start markers, walk under their FBI stats, route around impassable
 //! terrain, and their scripts see "moving" (port 29) while walking.
 
 use tak_commands::{LoggedCommand, PlayerId, QueueMode, SimCommand, Tick, UnitId, UnitSet};
@@ -219,8 +219,8 @@ fn every_mobile_unit_script_walks_without_runaways() {
 }
 
 #[test]
-fn monarch_halts_at_impassable_terrain() {
-    let Some(m) = load("monarch_halts_at_impassable_terrain") else {
+fn monarch_routes_around_impassable_terrain() {
+    let Some(m) = load("monarch_routes_around_impassable_terrain") else {
         return;
     };
     let sc = m.scenario.clone();
@@ -267,17 +267,15 @@ fn monarch_halts_at_impassable_terrain() {
     }
     let u = sim.world().unit(id).unwrap();
     assert!(moved);
-    assert!(u.orders.is_empty(), "the blocked order was dropped");
+    assert!(u.orders.is_empty(), "the order finished");
     assert_eq!(u.speed, Fx::ZERO);
-    assert!(
-        u.pos.distance(to) > Fx::from_int(32),
-        "did not reach the far side"
-    );
-    let ahead = (1..=4).any(|k| {
-        blocked(
-            &sc.map,
-            u.pos + Vec2::from_angle(u.heading).scale(Fx::from_int(k)),
-        )
-    });
-    assert!(ahead, "halted facing the blocker");
+    // Since WP-L the unit routes around the blocker instead of halting in
+    // front of it: it either reaches the target or, when the target lies
+    // inside the obstruction, the reachable point nearest to it.
+    use tak_sim::pathfinding::Outcome;
+    match u.path.outcome {
+        Outcome::Arrived => assert!(u.pos.distance(to) <= ARRIVAL_TOLERANCE),
+        Outcome::Unreachable => assert!(u.pos.distance(to) < Fx::from_int(160)),
+        o => panic!("unexpected outcome {o:?} at {:?}", u.pos),
+    }
 }

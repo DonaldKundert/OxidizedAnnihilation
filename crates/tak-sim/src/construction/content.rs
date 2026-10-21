@@ -4,7 +4,7 @@
 use tak_content::{MapDef, Ruleset, RulesetKind};
 use tak_vfs::Vfs;
 
-use crate::content::{ContentError, Match, PlayerSetup, load_scripts, unit_def_from_fbi};
+use crate::content::{ContentError, Match, PlayerSetup, load_scripts, unit_def_from_ruleset};
 use crate::defs::{MAX_UNIT_DEFS, UnitDef};
 use crate::scenario::Scenario;
 use crate::{UnitDefId, defs};
@@ -29,7 +29,7 @@ pub fn add_build_trees(rs: &Ruleset, defs: &mut Vec<UnitDef>) {
                 continue;
             };
             if find(defs, &target.unitname).is_none() && defs.len() < MAX_UNIT_DEFS {
-                defs.push(unit_def_from_fbi(target));
+                defs.push(unit_def_from_ruleset(target, rs));
             }
         }
     }
