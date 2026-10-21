@@ -14,3 +14,4 @@ tak-content.workspace = true
 tak-script.workspace = true
 tak-math.workspace = true
 tak-commands.workspace = true
+xxhash-rust.workspace = true

@@ -12,7 +12,8 @@ The core is headless and deterministic. It mounts the original archives, parses 
 |---|---|
 | M0 Workspace and CI | done |
 | M1 Install survey (`tak-cli survey`) | done, see [`docs/formats/hapi.md`](docs/formats/hapi.md) |
-| M2 Archive reader | in progress |
+| M2 Archive reader and VFS (`tak-cli ls/cat/extract`) | done |
+| M3–M7 formats, math, commands | in parallel, see [`docs/plan.md`](docs/plan.md) |
 
 The full plan is in [`docs/plan.md`](docs/plan.md).
 

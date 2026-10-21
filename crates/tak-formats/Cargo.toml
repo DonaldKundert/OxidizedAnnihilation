@@ -11,3 +11,8 @@ workspace = true
 
 [dependencies]
 tak-vfs.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true

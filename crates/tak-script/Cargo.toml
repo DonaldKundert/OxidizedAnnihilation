@@ -11,3 +11,7 @@ workspace = true
 
 [dependencies]
 tak-formats.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
