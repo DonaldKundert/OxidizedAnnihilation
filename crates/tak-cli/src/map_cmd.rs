@@ -126,20 +126,10 @@ fn load_palette(b: &[u8]) -> Res<Vec<[u8; 3]>> {
     Err("palette is neither a 1024-byte .pal nor a PCX with a trailing palette".into())
 }
 
-/// Stopgap until the typed OTA view (on WP-A's TDF parser) lands: find
-/// `kingdom=<name>;` in the sibling `.ota` and use `palettes/<name>.pcx`.
+/// The palette named by the sibling `.ota`'s `kingdom` (typed OTA view from
+/// `tak-content`): `palettes/<kingdom>.pcx`.
 fn kingdom_palette(vfs: &Vfs, tnt_path: &str) -> Option<Vec<[u8; 3]>> {
     let stem = tnt_path.get(..tnt_path.len().checked_sub(4)?)?;
-    let ota = vfs.read(&format!("{stem}.ota")).ok()?;
-    let text: String = ota
-        .iter()
-        .map(|&c| c as char)
-        .collect::<String>()
-        .to_ascii_lowercase();
-    let start = text.find("kingdom=")? + "kingdom=".len();
-    let name: String = text[start..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    load_palette(&vfs.read(&format!("palettes/{name}.pcx")).ok()?).ok()
+    let ota = tak_content::OtaDef::load(vfs, &format!("{stem}.ota"))?;
+    load_palette(&vfs.read(&ota.palette_path()?).ok()?).ok()
 }

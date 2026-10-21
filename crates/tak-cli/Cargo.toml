@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 tak-vfs.workspace = true
 tak-formats.workspace = true
+tak-content.workspace = true
 tak-script.workspace = true
 tak-math.workspace = true
 tak-headless.workspace = true
