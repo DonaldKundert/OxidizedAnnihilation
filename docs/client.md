@@ -57,7 +57,9 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
 - `--focus monarch:N | unit:SLOT | X,Y` centres the camera (at the point's
   terrain height); `--zoom` is world units per pixel (1 = TA's native
   640-px view scale); `--select 0,2` selects unit slots through the mapper,
-  so rings and the HUD panel show; `--window WxH`.
+  so rings and the HUD panel show; `--window WxH`; `--showcase a,b,c`
+  draws those 3DO models (rest pose, render only) in a row next to the
+  focus, for checking art by eye.
 - Each capture prints every unit (slot, def, owner, position, health,
   build progress, first orders), the feature count and the hash.
 - **Known** to work on this machine: Mesa lavapipe (Vulkan, llvmpipe),
@@ -177,9 +179,29 @@ sim's feature layer are drawn with their 3DO when the feature def names one
   the colours on the same models. A team ring under each unit (blue = you,
   red = enemy) is drawn too.
 - Untextured faces use their colour index in the model side's texture
-  palette. About 144 texture names resolve nowhere in `textures/` (85 of
-  them are in `anims/`, not searched yet, `3do.md`); they draw flat grey
-  and are logged. None are missing on the monarchs or the wall.
+  palette.
+- **Texture search (Chosen order)**: `textures/*.gaf` first, then
+  `anims/*.gaf`. The `anims/` files are only header-scanned for entry
+  names at startup (about 0.6 s for 434 files) and parsed on first use.
+  Their palette: a sibling `anims/<file>.pcx` if present (none of the 19
+  files that matter has one), else `<side>_textures.pcx` by the first three
+  letters, `*monst*` files (`nyrmonst`, `talmonst`) on `mon_textures`, else
+  `palette.pal` (**Chosen**; the `aid*` files land there). This resolves
+  85 more names (3,411 of 3,470): live units `aradrag`, `tartroop`,
+  `tardung`, `tarnecro`, `npcpeas`, `monpiran`, `npcbotl` and many
+  `_dead` corpses.
+- **Still unresolved (Known)**: 59 names, all on corpses except
+  `liegeshoul2` (`vercrus`): `zonbat_dead` (`bat*`), `zondrake_dead`
+  (`drake*`), `aradrag_dead`/`tardrag_dead`/`tarknigh_dead`/`npcthesh_dead`/
+  `npcjor2_dead` (`deaddragwing*`), `verpar_dead` (`deadwing3/4`),
+  `zongryp_dead` (`gryphwing*1`), `zonorc_dead`, `zontroll_dead`
+  (`trolllimb*`). They are not untextured by design (live models have
+  same-stem textures), so: a name whose stem (trailing digits dropped,
+  then shortened down to six letters) prefixes a known texture uses that
+  texture (`gryphwingl1` → `gryphwingL2`, `drakehead1` → `drakeheadA1`;
+  **Chosen**), and the rest draw in a neutral brown (`MISSING_RGB`), not
+  grey. Both are logged per model. `--showcase zondrake_dead,zonbat_dead`
+  shows them.
 
 ### Units: placement and animation
 
@@ -223,7 +245,6 @@ slots next to the cursor from `Mapper::wheel()`.
   dust yet; projectiles are spheres. Units under construction draw fully
   built (no TA:K build-up effect), with a progress bar.
 - Map features are boxes, not their GAF sprites or 3DOs; no shadows.
-- Texture search does not include `anims/*.gaf`; missing names draw grey.
 - No minimap, no fog of war, no audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet

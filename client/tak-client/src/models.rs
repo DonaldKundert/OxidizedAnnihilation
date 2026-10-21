@@ -18,7 +18,9 @@
 //!   palette. 2-index primitives (emit segments) and the root's selection
 //!   primitive (the ground plate) are not drawn.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use tak_formats::gaf::palette::Palette;
 use tak_formats::gaf::pcx::Pcx;
@@ -30,10 +32,51 @@ use tak_vfs::Vfs;
 pub const CUTOUT_INDEX: u8 = 5;
 
 /// Every model texture in the install, by lowercase entry name.
+///
+/// Search order (**Chosen**; the engine's is Unknown, `3do.md`): every
+/// `textures/*.gaf` first (path order), then every `anims/*.gaf`. The
+/// `anims/` files are only scanned for entry names at load (a cheap header
+/// walk) and parsed on first use. Names that resolve nowhere fall back to
+/// the nearest texture sharing a name stem of at least six letters
+/// (`gryphwingl1` → `gryphwingL2`, **Chosen**), else to a neutral colour.
 pub struct TextureIndex {
     gafs: Vec<(String, Gaf)>,
     by_name: BTreeMap<String, (usize, usize)>,
     palettes: BTreeMap<String, Palette>,
+    /// `anims/` entry names not found in `textures/`, to their file.
+    anim_names: BTreeMap<String, String>,
+    /// Lazily parsed `anims/` GAFs (and the VFS bytes they come from).
+    anim_gafs: RefCell<BTreeMap<String, Option<Arc<(Gaf, Palette)>>>>,
+    vfs_anims: BTreeMap<String, Vec<u8>>,
+}
+
+/// Colour for texture names that resolve nowhere and have no stem match
+/// (**Chosen**: a muted brown, closer to the hide and wood these corpse
+/// parts show than TA's flat colour 209).
+pub const MISSING_RGB: [u8; 3] = [104, 88, 70];
+
+/// Entry names of a GAF from its header alone (no frame decoding). Never
+/// panics: a truncated or odd file gives the names read so far.
+pub fn gaf_entry_names(data: &[u8]) -> Vec<String> {
+    let u32_at = |o: usize| -> Option<u32> {
+        let b = data.get(o..o.checked_add(4)?)?;
+        Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let Some(count) = u32_at(4) else {
+        return Vec::new();
+    };
+    let count = (count as usize).min(data.len() / 4);
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let Some(eo) = u32_at(12 + i * 4) else { break };
+        let start = eo as usize + 8;
+        let Some(raw) = data.get(start..start.saturating_add(32)) else {
+            continue;
+        };
+        let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+        out.push(String::from_utf8_lossy(&raw[..end]).into_owned());
+    }
+    out
 }
 
 /// Load a palette from a `.pal` or a PCX trailer.
@@ -85,16 +128,133 @@ impl TextureIndex {
             });
         }
         palettes.insert(String::new(), fallback);
-        TextureIndex {
+        let mut anim_names = BTreeMap::new();
+        let mut vfs_anims = BTreeMap::new();
+        let mut anim_files: Vec<String> = vfs
+            .list("anims/")
+            .into_iter()
+            .map(|f| f.path)
+            .filter(|p| p.ends_with(".gaf"))
+            .collect();
+        anim_files.sort();
+        for path in anim_files {
+            let Ok(bytes) = vfs.read(&path) else { continue };
+            let mut used = false;
+            for n in gaf_entry_names(&bytes) {
+                let key = n.to_ascii_lowercase();
+                if !by_name.contains_key(&key) && !anim_names.contains_key(&key) {
+                    anim_names.insert(key, path.clone());
+                    used = true;
+                }
+            }
+            if used {
+                vfs_anims.insert(path, bytes);
+            }
+        }
+        // Palettes the anims files may need.
+        for side in ["mon", "npc"] {
+            palettes.entry(side.to_string()).or_insert_with(|| {
+                load_palette(vfs, &format!("palettes/{side}_textures.pcx"))
+                    .unwrap_or_else(|| palettes_fallback(vfs))
+            });
+        }
+        let mut sibling = BTreeMap::new();
+        for path in vfs_anims.keys() {
+            if let Some(p) = load_palette(vfs, &path.replace(".gaf", ".pcx")) {
+                sibling.insert(path.clone(), p);
+            }
+        }
+        let mut idx = TextureIndex {
             gafs,
             by_name,
             palettes,
+            anim_names,
+            anim_gafs: RefCell::new(BTreeMap::new()),
+            vfs_anims,
+        };
+        for (path, p) in sibling {
+            idx.palettes.insert(format!("file:{path}"), p);
         }
+        idx
+    }
+
+    /// Palette for an `anims/` GAF used as a model texture: its sibling
+    /// PCX when present, else `<side>_textures.pcx` by the first three
+    /// letters, with `*monst*` files on `mon_textures` (**Chosen**), else
+    /// the fallback.
+    fn anim_palette(&self, path: &str) -> Palette {
+        if let Some(p) = self.palettes.get(&format!("file:{path}")) {
+            return p.clone();
+        }
+        let stem = file_stem(path).to_ascii_lowercase();
+        let side = side_of(&stem);
+        if let Some(p) = self.palettes.get(&side) {
+            return p.clone();
+        }
+        if stem.contains("monst") {
+            return self.palette("mon").clone();
+        }
+        self.palette("").clone()
+    }
+
+    fn anim_gaf(&self, path: &str) -> Option<Arc<(Gaf, Palette)>> {
+        let mut cache = self.anim_gafs.borrow_mut();
+        cache
+            .entry(path.to_string())
+            .or_insert_with(|| {
+                let bytes = self.vfs_anims.get(path)?;
+                let gaf = Gaf::parse(bytes).ok()?;
+                Some(Arc::new((gaf, self.anim_palette(path))))
+            })
+            .clone()
+    }
+
+    /// Where a texture name resolves: `"textures/x.gaf"`, `"anims/y.gaf"`,
+    /// or `None`.
+    pub fn source_of(&self, name: &str) -> Option<&str> {
+        let key = name.to_ascii_lowercase();
+        if let Some(&(gi, _)) = self.by_name.get(&key) {
+            return Some(&self.gafs[gi].0);
+        }
+        self.anim_names.get(&key).map(String::as_str)
+    }
+
+    /// The nearest known name sharing a stem of at least six letters with
+    /// `name` (trailing digits dropped first), for names that resolve
+    /// nowhere.
+    pub fn stem_fallback(&self, name: &str) -> Option<String> {
+        let key = name.to_ascii_lowercase();
+        let mut stem = key.trim_end_matches(|c: char| c.is_ascii_digit());
+        while stem.len() >= 6 {
+            let hit = self
+                .by_name
+                .range(stem.to_string()..)
+                .next()
+                .map(|(k, _)| k)
+                .filter(|k| k.starts_with(stem))
+                .or_else(|| {
+                    self.anim_names
+                        .range(stem.to_string()..)
+                        .next()
+                        .map(|(k, _)| k)
+                        .filter(|k| k.starts_with(stem))
+                });
+            if let Some(h) = hit {
+                return Some(h.clone());
+            }
+            stem = &stem[..stem.len() - 1];
+        }
+        None
     }
 
     /// Number of distinct entry names.
     pub fn len(&self) -> usize {
         self.by_name.len()
+    }
+
+    /// Number of extra names found only in `anims/`.
+    pub fn anim_len(&self) -> usize {
+        self.anim_names.len()
     }
 
     /// `true` if no textures were found.
@@ -112,14 +272,35 @@ impl TextureIndex {
 
     /// Decode texture `name` for `player` as RGBA8 `(w, h, pixels)`.
     pub fn decode(&self, name: &str, player: usize) -> Option<(u32, u32, Vec<u8>)> {
-        let &(gi, ei) = self.by_name.get(&name.to_ascii_lowercase())?;
-        let (path, gaf) = &self.gafs[gi];
-        let entry = gaf.entries.get(ei)?;
-        if entry.frames.is_empty() {
-            return None;
+        let key = name.to_ascii_lowercase();
+        if let Some(&(gi, ei)) = self.by_name.get(&key) {
+            let (path, gaf) = &self.gafs[gi];
+            let entry = gaf.entries.get(ei)?;
+            return decode_entry(entry, player, self.palette(&side_of(file_stem(path))));
         }
+        let path = self.anim_names.get(&key)?;
+        let g = self.anim_gaf(path)?;
+        let entry = g.0.entry(&key)?;
+        decode_entry(entry, player, &g.1)
+    }
+}
+
+fn palettes_fallback(vfs: &Vfs) -> Palette {
+    load_palette(vfs, "palettes/palette.pal").unwrap_or_else(Palette::grayscale)
+}
+
+/// Decode one entry's frame for `player` (per-player variants), with index
+/// 5 and the colour key transparent.
+fn decode_entry(
+    entry: &tak_formats::gaf::Entry,
+    player: usize,
+    pal: &Palette,
+) -> Option<(u32, u32, Vec<u8>)> {
+    if entry.frames.is_empty() {
+        return None;
+    }
+    {
         let frame = &entry.frames[player % entry.frames.len()].frame;
-        let pal = self.palette(&side_of(file_stem(path)));
         let (w, h) = (u32::from(frame.width), u32::from(frame.height));
         if w == 0 || h == 0 {
             return None;
@@ -247,8 +428,11 @@ pub struct BuiltModel {
     pub pieces: Vec<BuiltPiece>,
     /// Texture atlas.
     pub atlas: Atlas,
-    /// Texture names that resolved nowhere (drawn flat grey).
+    /// Texture names that resolved nowhere and had no stem match (drawn
+    /// in [`MISSING_RGB`]).
     pub missing: Vec<String>,
+    /// Names drawn with a stem match instead: `(name, stand-in)`.
+    pub stand_ins: Vec<(String, String)>,
 }
 
 /// Texture corners in TA order: a quad's indices 0..3 take these.
@@ -286,6 +470,7 @@ pub fn build_model(model: &Model, tex: &TextureIndex, side: &str, player: usize)
     let mut slot_of_name: BTreeMap<String, Skin> = BTreeMap::new();
     let mut flat_slot: BTreeMap<u8, usize> = BTreeMap::new();
     let mut missing = Vec::new();
+    let mut stand_ins = Vec::new();
     let pal = tex.palette(side);
     let mut skin_of = |prim: &model3do::Primitive| -> Skin {
         match &prim.texture {
@@ -294,7 +479,12 @@ pub fn build_model(model: &Model, tex: &TextureIndex, side: &str, player: usize)
                 if let Some(s) = slot_of_name.get(&key) {
                     return *s;
                 }
-                let s = match tex.decode(name, player) {
+                let found = tex.decode(name, player).or_else(|| {
+                    let alt = tex.stem_fallback(name)?;
+                    stand_ins.push((key.clone(), alt.clone()));
+                    tex.decode(&alt, player)
+                });
+                let s = match found {
                     Some(img) => {
                         images.push(img);
                         tex_names.push(key.clone());
@@ -325,7 +515,7 @@ pub fn build_model(model: &Model, tex: &TextureIndex, side: &str, player: usize)
         let key = if matches!(s, Skin::Missing) { 255 } else { c };
         flat_slot.entry(key).or_insert_with(|| {
             let rgb = if matches!(s, Skin::Missing) {
-                [128, 128, 128]
+                MISSING_RGB
             } else {
                 pal.rgb(c)
             };
@@ -392,6 +582,7 @@ pub fn build_model(model: &Model, tex: &TextureIndex, side: &str, player: usize)
         pieces,
         atlas,
         missing,
+        stand_ins,
     }
 }
 
@@ -438,6 +629,30 @@ mod tests {
         let (x, y, _, _) = rects[0];
         let i = ((y * atlas.width + x) * 4) as usize;
         assert_eq!(atlas.rgba[i], 255);
+    }
+
+    #[test]
+    fn entry_names_from_header() {
+        // Header: version, count 2, 0, two entry offsets; entries are
+        // frame_count, flags, 0, 32-byte name (no frames).
+        let mut b = Vec::new();
+        for v in [0x0001_0100u32, 2, 0, 20, 60] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        for name in ["Alpha", "beta2"] {
+            b.extend_from_slice(&[0, 0, 1, 0, 0, 0, 0, 0]);
+            let mut n = [0u8; 32];
+            n[..name.len()].copy_from_slice(name.as_bytes());
+            b.extend_from_slice(&n);
+        }
+        assert_eq!(gaf_entry_names(&b), vec!["Alpha", "beta2"]);
+        // Truncated or garbage input never panics.
+        for cut in 0..b.len() {
+            let _ = gaf_entry_names(&b[..cut]);
+        }
+        let mut huge = b.clone();
+        huge[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        let _ = gaf_entry_names(&huge);
     }
 
     #[test]

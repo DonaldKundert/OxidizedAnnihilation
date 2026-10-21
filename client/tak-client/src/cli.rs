@@ -56,6 +56,11 @@ pub struct Args {
     /// show selection rings and the HUD panel.
     #[arg(long, value_delimiter = ',')]
     pub select: Vec<u32>,
+    /// Render these 3DO models (names under `objects3d/`, comma-separated)
+    /// in a row next to the focus, at rest pose. Render only: for checking
+    /// textures and art by eye.
+    #[arg(long, value_delimiter = ',')]
+    pub showcase: Vec<String>,
 }
 
 impl Args {

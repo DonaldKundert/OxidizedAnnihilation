@@ -154,12 +154,13 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let ground = terrain::load(&vfs, &args.map)?;
     let tex = TextureIndex::load(&vfs);
     eprintln!(
-        "loaded {} ({}x{} cells, {} defs, {} textures, {} missing tile pieces) in {:.2}s",
+        "loaded {} ({}x{} cells, {} defs, {} textures + {} in anims/, {} missing tile pieces) in {:.2}s",
         args.map,
         ground.cells.0,
         ground.cells.1,
         session.defs.len(),
         tex.len(),
+        tex.anim_len(),
         ground.missing,
         t0.elapsed().as_secs_f32()
     );
@@ -220,6 +221,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             camera_system,
             units_system,
             corpses_system,
+            showcase_system,
             hud_system,
             gizmo_system,
             fps_report,
@@ -245,6 +247,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         app.insert_resource(StartFocus(focus));
         app.add_systems(Startup, initial_focus.after(setup_scene));
+    }
+    if !args.showcase.is_empty() {
+        app.insert_resource(Showcase(args.showcase.clone()));
     }
     app.insert_resource(Outputs {
         record: args.record.clone(),
@@ -1037,6 +1042,9 @@ fn units_system(
                         usize::from(u.owner),
                     ) {
                         Ok(b) => {
+                            if !b.stand_ins.is_empty() {
+                                info!("{}: stand-in textures {:?}", def.object, b.stand_ins);
+                            }
                             if !b.missing.is_empty() {
                                 warn!("{}: missing textures {:?}", def.object, b.missing);
                             }
@@ -1190,28 +1198,7 @@ fn corpses_system(
                 .clone()
         });
         match assets {
-            Some(a) => {
-                let mut ids: Vec<Entity> = Vec::new();
-                for pa in &a.pieces {
-                    let parent = pa.parent.and_then(|p| ids.get(p).copied()).unwrap_or(root);
-                    let pe = commands
-                        .spawn((
-                            Transform::from_translation(pa.offset),
-                            Visibility::default(),
-                            ChildOf(parent),
-                        ))
-                        .id();
-                    if let Some(m) = &pa.mesh {
-                        commands.spawn((
-                            Mesh3d(m.clone()),
-                            MeshMaterial3d(a.material.clone()),
-                            Transform::default(),
-                            ChildOf(pe),
-                        ));
-                    }
-                    ids.push(pe);
-                }
-            }
+            Some(a) => spawn_static_pieces(&mut commands, &a, root),
             None => {
                 let (w, d) = (r.w as f32 * 16.0, r.h as f32 * 16.0);
                 let mat = materials.add(StandardMaterial {
@@ -1228,6 +1215,100 @@ fn corpses_system(
             }
         }
         ents.0.insert(id, root);
+    }
+}
+
+/// Spawn a model's pieces at rest pose under `root`.
+fn spawn_static_pieces(commands: &mut Commands, a: &ModelAssets, root: Entity) {
+    let mut ids: Vec<Entity> = Vec::new();
+    for pa in &a.pieces {
+        let parent = pa.parent.and_then(|p| ids.get(p).copied()).unwrap_or(root);
+        let pe = commands
+            .spawn((
+                Transform::from_translation(pa.offset),
+                Visibility::default(),
+                ChildOf(parent),
+            ))
+            .id();
+        if let Some(m) = &pa.mesh {
+            commands.spawn((
+                Mesh3d(m.clone()),
+                MeshMaterial3d(a.material.clone()),
+                Transform::default(),
+                ChildOf(pe),
+            ));
+        }
+        ids.push(pe);
+    }
+}
+
+/// Models placed by `--showcase` (render only: the sim never sees them).
+#[derive(Resource)]
+struct Showcase(Vec<String>);
+
+/// `--showcase a,b,c`: static models in a row south of the focus point,
+/// facing the camera, for checking textures and art by eye.
+fn showcase_system(
+    mut commands: Commands,
+    show: Option<Res<Showcase>>,
+    mut done: Local<bool>,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    plan: Option<Res<ShotPlan>>,
+    mut cache: ResMut<ModelCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(show) = show else { return };
+    if *done || sim.session.tick().0 == 0 {
+        return;
+    }
+    *done = true;
+    let focus = plan.map_or(Focus::Monarch(0), |p| p.focus);
+    let w = sim.session.sim.world();
+    let centre = match focus {
+        Focus::Point(x, y) => [x, y],
+        _ => w
+            .players()
+            .first()
+            .and_then(|p| p.monarch.and_then(|m| w.unit(m)).map(|u| u.pos))
+            .map_or([0.0, 0.0], |p| [f(p.x), f(p.y)]),
+    };
+    let n = show.0.len() as f32;
+    for (i, name) in show.0.iter().enumerate() {
+        let o = name.to_ascii_lowercase();
+        let assets = cache
+            .models
+            .entry((o.clone(), 0))
+            .or_insert_with(|| match load_model(&content.vfs, &content.tex, &o, 0) {
+                Ok(b) => {
+                    eprintln!(
+                        "showcase {o}: stand-ins {:?} missing {:?}",
+                        b.stand_ins, b.missing
+                    );
+                    Some(Arc::new(upload_model(
+                        &b,
+                        &mut meshes,
+                        &mut images,
+                        &mut materials,
+                    )))
+                }
+                Err(e) => {
+                    eprintln!("showcase {o}: {e}");
+                    None
+                }
+            })
+            .clone();
+        let Some(a) = assets else { continue };
+        let x = centre[0] + (i as f32 - (n - 1.0) / 2.0) * 150.0;
+        let z = centre[1] + 60.0;
+        // Heading a quarter turn = facing south, toward the camera.
+        let tf = Transform::from_xyz(x, ground.0.height_at(x, z), z)
+            .with_rotation(heading_rotation(FRAC_PI_2));
+        let root = commands.spawn((tf, Visibility::default())).id();
+        spawn_static_pieces(&mut commands, &a, root);
     }
 }
 
