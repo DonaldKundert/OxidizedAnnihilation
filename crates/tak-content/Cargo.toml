@@ -11,3 +11,10 @@ workspace = true
 
 [dependencies]
 tak-formats.workspace = true
+tak-math.workspace = true
+tak-vfs.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

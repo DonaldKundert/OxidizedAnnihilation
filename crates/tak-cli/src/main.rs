@@ -2,6 +2,7 @@
 //! game binary.
 
 mod archive_cmds;
+mod content_cmd;
 mod disasm_cmd;
 mod keys_cmd;
 mod map_cmd;
@@ -103,6 +104,8 @@ enum Cmd {
     },
     /// Census of TDF keys: files, distinct values, value shapes, examples.
     Keys(keys_cmd::KeysArgs),
+    /// Load typed content (units, features, build menus, maps) and print a summary or one def as JSON.
+    Content(content_cmd::ContentArgs),
 }
 
 fn main() -> ExitCode {
@@ -133,6 +136,7 @@ fn main() -> ExitCode {
                 piece,
             } => map_cmd::dump_map(vfs, &path, &out, palette.as_deref(), piece),
             Cmd::Keys(args) => keys_cmd::keys(vfs, args),
+            Cmd::Content(args) => content_cmd::run(vfs, args),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };

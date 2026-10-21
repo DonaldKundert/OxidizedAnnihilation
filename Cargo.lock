@@ -597,6 +597,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "tak-content",
  "tak-formats",
  "tak-headless",
  "tak-script",
@@ -617,7 +618,12 @@ dependencies = [
 name = "tak-content"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tak-formats",
+ "tak-math",
+ "tak-vfs",
+ "thiserror",
 ]
 
 [[package]]
