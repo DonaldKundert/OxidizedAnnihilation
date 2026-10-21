@@ -106,6 +106,24 @@ pub trait ScriptHost {
     /// Forget a unit's script (it was removed from the world).
     fn remove_unit(&mut self, _unit: UnitId) {}
 
+    /// Whether a unit's script has a function of this name. Default: no
+    /// scripts.
+    fn has_function(&self, _unit: UnitId, _name: &str) -> bool {
+        false
+    }
+
+    /// The value a unit's script last `set` on a port (0 if never set);
+    /// `None` if the unit has no script. Combat reads the Kingdoms aim and
+    /// launch flags (ports 21..23) and the death flags this way.
+    fn port(&self, _unit: UnitId, _port: i32) -> Option<i32> {
+        None
+    }
+
+    /// Engine-side write of a unit's port register (e.g. resetting an aim
+    /// flag before asking the script again). Hashed with the script state.
+    /// No-op without a script.
+    fn set_port(&mut self, _unit: UnitId, _port: i32, _value: i32) {}
+
     /// Feed all script state into the world hash.
     fn hash_state(&self, h: &mut StateHasher) {
         let _ = h;
