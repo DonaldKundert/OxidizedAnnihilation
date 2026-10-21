@@ -425,6 +425,16 @@ pub fn tick(world: &mut World, _scripts: &mut dyn ScriptHost) {
             ..Default::default()
         });
     }
+    // Refunds from cancelled construction (WP-O) go back into the pool,
+    // capped by storage like any other credit. Applied in queue order.
+    for r in world.construction.take_refunds() {
+        let mut left = r.mana.max(0);
+        while left > 0 {
+            let chunk = left.min(i64::from(i32::MAX));
+            credit(world, r.player, Fx::from_raw(chunk as i32));
+            left -= chunk;
+        }
+    }
     if !world.economy.started {
         world.economy.started = true;
         let pct = world.economy.setup.rules.monarch_start_mana_percent;

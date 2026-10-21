@@ -67,6 +67,7 @@ pub fn unit_def_from_fbi(u: &tak_content::UnitDef) -> UnitDef {
         footprintx: u.footprint.x.unwrap_or(1).max(1),
         footprintz: u.footprint.z.unwrap_or(1).max(1),
         economy: crate::economy::economy_def_from_fbi(u),
+        build: crate::construction::build_def_from_fbi(u),
     }
 }
 

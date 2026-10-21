@@ -37,6 +37,12 @@ pub struct UnitDef {
     /// Economy keys (WP-N).
     #[serde(default)]
     pub economy: crate::economy::EconomyDef,
+    /// Construction data (WP-O): cost, build time, worker time, build menu.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::construction::BuildDef::is_default"
+    )]
+    pub build: crate::construction::BuildDef,
 }
 
 impl UnitDef {
@@ -63,7 +69,7 @@ impl UnitDef {
             return bad("name too long");
         }
         self.economy.validate(&self.name)?;
-        Ok(())
+        self.build.validate(&self.name)
     }
 
     pub(crate) fn hash(&self, h: &mut StateHasher) {
@@ -75,6 +81,7 @@ impl UnitDef {
         h.u8(self.footprintx);
         h.u8(self.footprintz);
         self.economy.hash(h);
+        self.build.hash(h);
     }
 }
 

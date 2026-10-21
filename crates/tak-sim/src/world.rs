@@ -440,6 +440,7 @@ mod tests {
                 footprintx: 1,
                 footprintz: 1,
                 economy: Default::default(),
+                build: Default::default(),
             }],
             players: vec![PlayerSpec {
                 start: 0,

@@ -23,6 +23,7 @@ pub fn monarch_def(name: &str) -> UnitDef {
         footprintx: 2,
         footprintz: 2,
         economy: Default::default(),
+        build: Default::default(),
     }
 }
 
