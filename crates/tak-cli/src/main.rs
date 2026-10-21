@@ -3,6 +3,7 @@
 
 mod archive_cmds;
 mod report;
+mod sprite_cmd;
 mod survey;
 
 use clap::{Parser, Subcommand};
@@ -60,6 +61,15 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Write every frame of a GAF/TAF/GAO or PCX as PNG. Keep the output outside the repo.
+    DumpSprite {
+        path: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Palette for indexed art (.pal or .pcx path in the archives).
+        #[arg(long)]
+        palette: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -77,6 +87,9 @@ fn main() -> ExitCode {
             Cmd::Census { out } => {
                 let out = out.unwrap_or_else(|| std::env::temp_dir().join("tak-census"));
                 archive_cmds::census(vfs, &out)
+            }
+            Cmd::DumpSprite { path, out, palette } => {
+                sprite_cmd::dump_sprite(vfs, &path, &out, palette.as_deref())
             }
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
