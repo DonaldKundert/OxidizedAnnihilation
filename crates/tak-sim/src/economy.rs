@@ -570,6 +570,33 @@ pub fn credit(world: &mut World, player: PlayerId, amount: Fx) -> Fx {
     Fx::from_raw(a as i32)
 }
 
+/// The first sacred site a sacred-site structure (`yardmap = S`) centred at
+/// `pos` would stand on and claim: its footprint plus the rules'
+/// `site_slack` contains `pos` (the same test income uses), and no other
+/// live sacred-site unit (built or under construction), other than
+/// `ignore`, stands on it. `None` if there is no such site. Placement uses
+/// this to keep lodestones on sacred sites (WP-P, Known from the data:
+/// only lodestones carry `yardmap = S`, and the community guides say a
+/// lodestone is built on a sacred site).
+pub fn free_site_at(world: &World, pos: crate::WorldPos, ignore: Option<UnitId>) -> Option<usize> {
+    let setup = &world.economy.setup;
+    let slack = setup.rules.site_slack;
+    let taken = |s: &SacredSite| {
+        world.units().any(|(id, u)| {
+            Some(id) != ignore
+                && world
+                    .defs()
+                    .get(u.def)
+                    .is_some_and(|d| d.economy.sacred_site)
+                && s.contains(u.pos, slack)
+        })
+    };
+    setup
+        .sacred_sites
+        .iter()
+        .position(|s| s.contains(pos, slack) && !taken(s))
+}
+
 /// A player's mana bar, if the player exists.
 pub fn player(world: &World, player: PlayerId) -> Option<&PlayerEconomy> {
     world.economy.players.get(player.0 as usize)

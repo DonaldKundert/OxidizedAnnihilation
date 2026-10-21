@@ -200,6 +200,8 @@ pub struct World {
     pub economy: crate::economy::EconomyState,
     /// Construction state (WP-O).
     pub construction: crate::construction::ConstructionState,
+    /// Placed features and corpses (WP-P).
+    pub features: crate::features::FeatureState,
 }
 
 impl World {
@@ -236,6 +238,7 @@ impl World {
             combat: Default::default(),
             economy: crate::economy::EconomyState::new(&scenario.economy, scenario.players.len()),
             construction: Default::default(),
+            features: crate::features::FeatureState::new(&scenario.features),
         })
     }
 
@@ -416,6 +419,7 @@ impl World {
         self.combat.hash(h);
         self.economy.hash(h);
         self.construction.hash(h);
+        self.features.hash(h);
     }
 }
 
@@ -449,6 +453,7 @@ mod tests {
                 monarch: UnitDefId(0),
             }],
             economy: Default::default(),
+            features: Default::default(),
         })
         .unwrap()
     }

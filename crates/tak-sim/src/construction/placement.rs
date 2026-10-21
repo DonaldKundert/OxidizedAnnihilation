@@ -113,6 +113,25 @@ pub enum SiteError {
     Terrain,
     /// A structure or a frame already occupies a covered cell.
     Occupied,
+    /// A sacred-site structure (`yardmap = S`, the lodestones) is not on a
+    /// free sacred site (WP-P).
+    NotSacredSite,
+    /// A blocking feature that appeared during the match (a wreck) covers
+    /// a cell (WP-P).
+    Feature,
+}
+
+impl SiteError {
+    /// A short reason for players and logs.
+    pub fn reason(self) -> &'static str {
+        match self {
+            SiteError::Bounds => "too close to the map edge",
+            SiteError::Terrain => "terrain is too steep, too deep or blocked",
+            SiteError::Occupied => "another structure is in the way",
+            SiteError::NotSacredSite => "must be built on a free sacred site",
+            SiteError::Feature => "a wreck is in the way",
+        }
+    }
 }
 
 /// The TA building validator, reduced to what the sim knows: every cell
@@ -121,9 +140,13 @@ pub enum SiteError {
 /// own sacred-site feature), and no structure or frame may occupy it.
 /// Mobile units do not block placement (**Chosen**: TA's ground word also
 /// holds mobile units, but players expect builders to start next to their
-/// army; units standing on a new frame keep their place). Whether an `S`
-/// cell actually holds a sacred site is not checked (**Unknown** until the
-/// map carries feature identities).
+/// army; units standing on a new frame keep their place).
+///
+/// Sacred-site structures (`yardmap = S`: every lodestone) must stand on a
+/// free sacred site ([`crate::economy::free_site_at`]), checked after the
+/// bounds and before terrain (**Believed**: `S` appears only on lodestones,
+/// and players build lodestones on the map's sacred stones). Blocking
+/// wrecks ([`crate::features`]) refuse their cells like map features.
 pub fn check_site(
     world: &World,
     def_id: UnitDefId,
@@ -138,6 +161,9 @@ pub fn check_site(
     if r.x < 1 || r.z < 1 || r.x + r.w >= cols || r.z + r.h >= rows {
         return Err(SiteError::Bounds);
     }
+    if def.economy.sacred_site && crate::economy::free_site_at(world, center, ignore).is_none() {
+        return Err(SiteError::NotSacredSite);
+    }
     for dz in 0..r.h {
         for dx in 0..r.w {
             let c = def.build.yard_cell(dx as u32, dz as u32, def.footprintx);
@@ -150,6 +176,9 @@ pub fn check_site(
             }
             if terrain_of_cell(world.map(), r.x + dx, r.z + dz) & blocks != 0 {
                 return Err(SiteError::Terrain);
+            }
+            if crate::pathfinding::is_obstacle(world, r.x + dx, r.z + dz) {
+                return Err(SiteError::Feature);
             }
         }
     }

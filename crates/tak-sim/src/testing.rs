@@ -53,6 +53,7 @@ pub fn example_scenario(seed: u64, players: usize) -> Scenario {
             })
             .collect(),
         economy: Default::default(),
+        features: Default::default(),
     }
 }
 

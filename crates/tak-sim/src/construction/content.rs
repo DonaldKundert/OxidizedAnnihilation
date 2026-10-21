@@ -1,10 +1,10 @@
 //! Real content for construction: every unit a match can build becomes a
 //! definition, and build menus resolve to definition ids.
 
-use tak_content::{MapDef, Ruleset, RulesetKind};
+use tak_content::Ruleset;
 use tak_vfs::Vfs;
 
-use crate::content::{ContentError, Match, PlayerSetup, load_scripts, unit_def_from_ruleset};
+use crate::content::{ContentError, Match, PlayerSetup, unit_def_from_ruleset};
 use crate::defs::{MAX_UNIT_DEFS, UnitDef};
 use crate::scenario::Scenario;
 use crate::{UnitDefId, defs};
@@ -54,30 +54,20 @@ impl Scenario {
     /// [`add_build_trees`]). Existing definition ids do not change.
     pub fn with_build_trees(mut self, rs: &Ruleset) -> Scenario {
         add_build_trees(rs, &mut self.unit_defs);
+        self.features.resolve_corpses(rs, &self.unit_defs);
         self
     }
 }
 
-/// [`crate::load_match`] plus the players' whole build trees, so `Build`
-/// commands work: base ruleset, the map, one monarch per player, every unit
-/// reachable through build menus, and all their scripts.
+/// The same as [`crate::load_match`], which now loads the players' whole
+/// build trees by default. Kept for existing callers.
 pub fn load_match_with_builds(
     vfs: &Vfs,
     map_name: &str,
     players: &[PlayerSetup],
     seed: u64,
 ) -> Result<Match, ContentError> {
-    let rs = Ruleset::load(vfs, RulesetKind::Base);
-    let map = MapDef::load(vfs, &rs, map_name)?;
-    let mut scenario = Scenario::from_content(&map, &rs, players)?.with_build_trees(&rs);
-    scenario.seed = seed;
-    scenario.validate()?;
-    let scripts = load_scripts(vfs, &rs, &scenario);
-    Ok(Match {
-        map,
-        scenario,
-        scripts,
-    })
+    crate::content::load_match(vfs, map_name, players, seed)
 }
 
 /// Find a definition id by unit name, any case.
