@@ -75,8 +75,7 @@ The minimaps are 8-bit indices with no palette in the file. They match
 `palettes/<kingdom>.pcx` (palette in the last 768 bytes), where `<kingdom>`
 is the OTA's `kingdom=` value: fitting each candidate palette against the
 terrain mosaic picks taros/zhon/aramon/veruna correctly for one map of each.
-`dump-map` does this lookup with a temporary key scan until the typed OTA
-view lands.
+`dump-map` reads it through tak-content's typed OTA view (`OtaDef::load`).
 
 ## What the engine needs
 

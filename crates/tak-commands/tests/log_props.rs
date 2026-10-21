@@ -106,6 +106,7 @@ fn client_command() -> impl Strategy<Value = ClientCommand> {
         Just(ClientCommand::JumpToAlert),
         Just(ClientCommand::CycleIdleBuilder),
         Just(ClientCommand::CenterOnMonarch),
+        Just(ClientCommand::ClearSelection),
     ]
 }
 

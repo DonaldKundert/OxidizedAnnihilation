@@ -85,7 +85,7 @@ fn gamepad_session_produces_expected_commands() {
             },
         ),
         client(ClientCommand::AssignGroup { group: g1 }),
-        Output::Deselect,
+        client(ClientCommand::ClearSelection),
         client(ClientCommand::RecallGroup { group: g1 }),
         // Command wheel, up: Stop.
         sim(
@@ -143,7 +143,7 @@ fn gamepad_session_produces_expected_commands() {
             },
         ),
         // First B closed the build wheel; second B deselects.
-        Output::Deselect,
+        client(ClientCommand::ClearSelection),
     ];
     if out != expected {
         let show = |v: &[Output]| {

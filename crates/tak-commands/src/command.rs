@@ -307,4 +307,6 @@ pub enum ClientCommand {
     CycleIdleBuilder,
     /// Centre the camera on the player's monarch.
     CenterOnMonarch,
+    /// Clear the selection (B / Escape with nothing else to cancel).
+    ClearSelection,
 }

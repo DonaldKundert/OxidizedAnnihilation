@@ -453,7 +453,12 @@ fn chord_modifier_suppresses_its_own_tap() {
         .collect();
     assert_eq!(cmds.len(), 4, "{cmds:#?}");
     assert!(cmds[1].contains("assign_group"));
-    assert_eq!(out[2], Output::Deselect);
+    assert_eq!(
+        out[2],
+        Output::Client {
+            command: ClientCommand::ClearSelection
+        }
+    );
     assert!(cmds[3].contains("recall_group"));
     assert_eq!(m.selection(), &UnitSet::single(uid(2)));
 }

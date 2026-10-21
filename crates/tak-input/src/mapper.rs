@@ -29,9 +29,6 @@ pub enum Output {
         /// The command.
         command: ClientCommand,
     },
-    /// The selection was cleared (B / Escape with nothing else to cancel).
-    /// `ClientCommand` has no variant for this yet.
-    Deselect,
     /// An order for the sim, stamped with the tick the caller passed in.
     Sim {
         /// Caller's tick.
@@ -739,8 +736,7 @@ impl Mapper {
             return;
         }
         if !self.selection.is_empty() {
-            self.selection = UnitSet::new();
-            cx.out.push(Output::Deselect);
+            self.client(ClientCommand::ClearSelection, cx);
         }
     }
 
@@ -863,6 +859,7 @@ impl Mapper {
                 let s = own_units(world, &self.groups[usize::from(group.get())]);
                 self.set_selection(s);
             }
+            ClientCommand::ClearSelection => self.set_selection(UnitSet::new()),
             ClientCommand::JumpToAlert
             | ClientCommand::CycleIdleBuilder
             | ClientCommand::CenterOnMonarch => {}
