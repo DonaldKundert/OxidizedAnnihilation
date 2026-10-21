@@ -10,6 +10,7 @@
 
 pub mod app;
 pub mod cli;
+pub mod feel;
 pub mod fog;
 pub mod game;
 pub mod models;
