@@ -93,26 +93,18 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
 
 ## Controls
 
-Both default `tak-input` profiles are merged into one mapper, so mouse,
-keyboard and a gamepad work together and share one selection.
+The full controller reference (both glyph sets), every feel value, the
+presets, live tuning and session recording are in
+[`controller.md`](controller.md) (WP-S). In short: both default `tak-input`
+profiles are merged into one mapper, so mouse, keyboard and a gamepad work
+together and share one selection; the minimap and HUD buttons take LMB or
+A with the cursor over them; F9 toggles the fog; Pause / Ctrl+P pauses and
+`=` / `-` change the game speed.
 
-| Intent | Mouse / keyboard | Controller |
-|---|---|---|
-| Select / drag-circle select | LMB click / drag (Shift adds) | A tap / A hold (brush) |
-| Context order (move, attack enemy, guard friend, place building) | RMB (Shift queues) | X (RB+X queues) |
-| Build | F1–F8 pick an option of the selected builder, then RMB to place | LB build wheel |
-| Orders wheel | S stop, P patrol, G guard, H/R/F fire state | LT command wheel |
-| Cancel / deselect | Esc | B |
-| Same-type select | Z (Ctrl+Z whole map) | Y / double Y |
-| Control groups | Ctrl+0–9 store, 0–9 recall | RB+D-pad store, D-pad recall |
-| Centre on monarch, idle builder | Home, Period | R3, View hold |
-| Pan | arrow keys | right stick |
-| Cursor | mouse | left stick (virtual cursor, magnetism, RT precision) |
-| Zoom | mouse wheel | |
-| Pause, game speed | Pause (or Ctrl+P), `=` / `-` | |
-| Jump the camera | LMB click / drag on the minimap | A with the cursor on the minimap |
-| HUD buttons (orders, build) | LMB on the button (same as its key) | A with the cursor on the button |
-| Fog of war on/off | F9 (`--no-fog` starts off) | |
+Client flags added by WP-S: `--input-preset`, `--input-profile` (hot
+reloaded, saved by the overlay), `--record-session`, `--ghost`,
+`--ghost-camera`, `--synth-events` / `--synth-ticks`, `--glyphs`,
+`--pad-events` (screenshot mode), `--overlay`.
 
 Game speed changes ticks per wall second only, never tick length.
 
@@ -413,9 +405,11 @@ build Barracks: terrain is too steep, too deep or blocked".
 `--click X,Y` (screenshot mode) clicks the HUD through the same hit test
 and key path, for checking it headless. Gizmos: team rings, selection rings, health
 and build-progress bars, queued-order lines for selected units, the
-cursor, the gamepad brush circle, the footprint of the building being
-placed, projectiles (orange spheres). Radial wheels are drawn as labelled
-slots next to the cursor from `Mapper::wheel()`.
+cursor ground point, the snap target, the gamepad brush circle, the
+footprint of the building being placed, projectiles (orange spheres). The
+cursor itself is the game's own context cursor (`anims/CURSORS.GAF`),
+radial wheels are labelled slots around the cursor, and a hint bar shows
+the controller buttons for the current context (WP-S, `controller.md`).
 
 ## Core changes made for the client
 

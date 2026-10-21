@@ -1027,7 +1027,7 @@ pub(super) fn setup_wheel(mut commands: Commands) {
         hud_text(14.0),
         Node {
             position_type: PositionType::Absolute,
-            width: Val::Px(150.0),
+            width: Val::Px(190.0),
             padding: UiRect::all(Val::Px(4.0)),
             ..default()
         },
