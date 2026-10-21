@@ -19,6 +19,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::Tonemapping;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
+use bevy::ui::UiGlobalTransform;
 use bevy::window::{PrimaryWindow, WindowResolution};
 
 use tak_commands::{ClientCommand, PlayerId, UnitId};
@@ -117,6 +118,8 @@ struct ShotPlan {
     focus: Focus,
     select: Vec<u32>,
     exit_wait: u32,
+    /// Screen points to click on the HUD before each capture.
+    clicks: Vec<(f32, f32)>,
 }
 
 /// Per-model render assets.
@@ -162,6 +165,106 @@ struct HudTop;
 struct HudPanel;
 #[derive(Component)]
 struct HudWheel;
+#[derive(Component)]
+struct HudInfo;
+#[derive(Component)]
+struct HudStatus;
+#[derive(Component)]
+struct HudAlert;
+
+/// Width of the bottom-left panel.
+const HUD_PANEL_W: f32 = 400.0;
+
+/// A bar in the selection panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BarKind {
+    Health,
+    Mana,
+    Build,
+}
+
+impl BarKind {
+    fn label(self) -> &'static str {
+        match self {
+            BarKind::Health => "Health",
+            BarKind::Mana => "Mana",
+            BarKind::Build => "Built",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            BarKind::Health => Color::srgb(0.2, 0.85, 0.2),
+            BarKind::Mana => Color::srgb(0.3, 0.5, 1.0),
+            BarKind::Build => Color::srgb(0.95, 0.75, 0.25),
+        }
+    }
+}
+
+#[derive(Component)]
+struct HudBar(BarKind);
+#[derive(Component)]
+struct HudBarFill(BarKind);
+/// Under the health fill: what a frame's progress has earned.
+#[derive(Component)]
+struct HudBarEarned;
+#[derive(Component)]
+struct HudBarText(BarKind);
+
+/// A clickable HUD button: it presses the same key as the keyboard
+/// binding, so it does exactly what the key (or wheel slot) does.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonKind {
+    /// `ORDER_BUTTONS[i]`.
+    Order(usize),
+    /// Build option `i` (key `f<i+1>`).
+    Build(usize),
+}
+
+#[derive(Component)]
+struct HudButtonLabel;
+
+/// Order buttons: label and the mouse/keyboard profile's key.
+const ORDER_BUTTONS: [(&str, &str); 7] = [
+    ("Stop", "s"),
+    ("Patrol", "p"),
+    ("Guard", "g"),
+    ("Spell", "c"),
+    ("Hold", "h"),
+    ("Return", "r"),
+    ("Fire", "f"),
+];
+
+/// Build buttons (the profile binds F1-F8).
+const BUILD_BUTTONS: usize = 8;
+
+impl ButtonKind {
+    fn key(self) -> String {
+        match self {
+            ButtonKind::Order(i) => ORDER_BUTTONS[i].1.to_string(),
+            ButtonKind::Build(i) => format!("f{}", i + 1),
+        }
+    }
+}
+
+fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
+    let b = commands
+        .spawn((
+            Node {
+                width: Val::Px(width),
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.16, 0.14, 0.11)),
+            BorderColor::all(Color::srgb(0.55, 0.48, 0.3)),
+            Visibility::Hidden,
+            kind,
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((Text::new(""), hud_text(13.0), HudButtonLabel, ChildOf(b)));
+}
 
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -286,6 +389,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 showcase_system,
                 fog_system,
                 hud_system,
+                hud_widgets_system,
                 minimap_system,
                 gizmo_system,
                 fps_report,
@@ -307,6 +411,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             focus,
             select: args.select.clone(),
             exit_wait: 0,
+            clicks: args
+                .click
+                .chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| (c[0], c[1]))
+                .collect(),
         });
     } else {
         app.insert_resource(StartFocus(focus));
@@ -500,18 +610,122 @@ fn setup_hud(mut commands: Commands) {
         },
         HudTop,
     ));
+    let panel = commands
+        .spawn((
+            bg,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(8.0),
+                bottom: Val::Px(8.0),
+                width: Val::Px(HUD_PANEL_W),
+                padding: UiRect::all(Val::Px(6.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            HudPanel,
+        ))
+        .id();
+    commands.spawn((Text::new(""), hud_text(15.0), HudInfo, ChildOf(panel)));
+    for kind in [BarKind::Health, BarKind::Mana, BarKind::Build] {
+        let row = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                HudBar(kind),
+                ChildOf(panel),
+            ))
+            .id();
+        commands.spawn((
+            Text::new(kind.label()),
+            hud_text(13.0),
+            Node {
+                width: Val::Px(44.0),
+                ..default()
+            },
+            ChildOf(row),
+        ));
+        let track = commands
+            .spawn((
+                Node {
+                    width: Val::Px(180.0),
+                    height: Val::Px(9.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.18, 0.05, 0.05)),
+                ChildOf(row),
+            ))
+            .id();
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(kind.color().with_alpha(0.45)),
+            HudBarEarned,
+            ChildOf(track),
+        ));
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(kind.color()),
+            HudBarFill(kind),
+            ChildOf(track),
+        ));
+        commands.spawn((
+            Text::new(""),
+            hud_text(13.0),
+            HudBarText(kind),
+            ChildOf(row),
+        ));
+    }
+    let grid = |commands: &mut Commands, panel: Entity| {
+        commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(4.0),
+                    ..default()
+                },
+                ChildOf(panel),
+            ))
+            .id()
+    };
+    let orders = grid(&mut commands, panel);
+    for i in 0..ORDER_BUTTONS.len() {
+        spawn_button(&mut commands, orders, ButtonKind::Order(i), 92.0);
+    }
+    let builds = grid(&mut commands, panel);
+    for i in 0..BUILD_BUTTONS {
+        spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
+    }
+    commands.spawn((Text::new(""), hud_text(13.0), HudStatus, ChildOf(panel)));
     commands.spawn((
         Text::new(""),
-        hud_text(15.0),
-        bg,
+        hud_text(16.0).0,
+        TextColor(Color::srgb(1.0, 0.45, 0.35)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
         Node {
             position_type: PositionType::Absolute,
+            top: Val::Px(40.0),
             left: Val::Px(8.0),
-            bottom: Val::Px(8.0),
             padding: UiRect::all(Val::Px(4.0)),
             ..default()
         },
-        HudPanel,
+        Visibility::Hidden,
+        HudAlert,
     ));
     commands.spawn((
         Text::new(""),
@@ -535,6 +749,13 @@ fn shot_driver(
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
     mut exit: MessageWriter<AppExit>,
+    hud_buttons: Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
 ) {
     let Some(mut plan) = plan else { return };
     sim.paused = true;
@@ -606,6 +827,31 @@ fn shot_driver(
         );
     }
     plan.wait += 1;
+    // `--click`: HUD clicks once the layout exists, through the same hit
+    // test and key path as a real click.
+    if plan.wait == 10 {
+        let clicks = plan.clicks.clone();
+        for (x, y) in clicks {
+            let hit = hud_hit(x, y, &hud_buttons, &hud_panel);
+            eprintln!("  click ({x}, {y}): {hit:?}");
+            if let Some(Some(k)) = hit {
+                let tick = sim.session.tick();
+                let view = SimView {
+                    world: sim.session.sim.world(),
+                    local: sim.session.local,
+                };
+                for kind in [
+                    EventKind::KeyDown { key: Key(k.key()) },
+                    EventKind::KeyUp { key: Key(k.key()) },
+                ] {
+                    let outs = input
+                        .mapper
+                        .handle(&InputEvent::new(2_000_000, kind), &view, tick);
+                    eprintln!("    -> {outs:?}");
+                }
+            }
+        }
+    }
     // Give assets a few frames to upload before capturing.
     if plan.wait >= if plan.requested == 0 { 150 } else { 20 } {
         let saved = plan.saved.clone();
@@ -779,6 +1025,13 @@ fn input_system(
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
     mut minimap: ResMut<MinimapState>,
+    hud_buttons: Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
 ) {
     if let Ok(win) = windows.single() {
         cam.geom.size = [win.width(), win.height()];
@@ -819,9 +1072,26 @@ fn input_system(
             minimap.mouse_drag = false;
         }
     }
-    let swallow_left =
-        minimap.mouse_drag || mouse.just_released(MouseButton::Left) && minimap.swallow_release;
-    minimap.swallow_release = minimap.mouse_drag;
+    // HUD panel and buttons: a click there presses the button's key (the
+    // same action as the keyboard) and never reaches the world.
+    let mut pressed_keys: Vec<String> = Vec::new();
+    if let Some(pos) = mouse_pos
+        && mouse.just_pressed(MouseButton::Left)
+        && !minimap.mouse_drag
+        && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
+    {
+        minimap.ui_held = true;
+        if let Some(k) = hit {
+            pressed_keys.push(k.key());
+        }
+    }
+    let swallow_left = minimap.mouse_drag
+        || minimap.ui_held
+        || mouse.just_released(MouseButton::Left) && minimap.swallow_release;
+    minimap.swallow_release = minimap.mouse_drag || minimap.ui_held;
+    if !mouse.pressed(MouseButton::Left) {
+        minimap.ui_held = false;
+    }
     for (mb, b) in [
         (MouseButton::Left, InButton::MouseLeft),
         (MouseButton::Right, InButton::MouseRight),
@@ -861,6 +1131,14 @@ fn input_system(
             cam.geom.target = mg.target_at(csp[0], csp[1]);
             minimap.pad_swallow = true;
         }
+        if pad.just_pressed(GamepadButton::South)
+            && let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel)
+        {
+            minimap.pad_swallow = true;
+            if let Some(k) = hit {
+                pressed_keys.push(k.key());
+            }
+        }
         if minimap.pad_swallow {
             swallow_a = true;
             if pad.just_released(GamepadButton::South) || !pad.pressed(GamepadButton::South) {
@@ -892,6 +1170,12 @@ fn input_system(
                 events.push(EventKind::Axis { axis, value: q });
             }
         }
+    }
+    for k in pressed_keys {
+        events.push(EventKind::KeyDown {
+            key: Key(k.clone()),
+        });
+        events.push(EventKind::KeyUp { key: Key(k) });
     }
     events.push(EventKind::Frame);
 
@@ -2451,6 +2735,8 @@ struct MinimapState {
     mouse_drag: bool,
     swallow_release: bool,
     pad_swallow: bool,
+    /// The left button went down on the HUD panel.
+    ui_held: bool,
 }
 
 impl MinimapState {
@@ -2649,11 +2935,8 @@ fn hud_system(
     cam: Res<CamState>,
     ground: Res<Ground>,
     mut top: Query<&mut Text, (With<HudTop>, Without<HudPanel>, Without<HudWheel>)>,
-    mut panel: Query<&mut Text, (With<HudPanel>, Without<HudTop>, Without<HudWheel>)>,
-    mut wheel_q: Query<
-        (&mut Text, &mut Node),
-        (With<HudWheel>, Without<HudTop>, Without<HudPanel>),
-    >,
+    mut panel: Query<&mut Text, (With<HudInfo>, Without<HudTop>, Without<HudWheel>)>,
+    mut wheel_q: Query<(&mut Text, &mut Node), (With<HudWheel>, Without<HudTop>, Without<HudInfo>)>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
@@ -2672,12 +2955,12 @@ fn hud_system(
             }
         );
         for p in w.players() {
-            if let Some(e) = tak_sim::economy::player(w, p.id) {
-                let side = p
-                    .monarch
-                    .and_then(|m| w.unit(m))
-                    .and_then(|u| s.def(u.def))
-                    .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
+            let side = s
+                .def(p.monarch_def)
+                .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
+            if player_defeated(w, p) {
+                line.push_str(&format!("   P{} {}: DEFEATED", p.id.0, side));
+            } else if let Some(e) = tak_sim::economy::player(w, p.id) {
                 line.push_str(&format!(
                     "   P{} {}: mana {:.0}/{:.0} (+{:.1}/s)",
                     p.id.0,
@@ -2691,7 +2974,6 @@ fn hud_system(
         t.0 = line;
     }
     if let Ok(mut t) = panel.single_mut() {
-        let mut out = String::new();
         let sel: Vec<UnitId> = input
             .mapper
             .selection()
@@ -2699,56 +2981,27 @@ fn hud_system(
             .copied()
             .filter(|id| w.unit(*id).is_some())
             .collect();
-        if let Some(&first) = sel.first()
-            && let Some(u) = w.unit(first)
-        {
-            let d = s.def(u.def);
-            out.push_str(&format!(
-                "{} ({})   HP {}/{}   {}{}",
-                d.map_or("?", |d| d.display.as_str()),
-                d.map_or("?", |d| d.unitname.as_str()),
-                u.combat.health,
-                u.combat.max_health,
-                if u.orders.is_empty() {
-                    "idle".to_string()
-                } else {
-                    format!("{} orders", u.orders.len())
-                },
-                if sel.len() > 1 {
-                    format!("   (+{} more)", sel.len() - 1)
-                } else {
-                    String::new()
-                }
-            ));
-            if u.build.percent_left() > 0 {
-                out.push_str(&format!(
-                    "\nunder construction: {}%",
-                    100 - u.build.percent_left()
-                ));
+        t.0 = match sel.first().and_then(|&id| w.unit(id)) {
+            Some(u) => {
+                let d = s.def(u.def);
+                format!(
+                    "{} ({})   {}{}",
+                    d.map_or("?", |d| d.display.as_str()),
+                    d.map_or("?", |d| d.unitname.as_str()),
+                    if u.orders.is_empty() {
+                        "idle".to_string()
+                    } else {
+                        format!("{} orders", u.orders.len())
+                    },
+                    if sel.len() > 1 {
+                        format!("   (+{} more)", sel.len() - 1)
+                    } else {
+                        String::new()
+                    }
+                )
             }
-            let opts = w
-                .defs()
-                .get(u.def)
-                .map(|d| d.build.canbuild.clone())
-                .unwrap_or_default();
-            if !opts.is_empty() {
-                out.push_str("\nBuild (F1-F8, LB wheel):");
-                let mode = input.mapper.mode();
-                for (i, o) in opts.iter().enumerate() {
-                    let name = s.def(*o).map_or("?", |d| d.display.as_str());
-                    let cost = w.defs().get(*o).map_or(0, |d| d.build.buildcost);
-                    let mark = if mode == Mode::Build(*o) { ">" } else { " " };
-                    out.push_str(&format!("\n{mark}F{} {name} ({cost})", i + 1));
-                }
-            }
-        } else {
-            out.push_str("Nothing selected. LMB / A: select   RMB / X: order   arrows / right stick: pan   wheel: zoom");
-        }
-        match input.mapper.mode() {
-            Mode::None => {}
-            m => out.push_str(&format!("\nmode: {m:?}")),
-        }
-        t.0 = out;
+            None => "Nothing selected. LMB / A: select   RMB / X: order\narrows / right stick: pan   wheel: zoom".to_string(),
+        };
     }
     if let Ok((mut t, mut node)) = wheel_q.single_mut() {
         let mut text = String::new();
@@ -2780,6 +3033,255 @@ fn hud_system(
         }
         t.0 = text;
     }
+}
+
+/// A player is shown as defeated once its monarch is dead (**Believed**:
+/// TA:K's default game ends for a player with its monarch) or it has no
+/// units left. Display only; the sim has no defeat rule yet.
+fn player_defeated(w: &tak_sim::World, p: &tak_sim::Player) -> bool {
+    let monarch_alive = p
+        .monarch
+        .and_then(|m| w.unit(m))
+        .is_some_and(|u| !u.combat.is_dying());
+    let any = w.units().any(|(_, u)| u.owner == p.id);
+    (p.monarch.is_some() && !monarch_alive) || (!any && w.tick().0 > 0)
+}
+
+/// Selection bars, buttons, the status line and the build-rejection alert.
+fn hud_widgets_system(
+    sim: NonSend<SimRes>,
+    input: Res<InputRes>,
+    mut bars: Query<
+        (&HudBar, &mut Node),
+        (
+            Without<HudBarFill>,
+            Without<HudBarEarned>,
+            Without<ButtonKind>,
+        ),
+    >,
+    mut fills: Query<
+        (&HudBarFill, &mut Node),
+        (Without<HudBar>, Without<HudBarEarned>, Without<ButtonKind>),
+    >,
+    mut earned: Query<
+        &mut Node,
+        (
+            With<HudBarEarned>,
+            Without<HudBar>,
+            Without<HudBarFill>,
+            Without<ButtonKind>,
+        ),
+    >,
+    mut texts: Query<
+        (&mut Text, Option<&HudBarText>, Option<&HudStatus>),
+        (Without<HudButtonLabel>, Without<HudAlert>),
+    >,
+    mut buttons: Query<
+        (
+            &ButtonKind,
+            &mut Visibility,
+            &mut Node,
+            &mut BackgroundColor,
+            &Children,
+        ),
+        Without<HudAlert>,
+    >,
+    mut labels: Query<&mut Text, (With<HudButtonLabel>, Without<HudAlert>)>,
+    mut alert: Query<(&mut Text, &mut Visibility), (With<HudAlert>, Without<ButtonKind>)>,
+) {
+    let s = &sim.session;
+    let w = s.sim.world();
+    let unit = input
+        .mapper
+        .selection()
+        .iter()
+        .copied()
+        .find_map(|id| w.unit(id).map(|u| (id, u)));
+    // Bars: (fraction, earned fraction, text) per kind, None = hidden.
+    let bar = |k: BarKind| -> Option<(f32, f32, String)> {
+        let (id, u) = unit?;
+        match k {
+            BarKind::Health => {
+                let max = u.combat.max_health.max(1);
+                let (d, t) = u.build.built_fraction();
+                let earned = max - tak_sim::combat::frame_health(max, t - d, t);
+                Some((
+                    u.combat.health as f32 / max as f32,
+                    earned as f32 / max as f32,
+                    format!("{}/{}", u.combat.health, u.combat.max_health),
+                ))
+            }
+            BarKind::Mana => {
+                let m = tak_sim::economy::unit_mana(w, id)?;
+                let (a, b) = (f(m.mana), f(m.max).max(1.0));
+                Some((a / b, 0.0, format!("{a:.0}/{b:.0}")))
+            }
+            BarKind::Build => {
+                let left = u.build.percent_left();
+                (left > 0).then(|| ((100 - left) as f32 / 100.0, 0.0, format!("{}%", 100 - left)))
+            }
+        }
+    };
+    let vals: Vec<(BarKind, Option<(f32, f32, String)>)> =
+        [BarKind::Health, BarKind::Mana, BarKind::Build]
+            .into_iter()
+            .map(|k| (k, bar(k)))
+            .collect();
+    let get = |k: BarKind| {
+        vals.iter()
+            .find(|(x, _)| *x == k)
+            .and_then(|(_, v)| v.clone())
+    };
+    for (b, mut n) in &mut bars {
+        let want = if get(b.0).is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if n.display != want {
+            n.display = want;
+        }
+    }
+    for (b, mut n) in &mut fills {
+        if let Some((frac, _, _)) = get(b.0) {
+            n.width = Val::Percent(frac.clamp(0.0, 1.0) * 100.0);
+        }
+    }
+    if let Some((_, e, _)) = get(BarKind::Health) {
+        for mut n in &mut earned {
+            n.width = Val::Percent(e.clamp(0.0, 1.0) * 100.0);
+        }
+    }
+    let mode = input.mapper.mode();
+    for (mut t, bt, st) in &mut texts {
+        if let Some(bt) = bt {
+            t.0 = get(bt.0).map(|v| v.2).unwrap_or_default();
+        } else if st.is_some() {
+            t.0 = match mode {
+                Mode::None => String::new(),
+                Mode::Build(d) => format!(
+                    "Place {}: RMB / X on the map, Esc / B cancels",
+                    s.def(d).map_or("?", |d| d.display.as_str())
+                ),
+                m => format!("mode: {m:?}"),
+            };
+        }
+    }
+    // Buttons: orders for own units, build options for own builders.
+    let own = unit.filter(|(_, u)| u.owner == s.local);
+    let opts: Vec<tak_commands::UnitDefId> = own
+        .and_then(|(_, u)| w.defs().get(u.def))
+        .map(|d| d.build.canbuild.clone())
+        .unwrap_or_default();
+    for (kind, mut vis, mut node, mut bg, children) in &mut buttons {
+        let (label, shown, active) = match *kind {
+            ButtonKind::Order(i) => {
+                let fs = own.map(|(_, u)| u.fire_state);
+                let active = match i {
+                    1 => mode == Mode::Patrol,
+                    2 => mode == Mode::Guard,
+                    4 => fs == Some(tak_commands::FireState::HoldFire),
+                    5 => fs == Some(tak_commands::FireState::ReturnFire),
+                    6 => fs == Some(tak_commands::FireState::FireAtWill),
+                    _ => false,
+                };
+                (
+                    format!(
+                        "{} [{}]",
+                        ORDER_BUTTONS[i].0,
+                        ORDER_BUTTONS[i].1.to_ascii_uppercase()
+                    ),
+                    own.is_some(),
+                    active,
+                )
+            }
+            ButtonKind::Build(i) => match opts.get(i) {
+                Some(&o) => (
+                    format!(
+                        "F{} {} ({})",
+                        i + 1,
+                        s.def(o).map_or("?", |d| d.display.as_str()),
+                        w.defs().get(o).map_or(0, |d| d.build.buildcost)
+                    ),
+                    true,
+                    mode == Mode::Build(o),
+                ),
+                None => (String::new(), false, false),
+            },
+        };
+        let want = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+        // Hidden buttons take no room either.
+        let disp = if shown { Display::Flex } else { Display::None };
+        if node.display != disp {
+            node.display = disp;
+        }
+        bg.0 = if active {
+            Color::srgb(0.45, 0.36, 0.12)
+        } else {
+            Color::srgb(0.16, 0.14, 0.11)
+        };
+        for c in children.iter() {
+            if let Ok(mut t) = labels.get_mut(c)
+                && t.0 != label
+            {
+                t.0 = label.clone();
+            }
+        }
+    }
+    // The local player's latest refused build, for 5 s.
+    if let Ok((mut t, mut v)) = alert.single_mut() {
+        let now = w.tick().0;
+        let r = w
+            .construction
+            .rejections
+            .iter()
+            .rev()
+            .find(|r| r.player == s.local && now.saturating_sub(r.tick.0) < 150);
+        match r {
+            Some(r) => {
+                t.0 = format!(
+                    "Cannot build {}: {}",
+                    s.def(r.def).map_or("?", |d| d.display.as_str()),
+                    r.reason.reason()
+                );
+                *v = Visibility::Inherited;
+            }
+            None => *v = Visibility::Hidden,
+        }
+    }
+}
+
+/// What a click at a screen point hits on the HUD: a button, or just the
+/// panel (swallowed so it does not select or order behind it).
+fn hud_hit(
+    sx: f32,
+    sy: f32,
+    buttons: &Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    panel: &Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+) -> Option<Option<ButtonKind>> {
+    let inside = |n: &ComputedNode, t: &UiGlobalTransform| {
+        let c = t.translation;
+        let h = n.size / 2.0;
+        sx >= c.x - h.x && sx <= c.x + h.x && sy >= c.y - h.y && sy <= c.y + h.y
+    };
+    for (k, n, t, v) in buttons {
+        if v.get() && inside(n, t) {
+            return Some(Some(*k));
+        }
+    }
+    panel.iter().any(|(n, t)| inside(n, t)).then_some(None)
 }
 
 fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color: Color) {

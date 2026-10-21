@@ -382,10 +382,29 @@ sim's job.
 
 ### HUD and overlays
 
-Top bar: map, tick, pause/speed, every player's mana, storage and income.
-Bottom-left panel: the first selected unit's name, def, health, order
-count, construction progress, and its build menu with costs (the option
-in placement mode is marked). Gizmos: team rings, selection rings, health
+Top bar: map, tick, pause/speed, every player's mana, storage and income;
+a player whose monarch is dead or who has no units left shows as
+`DEFEATED` (**Believed**: TA:K's default game end is the monarch's death;
+display only, the sim has no defeat rule). The side is taken from the
+player's monarch definition, so it survives the monarch.
+
+Bottom-left panel (WP-R): the first selected unit's name, def and order
+count; bars for health (for a frame, a dim segment under it shows the
+health its progress has earned), the unit's own mana pool
+(`economy::unit_mana`, spellcasters) and build progress (frames); then
+clickable buttons: orders (Stop, Patrol, Guard, Spell, Hold / Return /
+Fire, the active fire state and order mode highlighted) for own units,
+and the build menu (F1–F8 with costs, the option in placement mode
+highlighted) for own builders. A button presses the key the
+mouse/keyboard profile binds to that action, so it does exactly what the
+key and the wheel slot do. Clicks on the panel never select or order
+behind it; with a gamepad, A with the virtual cursor over a button does
+the same. Below: the placement hint while placing. A red line under the
+top bar shows the local player's latest refused build for 5 s
+(`ConstructionState::rejections`, `SiteError::reason()`), e.g. "Cannot
+build Barracks: terrain is too steep, too deep or blocked".
+`--click X,Y` (screenshot mode) clicks the HUD through the same hit test
+and key path, for checking it headless. Gizmos: team rings, selection rings, health
 and build-progress bars, queued-order lines for selected units, the
 cursor, the gamepad brush circle, the footprint of the building being
 placed, projectiles (orange spheres). Radial wheels are drawn as labelled
@@ -407,9 +426,7 @@ slots next to the cursor from `Mapper::wheel()`.
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No audio, no in-HUD click targets (build menu
-  is keyboard/wheel), no spell UI beyond the cast mode.
-- Rejected build placements (`ConstructionState.rejections`) are not yet
-  shown in the HUD.
+- No audio, no spell UI beyond the cast mode; build buttons stop at F8
+  (the profile's bindings).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies around tick 1,700. Behaviour is the sim's.

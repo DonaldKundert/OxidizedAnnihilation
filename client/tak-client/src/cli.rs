@@ -64,6 +64,10 @@ pub struct Args {
     /// Start with the visual fog of war off (F9 toggles it in play).
     #[arg(long)]
     pub no_fog: bool,
+    /// Screenshot mode: click the HUD at these screen points (`x,y,x,y`)
+    /// before each capture, through the real hit test and key path.
+    #[arg(long, value_delimiter = ',')]
+    pub click: Vec<f32>,
 }
 
 impl Args {
