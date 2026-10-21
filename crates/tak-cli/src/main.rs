@@ -3,6 +3,7 @@
 
 mod archive_cmds;
 mod disasm_cmd;
+mod map_cmd;
 mod model_cmd;
 mod report;
 mod sprite_cmd;
@@ -85,6 +86,20 @@ enum Cmd {
         #[arg(long)]
         palette: Option<String>,
     },
+    /// Write PNGs of a map's heights, cells, minimaps and terrain mosaic.
+    DumpMap {
+        /// VFS path to a .tnt, e.g. "kmap/Adamantine Gate.tnt".
+        path: String,
+        /// Output folder. Keep it outside the repo.
+        #[arg(long)]
+        out: PathBuf,
+        /// VFS path of a .pcx/.pal for the minimaps (default: from the .ota kingdom).
+        #[arg(long)]
+        palette: Option<String>,
+        /// Mosaic pixels per tile cell (0 skips the mosaic).
+        #[arg(long, default_value_t = 16)]
+        piece: u32,
+    },
 }
 
 fn main() -> ExitCode {
@@ -108,6 +123,12 @@ fn main() -> ExitCode {
             Cmd::DumpSprite { path, out, palette } => {
                 sprite_cmd::dump_sprite(vfs, &path, &out, palette.as_deref())
             }
+            Cmd::DumpMap {
+                path,
+                out,
+                palette,
+                piece,
+            } => map_cmd::dump_map(vfs, &path, &out, palette.as_deref(), piece),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
