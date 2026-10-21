@@ -132,6 +132,12 @@ pub enum EventKind {
         /// Pixels from the top edge.
         y: i32,
     },
+    /// Mouse wheel: thousandths of a notch, positive away from the user
+    /// (zoom in).
+    Scroll {
+        /// Notches times 1000.
+        milli: i32,
+    },
     /// A frame boundary: time passed with no other input.
     Frame,
 }

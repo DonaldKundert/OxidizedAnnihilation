@@ -65,6 +65,7 @@ impl UnitSpec {
             def: UnitDefId(self.def),
             selectable: self.selectable,
             builder: self.builder,
+            under_construction: false,
         }
     }
 }
@@ -124,4 +125,12 @@ pub fn uid(i: u32) -> UnitId {
 
 pub fn pos(x: i32, y: i32) -> Vec2 {
     Vec2::from_ints(x, y)
+}
+
+/// The default mouse/keyboard profile with the WP-J tuning (the WP-J tests
+/// pin the original feel values).
+pub fn wp_j_mk() -> tak_input::Profile {
+    let mut p = tak_input::Profile::default_mouse_keyboard();
+    p.tuning = tak_input::Tuning::wp_j();
+    p
 }

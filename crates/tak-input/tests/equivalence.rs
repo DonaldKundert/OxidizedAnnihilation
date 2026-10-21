@@ -390,8 +390,8 @@ fn drive(pad: &mut Rig<'_>, mk: &mut Rig<'_>, intent: &Intent) {
 
 fn check(intents: &[Intent]) -> Vec<SimCommand> {
     let w = world();
-    let mut pad = Rig::new(Profile::default_controller(), &w);
-    let mut mk = Rig::new(Profile::default_mouse_keyboard(), &w);
+    let mut pad = Rig::new(Profile::wp_j_controller(), &w);
+    let mut mk = Rig::new(common::wp_j_mk(), &w);
     for (n, i) in intents.iter().enumerate() {
         drive(&mut pad, &mut mk, i);
         assert_eq!(

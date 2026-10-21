@@ -462,6 +462,47 @@
         "type": "assign_group",
         "group": 9
       }
+    },
+    {
+      "input": {
+        "key": "q"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "select_all",
+        "scope": "on_screen"
+      }
+    },
+    {
+      "input": {
+        "key": "q"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "select_all",
+        "scope": "map"
+      }
+    },
+    {
+      "input": {
+        "key": "v"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "follow_selection"
+      }
+    },
+    {
+      "input": {
+        "key": "f11"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "toggle_overlay"
+      }
     }
   ]
 }

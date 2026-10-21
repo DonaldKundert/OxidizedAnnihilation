@@ -41,7 +41,7 @@ fn gamepad_session_produces_expected_commands() {
     let fixture: Fixture =
         serde_json::from_str(include_str!("fixtures/gamepad_session.json")).expect("fixture");
     let world = TestWorld::new(fixture.world);
-    let mut mapper = Mapper::new(Profile::default_controller());
+    let mut mapper = Mapper::new(Profile::wp_j_controller());
     let out = run(&mut mapper, &world, &fixture.events);
 
     let g1 = ControlGroup::new(1).unwrap();

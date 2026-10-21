@@ -30,12 +30,16 @@ use tak_input::{
 use tak_vfs::Vfs;
 
 use crate::cli::{Args, Focus, parse_focus};
+
+#[path = "controls.rs"]
+mod controls;
 use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
 use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
 use crate::view::{MinimapGeom, SimView, ViewGeom, f, pick_radius};
+use controls::Feel;
 
 /// Seconds per sim tick.
 const TICK_DT: f32 = 1.0 / 30.0;
@@ -120,6 +124,8 @@ struct ShotPlan {
     exit_wait: u32,
     /// Screen points to click on the HUD before each capture.
     clicks: Vec<(f32, f32)>,
+    /// Gamepad events fed to the mapper before each capture.
+    pad_events: Vec<InputEvent>,
 }
 
 /// Per-model render assets.
@@ -163,8 +169,6 @@ struct FeatureEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
 struct HudTop;
 #[derive(Component)]
 struct HudPanel;
-#[derive(Component)]
-struct HudWheel;
 #[derive(Component)]
 struct HudInfo;
 #[derive(Component)]
@@ -269,6 +273,31 @@ fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = crate::game::open_vfs(&args.data)?;
+    let (profile, profile_mtime) =
+        crate::feel::initial_profile(&args.input_preset, args.input_profile.as_deref())?;
+    if let Some(ev_path) = &args.synth_events {
+        return synth(&args, &vfs, profile, ev_path);
+    }
+    let mut ghost = None;
+    let mut args = args;
+    if let Some(gp) = &args.ghost {
+        let rec = tak_input::Recording::from_json(&std::fs::read_to_string(gp)?)
+            .map_err(|e| format!("{}: {e}", gp.display()))?;
+        let gm = crate::feel::ghost_match(&rec)?;
+        eprintln!(
+            "ghost: {} on {} ({}), {} orders, {} ticks, final hash {:?}",
+            gp.display(),
+            gm.map,
+            gm.players,
+            gm.log.len(),
+            gm.ticks,
+            gm.final_hash
+        );
+        args.map = gm.map.clone();
+        args.players = gm.players.clone();
+        args.world_seed = gm.seed;
+        ghost = Some((rec, gm.log));
+    }
     let log = match &args.log {
         Some(p) => tak_commands::CommandLog::from_json(&std::fs::read_to_string(p)?)
             .map_err(|e| format!("{}: {e}", p.display()))?,
@@ -278,6 +307,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let mut session = Session::load(&vfs, &args.map, &args.players, args.world_seed, log)?;
     if args.demo {
         session.log = crate::game::demo_log(&session);
+    }
+    if let Some((_, log)) = &ghost {
+        session.log = log.clone();
     }
     let ground = terrain::load(&vfs, &args.map, session.map.palette.as_deref())?;
     let tex = TextureIndex::load(&vfs);
@@ -297,14 +329,20 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = args.window_size();
     let focus = parse_focus(&args.focus).ok_or("bad --focus")?;
     let snap = session.snapshot();
-    let mut profile = Profile::default_controller();
-    let mk = Profile::default_mouse_keyboard();
-    profile.name = "controller+mouse_keyboard".into();
-    profile.bindings.extend(mk.bindings);
     profile
         .validate()
         .map_err(|e| format!("input profile: {e}"))?;
     let mapper = Mapper::new(profile);
+    let mut feel = Feel::new(&args, profile_mtime);
+    if feel.record_path.is_some() {
+        feel.recorder = Some(tak_input::Recorder::new(serde_json::Value::Null, &mapper));
+    }
+    feel.ghost = ghost.map(|(r, _)| r);
+    let pad_events: Vec<InputEvent> = match &args.pad_events {
+        Some(p) => serde_json::from_str(&std::fs::read_to_string(p)?)
+            .map_err(|e| format!("{}: {e}", p.display()))?,
+        None => Vec::new(),
+    };
 
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -352,6 +390,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             last_axes: BTreeMap::new(),
             last_pointer: None,
         })
+        .insert_resource(feel)
         .init_resource::<ModelCache>()
         .init_resource::<UnitEntities>()
         .init_resource::<FeatureEntities>()
@@ -372,27 +411,42 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 spawn_scenery,
                 setup_minimap,
                 setup_fog,
+                controls::setup_overlay,
+                controls::setup_cursors,
+                controls::setup_hints,
+                controls::setup_wheel,
             )
                 .chain(),
         )
         .add_systems(
             Update,
             (
-                shot_driver,
-                input_system,
-                sim_driver,
-                camera_system,
-                units_system,
-                features_system,
-                effects_system,
-                animate_sprites,
-                showcase_system,
-                fog_system,
-                hud_system,
-                hud_widgets_system,
-                minimap_system,
-                gizmo_system,
-                fps_report,
+                (
+                    shot_driver,
+                    controls::hot_reload_system,
+                    controls::overlay_input_system,
+                    input_system,
+                    sim_driver,
+                    camera_system,
+                    units_system,
+                    features_system,
+                    effects_system,
+                    animate_sprites,
+                    showcase_system,
+                    fog_system,
+                ),
+                (
+                    hud_system,
+                    hud_widgets_system,
+                    minimap_system,
+                    gizmo_system,
+                    controls::cursor_system,
+                    controls::hints_system,
+                    controls::wheel_system,
+                    controls::overlay_draw_system,
+                    controls::rumble_system,
+                    fps_report,
+                ),
             )
                 .chain(),
         );
@@ -417,6 +471,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|c| c.len() == 2)
                 .map(|c| (c[0], c[1]))
                 .collect(),
+            pad_events,
         });
     } else {
         app.insert_resource(StartFocus(focus));
@@ -432,6 +487,45 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     })
     .add_systems(Last, write_outputs);
     app.run();
+    Ok(())
+}
+
+/// `--synth-events`: drive the match headless with scripted gamepad events
+/// through the real mapper and write a session recording.
+fn synth(
+    args: &Args,
+    vfs: &Vfs,
+    profile: Profile,
+    events: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let evs: Vec<InputEvent> = serde_json::from_str(&std::fs::read_to_string(events)?)
+        .map_err(|e| format!("{}: {e}", events.display()))?;
+    let mut session = Session::load(
+        vfs,
+        &args.map,
+        &args.players,
+        args.world_seed,
+        tak_commands::CommandLog::new(),
+    )?;
+    let mut mapper = Mapper::new(profile);
+    let rec = crate::feel::synth_recording(
+        &mut session,
+        &mut mapper,
+        &evs,
+        args.synth_ticks,
+        &args.players,
+        args.world_seed,
+    );
+    let out = args.record_session.as_ref().ok_or("--record-session")?;
+    std::fs::write(out, rec.to_json())?;
+    eprintln!(
+        "wrote {} ({} frames, {} orders, final hash {:016x}): {:?}",
+        out.display(),
+        rec.frames.len(),
+        session.log.len(),
+        session.last_hash().unwrap_or(0),
+        rec.summary()
+    );
     Ok(())
 }
 
@@ -454,6 +548,7 @@ fn write_outputs(
     windows: Query<(), With<PrimaryWindow>>,
     sim: NonSend<SimRes>,
     mut out: ResMut<Outputs>,
+    mut feel: ResMut<Feel>,
 ) {
     let exiting = exits.read().count() > 0 || closed.read().count() > 0 || windows.is_empty();
     if !exiting || out.done {
@@ -473,6 +568,7 @@ fn write_outputs(
             Err(e) => eprintln!("{}: {e}", p.display()),
         }
     }
+    controls::write_recording(&mut feel, s);
     if let Some(h) = s.last_hash() {
         eprintln!("final tick {} hash {h:016x}", s.tick().0.saturating_sub(1));
     }
@@ -727,17 +823,6 @@ fn setup_hud(mut commands: Commands) {
         Visibility::Hidden,
         HudAlert,
     ));
-    commands.spawn((
-        Text::new(""),
-        hud_text(15.0),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            ..default()
-        },
-        HudWheel,
-    ));
 }
 
 /// Screenshot mode: run the sim to each requested tick, let the frame
@@ -829,6 +914,39 @@ fn shot_driver(
     plan.wait += 1;
     // `--click`: HUD clicks once the layout exists, through the same hit
     // test and key path as a real click.
+    if plan.wait == 10 && !plan.pad_events.is_empty() {
+        let tick = sim.session.tick();
+        let view = SimView {
+            world: sim.session.sim.world(),
+            local: sim.session.local,
+        };
+        let base = 3_000_000 + plan.next as u32 * 100_000;
+        let mut last = base;
+        for e in &plan.pad_events {
+            last = base + e.t;
+            let outs = input
+                .mapper
+                .handle(&InputEvent::new(last, e.kind.clone()), &view, tick);
+            if !outs.is_empty() {
+                eprintln!("  pad {:?} -> {outs:?}", e.kind);
+            }
+        }
+        let _ = input
+            .mapper
+            .handle(&InputEvent::new(last + 1, EventKind::Frame), &view, tick);
+        let pan = input.mapper.take_camera_pan();
+        cam.geom.target[0] += f(pan.x);
+        cam.geom.target[1] += f(pan.y);
+        eprintln!(
+            "  pad cursor {:?} kind {:?} wheel {:?}",
+            input.mapper.cursor_screen(),
+            input.mapper.cursor_kind(&view),
+            input
+                .mapper
+                .wheel()
+                .map(|w| (w.kind, w.slots.len(), w.highlighted))
+        );
+    }
     if plan.wait == 10 {
         let clicks = plan.clicks.clone();
         for (x, y) in clicks {
@@ -1032,15 +1150,34 @@ fn input_system(
         &InheritedVisibility,
     )>,
     hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+    mut feel: ResMut<Feel>,
 ) {
     if let Ok(win) = windows.single() {
         cam.geom.size = [win.width(), win.height()];
+    }
+    // Ghost playback: follow the recorded camera if asked.
+    if feel.ghost_camera
+        && let Some(g) = feel
+            .ghost
+            .as_ref()
+            .and_then(|r| r.ghost_at(sim.session.tick().0))
+    {
+        let c = g.camera;
+        let z = f(c.world_per_px);
+        cam.geom.zoom = z;
+        cam.geom.target = [
+            f(c.origin.x) + c.width_px as f32 / 2.0 * z,
+            f(c.origin.y) + c.height_px as f32 / 2.0 * z,
+        ];
     }
     let geom = cam.geom;
     input.mapper.set_camera(geom.input_camera());
     if plan.is_some() {
         return;
     }
+    let ghost = feel.ghost.is_some();
+    // Opening the overlay drops gestures in progress (no stuck holds).
+    let overlay = feel.overlay_open;
     let t = time.elapsed().as_millis() as u32;
     let mut events = Vec::new();
     // Pointer: the terrain point under the mouse, as a virtual pixel.
@@ -1097,7 +1234,7 @@ fn input_system(
         (MouseButton::Right, InButton::MouseRight),
         (MouseButton::Middle, InButton::MouseMiddle),
     ] {
-        if mb == MouseButton::Left && swallow_left {
+        if (mb == MouseButton::Left && swallow_left) || overlay {
             continue;
         }
         if mouse.just_pressed(mb) {
@@ -1108,6 +1245,9 @@ fn input_system(
         }
     }
     for k in keys.get_just_pressed() {
+        if overlay {
+            break;
+        }
         if let Some(n) = key_name(*k) {
             events.push(EventKind::KeyDown { key: Key(n) });
         }
@@ -1117,8 +1257,8 @@ fn input_system(
             events.push(EventKind::KeyUp { key: Key(n) });
         }
     }
-    // One pad drives the mapper.
-    if let Some(pad) = pads.iter().next() {
+    // One pad drives the mapper (not while the overlay or a ghost has it).
+    if let Some(pad) = pads.iter().next().filter(|_| !overlay && !ghost) {
         // A with the virtual cursor over the minimap jumps the camera there.
         let c = input.mapper.cursor_world();
         let (cx, cz) = (f(c.x), f(c.y));
@@ -1177,6 +1317,20 @@ fn input_system(
         });
         events.push(EventKind::KeyUp { key: Key(k) });
     }
+    for ev in wheel.read() {
+        let steps = match ev.unit {
+            MouseScrollUnit::Line => ev.y,
+            MouseScrollUnit::Pixel => ev.y / 40.0,
+        };
+        let milli = (steps * 1000.0).round() as i32;
+        if milli != 0 {
+            events.push(EventKind::Scroll { milli });
+        }
+    }
+    if ghost {
+        // Watching a ghost: the camera only (wheel zoom, arrows below).
+        events.retain(|e| matches!(e, EventKind::Scroll { .. }));
+    }
     events.push(EventKind::Frame);
 
     let tick = sim.session.tick();
@@ -1186,40 +1340,79 @@ fn input_system(
             world: sim.session.sim.world(),
             local: sim.session.local,
         };
-        for kind in events {
-            outs.extend(input.mapper.handle(&InputEvent::new(t, kind), &view, tick));
+        for kind in &events {
+            outs.extend(
+                input
+                    .mapper
+                    .handle(&InputEvent::new(t, kind.clone()), &view, tick),
+            );
         }
     }
-    for o in outs {
+    let mut submitted = Vec::new();
+    for o in &outs {
         match o {
             Output::Sim { command, .. } => {
-                let at = sim.session.submit(command);
+                let at = sim.session.submit(command.clone());
+                submitted.push((at.0, command.clone()));
                 debug!("order for tick {}", at.0);
+            }
+            Output::ToggleOverlay => {
+                feel.overlay_open = !feel.overlay_open;
+                if feel.overlay_open {
+                    let p = input.mapper.profile().clone();
+                    input.mapper.set_profile(p);
+                }
             }
             Output::Client { command } => match command {
                 ClientCommand::CenterOnMonarch => {
                     if let Some(p) = focus_point(&sim.session, Focus::Monarch(sim.session.local.0))
                     {
-                        cam.geom.target = p;
+                        input.mapper.glide_to(fx_pos(p));
                     }
                 }
                 ClientCommand::CycleIdleBuilder => {
                     if let Some(id) = input.mapper.selection().iter().next()
                         && let Some(u) = sim.session.sim.world().unit(*id)
                     {
-                        cam.geom.target = [f(u.pos.x), f(u.pos.y)];
+                        let h = f(sim.session.sim.world().map().height_at(u.pos));
+                        let p = [f(u.pos.x), f(u.pos.y) - crate::view::SHEAR * h];
+                        input.mapper.glide_to(fx_pos(p));
                     }
                 }
                 _ => {}
             },
+            Output::SelectAll { .. } => {}
         }
     }
-    // Camera: mapper pan (right stick), arrow keys, mouse wheel zoom.
+    let fb = input.mapper.take_feedback();
+    if let Some(rec) = feel.recorder.as_mut() {
+        rec.frame(
+            &input.mapper,
+            t,
+            tick.0,
+            tak_input::FrameIo {
+                events: &events,
+                outputs: &outs,
+                submitted: &submitted,
+                feedback: &fb,
+            },
+        );
+    }
+    feel.feedback.extend(fb);
+    // Camera: mapper pan (right stick, edge pan, glides) and zoom (wheel,
+    // RB + right stick), then the arrow keys.
     let pan = input.mapper.take_camera_pan();
     cam.geom.target[0] += f(pan.x);
     cam.geom.target[1] += f(pan.y);
+    if let Some(z) = input.mapper.take_camera_zoom() {
+        cam.geom.zoom = f(z);
+    }
     let dt = time.delta_secs();
-    let speed = 900.0 * cam.geom.zoom * dt;
+    let speed = if overlay {
+        0.0
+    } else {
+        900.0 * cam.geom.zoom * dt
+    };
     if keys.pressed(KeyCode::ArrowLeft) {
         cam.geom.target[0] -= speed;
     }
@@ -1231,13 +1424,6 @@ fn input_system(
     }
     if keys.pressed(KeyCode::ArrowDown) {
         cam.geom.target[1] += speed;
-    }
-    for ev in wheel.read() {
-        let steps = match ev.unit {
-            MouseScrollUnit::Line => ev.y,
-            MouseScrollUnit::Pixel => ev.y / 40.0,
-        };
-        cam.geom.zoom = (cam.geom.zoom * 0.9f32.powf(steps)).clamp(0.15, 4.0);
     }
     // Game speed and pause (client only: changes ticks per wall second).
     if keys.just_pressed(KeyCode::Pause)
@@ -1251,6 +1437,14 @@ fn input_system(
     if keys.just_pressed(KeyCode::Minus) {
         sim.speed = (sim.speed / 2.0).max(0.25);
     }
+}
+
+/// A camera-target point as a `tak-input` ground position.
+fn fx_pos(p: [f32; 2]) -> tak_math::Vec2 {
+    tak_math::Vec2::new(
+        tak_math::Fx::from_raw((p[0] * 65536.0) as i32),
+        tak_math::Fx::from_raw((p[1] * 65536.0) as i32),
+    )
 }
 
 /// Fixed 30 Hz stepping on an accumulator.
@@ -2932,11 +3126,9 @@ fn mana(raw: i64) -> f64 {
 fn hud_system(
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
-    cam: Res<CamState>,
-    ground: Res<Ground>,
-    mut top: Query<&mut Text, (With<HudTop>, Without<HudPanel>, Without<HudWheel>)>,
-    mut panel: Query<&mut Text, (With<HudInfo>, Without<HudTop>, Without<HudWheel>)>,
-    mut wheel_q: Query<(&mut Text, &mut Node), (With<HudWheel>, Without<HudTop>, Without<HudInfo>)>,
+    feel: Res<Feel>,
+    mut top: Query<&mut Text, (With<HudTop>, Without<HudPanel>)>,
+    mut panel: Query<&mut Text, (With<HudInfo>, Without<HudTop>)>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
@@ -2971,6 +3163,16 @@ fn hud_system(
                 ));
             }
         }
+        if let Some((m, _)) = &feel.status {
+            line.push_str(&format!("   [{m}]"));
+        }
+        if let Some(r) = &feel.ghost {
+            line.push_str(&format!("   GHOST {} frames", r.frames.len()));
+        }
+        line.push_str(&format!(
+            "   input: {}",
+            input.mapper.tuning().preset_name().unwrap_or("custom")
+        ));
         t.0 = line;
     }
     if let Ok(mut t) = panel.single_mut() {
@@ -3002,36 +3204,6 @@ fn hud_system(
             }
             None => "Nothing selected. LMB / A: select   RMB / X: order\narrows / right stick: pan   wheel: zoom".to_string(),
         };
-    }
-    if let Ok((mut t, mut node)) = wheel_q.single_mut() {
-        let mut text = String::new();
-        if let Some(wh) = input.mapper.wheel() {
-            let c = input.mapper.cursor_world();
-            let (cx, cz) = (f(c.x), f(c.y));
-            let sp = cam.geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
-            node.left = Val::Px(sp[0] + 24.0);
-            node.top = Val::Px(sp[1] - 60.0);
-            text.push_str(match wh.kind {
-                WheelKind::Command => "Orders",
-                WheelKind::Build => "Build",
-            });
-            for (i, a) in wh.slots.iter().enumerate() {
-                let mark = if wh.highlighted == Some(i) { ">" } else { " " };
-                let label = match a {
-                    Action::BuildOption { index } => {
-                        let sel = input.mapper.selection().iter().next().copied();
-                        sel.and_then(|id| w.unit(id))
-                            .and_then(|u| w.defs().get(u.def))
-                            .and_then(|d| d.build.canbuild.get(usize::from(*index)).copied())
-                            .and_then(|o| s.def(o))
-                            .map_or(format!("option {index}"), |d| d.display.clone())
-                    }
-                    other => format!("{other:?}"),
-                };
-                text.push_str(&format!("\n{mark}{i}: {label}"));
-            }
-        }
-        t.0 = text;
     }
 }
 
@@ -3306,8 +3478,38 @@ fn gizmo_system(
     input: Res<InputRes>,
     ground: Res<Ground>,
     plan: Option<Res<ShotPlan>>,
+    feel: Res<Feel>,
+    art: Option<Res<controls::CursorArt>>,
 ) {
     let t = &ground.0;
+    let ghost = feel
+        .ghost
+        .as_ref()
+        .and_then(|r| r.ghost_at(sim.session.tick().0));
+    let ghost_sel = ghost
+        .as_ref()
+        .map(|g| g.selection.clone())
+        .unwrap_or_default();
+    if let Some(gh) = &ghost {
+        // The recorded player's cursor and brush.
+        let (cx, cz) = (f(gh.cursor_world.x), f(gh.cursor_world.y));
+        let c = Color::srgb(1.0, 0.4, 1.0);
+        ground_circle(&mut g, t, cx, cz, 9.0, c);
+        let ch = t.height_at(cx, cz) + 1.5;
+        g.line(
+            Vec3::new(cx - 14.0, ch, cz),
+            Vec3::new(cx + 14.0, ch, cz),
+            c,
+        );
+        g.line(
+            Vec3::new(cx, ch, cz - 14.0),
+            Vec3::new(cx, ch, cz + 14.0),
+            c,
+        );
+        if let Some((bc, br)) = gh.brush {
+            ground_circle(&mut g, t, f(bc.x), f(bc.y), f(br), c);
+        }
+    }
     let alpha = sim.alpha();
     let prev: BTreeMap<UnitId, &UnitSnap> = sim.prev.units.iter().map(|u| (u.id, u)).collect();
     let w = sim.session.sim.world();
@@ -3330,7 +3532,26 @@ fn gizmo_system(
         ground_circle(&mut g, t, x, y, r * 0.9, team.with_alpha(0.7));
         let selected = input.mapper.selection().contains(u.id);
         if selected {
-            ground_circle(&mut g, t, x, y, r + 3.0, Color::srgb(0.3, 1.0, 0.3));
+            // Selection flash (`select_flash_ms`): a bright ring that
+            // shrinks onto the normal one.
+            match input.mapper.selection_flash() {
+                Some(age) => {
+                    let k = 1.0 - age as f32 / input.mapper.tuning().select_flash_ms.max(1) as f32;
+                    ground_circle(
+                        &mut g,
+                        t,
+                        x,
+                        y,
+                        r + 3.0 + 8.0 * k,
+                        Color::srgb(0.85, 1.0, 0.85),
+                    );
+                    ground_circle(&mut g, t, x, y, r + 3.0, Color::srgb(0.6, 1.0, 0.6));
+                }
+                None => ground_circle(&mut g, t, x, y, r + 3.0, Color::srgb(0.3, 1.0, 0.3)),
+            }
+        }
+        if ghost_sel.contains(u.id) {
+            ground_circle(&mut g, t, x, y, r + 6.0, Color::srgb(1.0, 0.4, 1.0));
         }
         if selected || u.health_percent < 100 || u.build_percent_left > 0 {
             let top = tops.0.get(&u.id).copied().unwrap_or(60.0);
@@ -3449,23 +3670,50 @@ fn gizmo_system(
     }
     // Cursor, brush and build placement (no cursor in screenshots: the
     // mouse is not there).
-    if plan.is_some() && input.mapper.brush().is_none() {
+    if (plan.is_some() && input.mapper.brush().is_none() && !feel.shot_pad) || ghost.is_some() {
         return;
     }
     let c = input.mapper.cursor_world();
     let (cx, cz) = (f(c.x), f(c.y));
-    ground_circle(&mut g, t, cx, cz, 6.0, Color::srgb(1.0, 1.0, 0.2));
-    let ch = t.height_at(cx, cz) + 1.5;
-    g.line(
-        Vec3::new(cx - 10.0, ch, cz),
-        Vec3::new(cx + 10.0, ch, cz),
-        Color::srgb(1.0, 1.0, 0.2),
-    );
-    g.line(
-        Vec3::new(cx, ch, cz - 10.0),
-        Vec3::new(cx, ch, cz + 10.0),
-        Color::srgb(1.0, 1.0, 0.2),
-    );
+    if art.as_ref().is_some_and(|a| a.loaded()) {
+        // The game cursor sprite shows the cursor; mark the ground point
+        // under a stick cursor.
+        if input.mapper.stick_cursor() {
+            ground_circle(&mut g, t, cx, cz, 3.0, Color::srgb(1.0, 1.0, 0.2));
+        }
+    } else {
+        ground_circle(&mut g, t, cx, cz, 6.0, Color::srgb(1.0, 1.0, 0.2));
+        let ch = t.height_at(cx, cz) + 1.5;
+        g.line(
+            Vec3::new(cx - 10.0, ch, cz),
+            Vec3::new(cx + 10.0, ch, cz),
+            Color::srgb(1.0, 1.0, 0.2),
+        );
+        g.line(
+            Vec3::new(cx, ch, cz - 10.0),
+            Vec3::new(cx, ch, cz + 10.0),
+            Color::srgb(1.0, 1.0, 0.2),
+        );
+    }
+    // Aim assist: a thin ring on the snap target.
+    if let Some(u) = input
+        .mapper
+        .snap_target()
+        .and_then(|id| sim.curr.units.iter().find(|u| u.id == id))
+    {
+        let r = sim
+            .session
+            .def(u.def)
+            .map_or(14.0, |d| pick_radius(d.footprint.0, d.footprint.1));
+        ground_circle(
+            &mut g,
+            t,
+            u.x,
+            u.y,
+            r + 9.0,
+            Color::srgba(1.0, 1.0, 0.3, 0.7),
+        );
+    }
     if let Some((bc, br)) = input.mapper.brush() {
         ground_circle(
             &mut g,

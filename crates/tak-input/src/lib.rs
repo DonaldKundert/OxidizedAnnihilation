@@ -30,7 +30,9 @@ mod brush;
 mod context;
 mod cursor;
 mod event;
+pub mod lab;
 mod mapper;
+mod record;
 mod tuning;
 mod wheel;
 mod world;
@@ -38,9 +40,15 @@ mod world;
 pub use binding::{Action, Binding, Gesture, Profile, ProfileError};
 pub use brush::{brush_radius, drag_circle, units_in_circle};
 pub use context::{Mode, builders_for, casters_for, own_units, pick_unit, resolve_context};
-pub use cursor::{AXIS_MAX, cursor_step, magnetize, per_second, stick_vector};
+pub use cursor::{
+    AXIS_MAX, Motion, approach_frac, cursor_motion, cursor_step, curve, friction, magnetize, pct,
+    per_second, soft_snap, stick_vector, stick_vector_zones, zoom_factor,
+};
 pub use event::{Axis, Button, EventKind, Input, InputEvent, Key};
-pub use mapper::{Mapper, Output};
-pub use tuning::Tuning;
-pub use wheel::{Wheel, WheelKind, slot_direction, slot_for};
+pub use mapper::{CursorKind, Feedback, Mapper, Output};
+pub use record::{
+    FrameIo, Ghost, RECORDING_VERSION, RecFrame, Recorder, Recording, RecordingError, Summary,
+};
+pub use tuning::{PRESETS, TUNING_FIELDS, Tuning, TuningField, field as tuning_field};
+pub use wheel::{Wheel, WheelKind, context_slots, slot_direction, slot_for};
 pub use world::{BuilderKind, Camera, UnitInfo, WorldView, units_sorted};

@@ -52,6 +52,7 @@ impl WorldView for SimView<'_> {
                 def: u.def,
                 selectable: !u.combat.is_dying(),
                 builder,
+                under_construction: !u.build.is_complete(),
             });
         }
     }
@@ -66,6 +67,14 @@ impl WorldView for SimView<'_> {
             .and_then(|u| self.world.defs().get(u.def))
             .map(|d| d.build.canbuild.clone())
             .unwrap_or_default()
+    }
+
+    fn can_place(&self, def: UnitDefId, pos: tak_commands::WorldPos) -> bool {
+        use tak_sim::construction::placement::{check_site, site_center};
+        let Some(d) = self.world.defs().get(def) else {
+            return false;
+        };
+        check_site(self.world, def, site_center(d, pos), None).is_ok()
     }
 
     fn is_idle(&self, unit: UnitId) -> bool {

@@ -68,6 +68,45 @@ pub struct Args {
     /// before each capture, through the real hit test and key path.
     #[arg(long, value_delimiter = ',')]
     pub click: Vec<f32>,
+    /// Input tuning preset: console (default), assisted, precise, wp_j.
+    /// Ignored when `--input-profile` names an existing file.
+    #[arg(long, default_value = "console")]
+    pub input_preset: String,
+    /// Input profile JSON (bindings + tuning). Watched while playing: edits
+    /// apply on save. The tuning overlay saves here. Created from the preset
+    /// if missing.
+    #[arg(long)]
+    pub input_profile: Option<PathBuf>,
+    /// Record the play session (device events, cursor, camera, selections,
+    /// orders, plus the match and command log) to this file on exit. Send
+    /// it back for analysis or watch it with `--ghost`.
+    #[arg(long)]
+    pub record_session: Option<PathBuf>,
+    /// Replay a recorded session: its map, players, seed and orders, with
+    /// the player's cursor drawn as a ghost (live input is off).
+    #[arg(long, conflicts_with_all = ["log", "demo"])]
+    pub ghost: Option<PathBuf>,
+    /// Ghost playback: follow the recorded camera.
+    #[arg(long)]
+    pub ghost_camera: bool,
+    /// Headless: drive the demo match with the scripted gamepad events in
+    /// this file (`tak-input` event JSON) through the real input path, write
+    /// a session recording to `--record-session` and exit.
+    #[arg(long, requires = "record_session")]
+    pub synth_events: Option<PathBuf>,
+    /// Ticks to run for `--synth-events`.
+    #[arg(long, default_value_t = 600)]
+    pub synth_ticks: u32,
+    /// Controller button glyphs: auto (detect), xbox or playstation.
+    #[arg(long, default_value = "auto")]
+    pub glyphs: String,
+    /// Screenshot mode: feed these gamepad events (`tak-input` event JSON)
+    /// to the mapper before each capture, so wheels, cursors and hints show.
+    #[arg(long)]
+    pub pad_events: Option<PathBuf>,
+    /// Start with the tuning overlay open.
+    #[arg(long)]
+    pub overlay: bool,
 }
 
 impl Args {
