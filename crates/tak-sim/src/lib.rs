@@ -31,6 +31,7 @@ pub mod construction;
 pub mod content;
 pub mod defs;
 pub mod economy;
+pub mod features;
 pub mod hash;
 pub mod lifecycle;
 pub mod map;
@@ -43,7 +44,7 @@ pub mod testing;
 pub mod world;
 
 pub use cob::{CobScripts, ScriptType};
-pub use content::{Match, PlayerSetup, load_match};
+pub use content::{Match, PlayerSetup, load_match, load_match_monarchs};
 pub use defs::{UnitDef, UnitDefs};
 pub use hash::StateHasher;
 pub use map::{HeightGrid, MapInfo, StartPos, TerrainGrid};

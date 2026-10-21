@@ -82,6 +82,21 @@ pub struct UnitBuild {
     pub job: Option<BuilderJob>,
     /// Factories: production.
     pub factory: FactoryState,
+    /// Mobile builders: the frame it helps build because it guards that
+    /// frame, its builder or its factory (WP-P).
+    pub assist: Option<Assist>,
+}
+
+/// A mobile builder assisting through `Guard` (see [`assist_target`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Assist {
+    /// The frame being built.
+    pub target: UnitId,
+    /// Destination of the `Move` construction issued to bring the builder
+    /// into range, while it walks.
+    pub walk_to: Option<WorldPos>,
+    /// `StartBuilding` was called and `StopBuilding` is still owed.
+    pub building: bool,
 }
 
 impl UnitBuild {
@@ -130,6 +145,11 @@ impl UnitBuild {
         h.option(f.product, StateHasher::unit_id);
         h.bool(f.active);
         h.option(f.retry_at, StateHasher::tick);
+        h.option(self.assist, |h, a| {
+            h.unit_id(a.target);
+            h.option(a.walk_to, StateHasher::vec2);
+            h.bool(a.building);
+        });
     }
 }
 
@@ -143,11 +163,35 @@ pub struct Refund {
     pub mana: i64,
 }
 
+/// A build order dropped because its site was refused (WP-P): what the
+/// player sees as "cannot build here" and why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rejection {
+    /// Tick of the refusal.
+    pub tick: Tick,
+    /// The builder whose order was dropped.
+    pub builder: UnitId,
+    /// Its owner.
+    pub player: PlayerId,
+    /// What it was to build.
+    pub def: UnitDefId,
+    /// The snapped site centre.
+    pub site: WorldPos,
+    /// Why ([`placement::SiteError::reason`] has the text).
+    pub reason: placement::SiteError,
+}
+
+/// Most recent rejections kept in [`ConstructionState::rejections`].
+pub const MAX_REJECTIONS: usize = 64;
+
 /// World-level construction state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConstructionState {
     /// Refunds not yet credited by the economy.
     pub refunds: Vec<Refund>,
+    /// The latest refused build orders, oldest first (at most
+    /// [`MAX_REJECTIONS`]).
+    pub rejections: Vec<Rejection>,
 }
 
 impl ConstructionState {
@@ -163,6 +207,22 @@ impl ConstructionState {
             h.player(r.player);
             h.u64(r.mana as u64);
         }
+        h.len(self.rejections.len());
+        for r in &self.rejections {
+            h.tick(r.tick);
+            h.unit_id(r.builder);
+            h.player(r.player);
+            h.unit_def(r.def);
+            h.vec2(r.site);
+            h.u8(r.reason as u8);
+        }
+    }
+
+    fn reject(&mut self, r: Rejection) {
+        if self.rejections.len() >= MAX_REJECTIONS {
+            self.rejections.remove(0);
+        }
+        self.rejections.push(r);
     }
 }
 
@@ -245,17 +305,162 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
     }
     for &id in &ids {
         match builder_kind(world, id) {
-            Some(true) => mobile_step(world, scripts, id),
+            Some(true) => {
+                mobile_step(world, scripts, id);
+                assist_step(world, scripts, id);
+            }
             Some(false) => factory_step(world, scripts, id),
             None => {}
         }
     }
     for &id in &ids {
         match builder_kind(world, id) {
-            Some(true) => mobile_finish(world, scripts, id),
+            Some(true) => {
+                mobile_finish(world, scripts, id);
+                assist_finish(world, scripts, id);
+            }
             Some(false) => factory_finish(world, scripts, id),
             None => {}
         }
+    }
+}
+
+/// The frame a builder guarding `guarded` helps build (TA: a builder
+/// ordered to guard assists): `guarded` itself while it is under
+/// construction; else the frame `guarded` is building (a mobile builder's
+/// job or assist, one level deep); else a factory's product on the pad.
+/// Same owner only (no alliances yet). `None` when there is nothing to
+/// build.
+pub fn assist_target(world: &World, owner: PlayerId, guarded: UnitId) -> Option<UnitId> {
+    let g = world.unit(guarded).filter(|g| g.owner == owner)?;
+    if g.combat.is_dying() {
+        return None;
+    }
+    let frame = |t: UnitId| {
+        world
+            .unit(t)
+            .filter(|u| u.owner == owner && !u.build.is_complete() && !u.combat.is_dying())
+            .map(|_| t)
+    };
+    if !g.build.is_complete() {
+        return Some(guarded);
+    }
+    g.build
+        .job
+        .and_then(|j| j.target)
+        .and_then(frame)
+        .or_else(|| g.build.assist.and_then(|a| frame(a.target)))
+        .or_else(|| g.build.factory.product.and_then(frame))
+}
+
+/// Guard-assist for a mobile builder without a build job (WP-P): walk into
+/// build range of the [`assist_target`] and work on it with this builder's
+/// `workertime`, paid by its owner through [`economy::drain`], with
+/// `StartBuilding`/`StopBuilding` as for a build order. A player order
+/// (anything but the guard) suspends it.
+fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    let Some(u) = world.unit(id) else { return };
+    let owner = u.owner;
+    let mut assist = u.build.assist;
+    let guarded = match u.combat.order {
+        Some(crate::combat::CombatOrder::Guard(g)) if u.build.job.is_none() => Some(g),
+        _ => None,
+    };
+    let walk_to = assist.and_then(|a| a.walk_to);
+    let own_walk = walk_to
+        .is_some_and(|w| u.orders.len() == 1 && u.orders.front() == Some(&Order::Move { to: w }));
+    let combat_walk = u
+        .combat
+        .goal
+        .is_some_and(|g| u.orders.len() == 1 && u.orders.front() == Some(&Order::Move { to: g }));
+    let busy = !u.orders.is_empty() && !own_walk && !combat_walk;
+    let target = guarded
+        .filter(|_| !busy)
+        .and_then(|g| assist_target(world, owner, g));
+
+    // Lost or changed target: stop working on (and walking to) the old one.
+    if let Some(a) = assist {
+        if Some(a.target) != target {
+            if a.building {
+                start(scripts, id, "StopBuilding");
+            }
+            if own_walk {
+                if let Some(u) = world.unit_mut(id) {
+                    u.orders.clear();
+                }
+            }
+            assist = None;
+        }
+    }
+    let Some(t) = target else {
+        set_assist(world, id, None);
+        return;
+    };
+    let mut a = assist.unwrap_or(Assist {
+        target: t,
+        walk_to: None,
+        building: false,
+    });
+    let (Some(u), Some(tu)) = (world.unit(id), world.unit(t)) else {
+        return;
+    };
+    let tpos = tu.pos;
+    let (Some(bd), Some(td)) = (world.defs().get(u.def), world.defs().get(tu.def)) else {
+        return;
+    };
+    let in_range = placement::in_range(u.pos, bd, tpos, td);
+    let (workertime, turnrate) = (bd.build.workertime, bd.turnrate);
+    if !in_range {
+        // Walk over; a walk that ended out of range is not repeated unless
+        // the target moved (unreachable frames are left alone).
+        let goal = world.map().clamp(tpos);
+        if !own_walk && a.walk_to != Some(goal) {
+            pathfinding::go_to(world, id, goal);
+            if let Some(u) = world.unit_mut(id) {
+                u.combat.goal = None;
+            }
+            a.walk_to = Some(goal);
+        }
+        if a.building {
+            start(scripts, id, "StopBuilding");
+            a.building = false;
+        }
+        set_assist(world, id, Some(a));
+        return;
+    }
+    if own_walk || combat_walk {
+        if let Some(u) = world.unit_mut(id) {
+            u.orders.clear();
+            u.combat.goal = None;
+        }
+    }
+    a.walk_to = None;
+    if !a.building {
+        start(scripts, id, "StartBuilding");
+        a.building = true;
+    }
+    set_assist(world, id, Some(a));
+    face(world, id, tpos, turnrate);
+    work(world, t, owner, workertime);
+}
+
+fn set_assist(world: &mut World, id: UnitId, a: Option<Assist>) {
+    if let Some(u) = world.unit_mut(id) {
+        u.build.assist = a;
+    }
+}
+
+/// An assisted frame that completed (or vanished) this tick: `StopBuilding`
+/// now; the guard picks up the next frame (e.g. the factory's next
+/// product) on a later tick.
+fn assist_finish(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    let Some(a) = world.unit(id).and_then(|u| u.build.assist) else {
+        return;
+    };
+    let done = world.unit(a.target).is_none_or(|u| u.build.is_complete());
+    if done && a.building {
+        start(scripts, id, "StopBuilding");
+        set_assist(world, id, None);
     }
 }
 
@@ -314,10 +519,13 @@ fn work(world: &mut World, target: UnitId, payer: PlayerId, workertime: i32) -> 
     } else {
         Fx::ZERO
     };
+    let before = frame.done;
     let added = frame.commit(cost, to, want, granted);
     if let Some(u) = world.unit_mut(target) {
         u.build.frame = (!frame.is_complete()).then_some(frame);
     }
+    // Frame health follows progress (combat owns health).
+    crate::combat::build_progress(world, target, before, frame.done, frame.total);
     added > 0
 }
 
@@ -442,13 +650,29 @@ fn mobile_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     }
 
     let target = job.target.filter(|&t| world.unit(t).is_some());
+    if job.target.is_some() && target.is_none() {
+        // The frame was destroyed: the order ends (**Believed**, TA drops
+        // a build order whose target dies; rebuilding needs a new order).
+        store_job(world, id, job);
+        end_job(world, scripts, id, true);
+        return;
+    }
     let target = match target {
         Some(t) => t,
         None => match unit_at_site(world, job.def, owner, job.site) {
             // Assist an existing frame (or find it already finished).
             Some(t) => t,
             None => {
-                if placement::check_site(world, job.def, job.site, None).is_err() {
+                if let Err(reason) = placement::check_site(world, job.def, job.site, None) {
+                    let tick = world.tick();
+                    world.construction.reject(Rejection {
+                        tick,
+                        builder: id,
+                        player: owner,
+                        def: job.def,
+                        site: job.site,
+                        reason,
+                    });
                     store_job(world, id, job);
                     end_job(world, scripts, id, true);
                     return;

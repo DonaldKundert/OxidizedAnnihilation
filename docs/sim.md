@@ -26,9 +26,11 @@ ticks.
 ## Tick
 
 30 ticks per second. System order per tick: spawn monarchs (tick 0 only, then
-`ScriptHost::create_unit` per spawn) → commands → orders (pop reached
-waypoints) → movement → `ScriptHost::tick_unit` per live unit in slot order →
-advance tick → hash (world, then script host). Commands are the only input.
+`ScriptHost::create_unit` per spawn) → commands → construction → economy →
+orders (pop reached waypoints) → pathfinding → movement → combat (ending
+with feature decay, WP-P) → `ScriptHost::tick_unit` per live unit in slot
+order → advance tick → hash (world, then script host). Commands are the only
+input. The authoritative list is the module doc of `systems.rs`.
 
 ## Coordinates
 
@@ -75,13 +77,18 @@ yet.
 ## Real-map scenario
 
 `Scenario::from_content(&MapDef, &Ruleset, &[PlayerSetup])`; `load_match(vfs,
-map, players, seed)` loads the base ruleset, the map and the scripts.
+map, players, seed)` loads the base ruleset, the map, the monarchs plus
+their whole build trees (WP-P; `docs/construction.md`), the map's
+gameplay features and every unit's corpse (`Scenario::features`,
+`docs/combat.md`), and the scripts. `load_match_monarchs` loads only the
+monarchs (the pre-WP-P behaviour).
 
 - Player `i` takes the map's `i`-th start position (sorted by OTA player
   number) and spawns its side's `commander` from `gamedata/sidedata.tdf`
   (`ARA` → `ARAKING`, `TAR` → `TARNECRO`, `VER` → `VERMAGE`, `ZON` →
   `ZONHUNT`, `CRE` → `CRESAGE`). Sides match `nameprefix` or `name`, any case.
-- One `UnitDef` per distinct monarch. The map keeps heights, a per-cell
+- One `UnitDef` per distinct monarch first (ids `0..`), then the build
+  trees. The map keeps heights, a per-cell
   terrain grid (`MapInfo.terrain`, the `PassGrid` flags verbatim) and the sea
   level. Synthetic scenarios have no terrain grid (open ground everywhere),
   so their JSON is unchanged.

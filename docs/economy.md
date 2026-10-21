@@ -88,14 +88,41 @@ spread across systems.
 |---|---|---|
 | Income | sum of `mogriumincome` over the player's live, **completed** units, per **second** | Known keys (install doc calls it "Mana Production"); per second **Believed** (TA's `MetalMake`/`EnergyMake` are per second, and the pace fits: a lone monarch makes 10/s, a swordsman costs 285) |
 | Lodestones | income x the `sacredsite` value of the site under them (10, 15 or 20 for a Lodestone; 20, 30, 40 for a Divine Lodestone) | **Believed** (the key's only plausible job; tier names say weak to powerful) |
-| Lodestone not on a site | x `off_site_multiplier` = 1.0 | **Chosen** (cannot happen in the original: placement requires a site) |
+| Lodestone not on a site | x `off_site_multiplier` = 1.0 | **Chosen** (cannot happen through building: placement requires a free site, WP-P) |
 | Site claims | a site serves one lodestone; lodestones claim the first free site whose footprint (top-left anchored, plus one 16-px cell of slack on every side, which also covers centre anchoring) contains their position, in slot order | **Chosen** |
 | Storage cap | sum of `mogriumstorage` over the player's live, completed units (monarch 5000) | Known keys ("Mana Storage"); **Believed** semantics (TA) |
 | Overflow | income beyond the cap is lost; if the cap shrinks (a lodestone dies) the excess is lost | **Believed** (TA) |
 | Units under construction | give no income and no storage until complete | **Believed** (TA) |
 | Starting mana | 1000 per player (`start_mana`), then capped by storage | **Chosen**: the menus have no setting, TA's default start is 1000 |
-| `economybonus` | ignored by default (`economy_bonus = Ignore`). Options: `UnitIncomePercent` (adds N% to that unit's own income: 10 → 13) or `PlayerIncomePercent` (adds N% to the player's whole income while the unit lives) | **Unknown**. Only monarchs carry it. Hint: the `cb` balance gives the Veruna monarch (the one without a bonus) 15 instead of 10, close to 10 + 30%, which favours `UnitIncomePercent`; not enough to turn on by default |
+| `economybonus` | ignored by default (`economy_bonus = Ignore`). Options: `UnitIncomePercent` (adds N% to that unit's own income: 10 → 13) or `PlayerIncomePercent` (adds N% to the player's whole income while the unit lives) | **Unknown**, default kept after a second look (WP-P, below) |
 | Alliance sharing (`AutoShareMana`) | not modelled | Unknown (diplomacy is later) |
+
+**`economybonus`, the evidence (WP-P, `economybonus_evidence` test).**
+
+- Who: exactly seven units, all monarch-class: `ARAKING`, `CRESAGE`,
+  `TARNECRO`, `TARNECR2`, `ZONHUNT`, `ZONHURT` (30) and the mission hero
+  `TARHEL` (15). In every case `economybonus = 3 × mogriumincome` and
+  `mogriumstorage = 500 × mogriumincome` (Known). The Veruna monarch
+  `VERMAGE` (income 10) has none.
+- Crusades (`cb`): `VERMAGE` income 10 → 15, but `cb` also raises every
+  priest-class unit 1 → 5 (`ARAPRIES`, `CRECHIE`, `TARPRIES`, `VERLIHR`,
+  `ZONSHAM`) and the Aramon flying builder 1 → 2, while the bonus
+  carriers stay at 10. So the Veruna change reads as part of a general
+  mana rebalance, which weakens WP-N's "15 ≈ 10 + 30 %" hint.
+- Documentation: the install's six unit sheets (`Docs/*.txt`) and
+  `readme.htm` never mention it; a web search for the key (October 2026)
+  finds only general game pages, none giving a meaning.
+- Readings: a percentage of the unit's own income (`UnitIncomePercent`,
+  monarch 10 → 13/s), of the player's income (`PlayerIncomePercent`), or a
+  flat amount (monarch 10 → 40/s, which would make lodestones nearly
+  pointless and contradicts the pace players describe). The fixed 3:1
+  ratio suggests a value derived from income by the designers' tool, which
+  fits a percentage better than a flat amount.
+- Decision (per `CLAUDE.md`'s fidelity rule): keep `Ignore` as the default
+  (confidence that it has *some* effect: low-moderate; no reading is
+  supported well enough to change everyone's income). If footage shows a
+  lone monarch earning 13/s instead of 10/s, switch the default to
+  `UnitIncomePercent`, which is already implemented and tested.
 
 Arithmetic: income is kept in 16.16 per second (`i64`), and each tick adds
 `(income + carry) / 30` with the remainder carried, so a second of ticks adds
@@ -158,7 +185,14 @@ economy::mana / storage / income_per_second(world, player) -> WideFx
 economy::unit_mana(world, id) -> Option<UnitMana>      // { mana, max }
 economy::spend_unit_mana(world, id, cost: Fx) -> bool  // combat: all or nothing
 economy::set_unit_mana_percent(world, id, percent)
+economy::free_site_at(world, pos, ignore) -> Option<usize> // placement: lodestones (WP-P)
 ```
+
+**Placement** (WP-P) refuses a `yardmap = S` structure unless
+`free_site_at` finds a sacred site containing its centre (plus
+`site_slack`) that no other sacred-site unit stands on, so every placed
+lodestone earns its site's multiplier; `off_site_multiplier` now only
+matters for units spawned directly (tools, missions).
 
 **Construction** should, per building unit per tick, compute the mana for
 this tick's progress, call `drain`, and advance progress by

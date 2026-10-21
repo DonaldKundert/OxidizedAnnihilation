@@ -468,6 +468,8 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
         }
     }
     step_projectiles(world, scripts, now);
+    // Corpses decompose (WP-P features ride on the combat lane).
+    crate::features::tick(world);
 }
 
 fn init_and_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u32) {
@@ -480,17 +482,18 @@ fn init_and_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, no
     let nweapons = def.combat.weapons.len();
     let reload_ms = def.combat.max_reload_ms();
     let u = world.unit_mut(id).expect("live");
+    let (done, total) = u.build.built_fraction();
+    let complete = u.build.is_complete();
     let c = &mut u.combat;
     if !c.ready {
-        c.ready = true;
-        c.born = now;
-        c.health = max;
-        c.max_health = max;
-        c.weapons = vec![WeaponState::default(); nweapons];
-        c.reload_sent = nweapons == 0;
+        // A frame first seen here (not through `build_progress`) starts
+        // with the health its progress has earned.
+        let health = frame_health(max, total - done.min(total), total);
+        init_state(c, max, nweapons, now, max - health);
         return;
     }
-    if c.max_health <= 0 || c.dying.is_some() {
+    // Frames do not regenerate: their health comes from building.
+    if c.max_health <= 0 || c.dying.is_some() || !complete {
         return;
     }
     if c.health < c.max_health && heal > Fx::ZERO {
@@ -510,6 +513,63 @@ fn init_and_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, no
             lifecycle::call_script(world, scripts, id, "SetMaxReloadTime", &[reload_ms]);
         }
     }
+}
+
+fn init_state(c: &mut UnitCombat, max: i32, nweapons: usize, now: u32, health: i32) {
+    c.ready = true;
+    c.born = now;
+    c.health = health;
+    c.max_health = max;
+    c.weapons = vec![WeaponState::default(); nweapons];
+    c.reload_sent = nweapons == 0;
+}
+
+/// `trunc(maxdamage × remaining / total)`: the health a frame has *not*
+/// yet earned when `remaining` of `total` work is left. TA-Known (Nanolathe
+/// `05` "Health gain and fractional carry"): health gained by a build step
+/// is `trunc(max × old) − trunc(max × new)` over the remaining fraction.
+pub fn frame_health(max: i32, remaining: i64, total: i64) -> i32 {
+    if total <= 0 || max <= 0 {
+        return 0;
+    }
+    let r = i128::from(remaining.clamp(0, total));
+    (i128::from(max) * r / i128::from(total)) as i32
+}
+
+/// Construction calls this after every build step on a frame (WP-P frame
+/// health, TA-Known): a new frame starts at **zero** health (TA allocates
+/// nanoframes with health 0) and each step adds
+/// `trunc(max × old_remaining) − trunc(max × new_remaining)`, capped at
+/// `maxdamage`. Damage to a frame is plain health loss; its build progress
+/// is untouched (TA: the work step and damage write separate fields), so
+/// a damaged frame completes below full health and a frame whose health
+/// reaches zero dies like any unit.
+pub fn build_progress(
+    world: &mut World,
+    id: UnitId,
+    done_before: i64,
+    done_after: i64,
+    total: i64,
+) {
+    let now = world.tick().0;
+    let Some(u) = world.unit(id) else { return };
+    let Some(def) = world.defs().get(u.def) else {
+        return;
+    };
+    let max = def.combat.max_damage;
+    let nweapons = def.combat.weapons.len();
+    let Some(u) = world.unit_mut(id) else { return };
+    let c = &mut u.combat;
+    if !c.ready {
+        init_state(c, max, nweapons, now, 0);
+    }
+    if c.max_health <= 0 || c.dying.is_some() {
+        return;
+    }
+    let old = frame_health(max, total - done_before, total);
+    let new = frame_health(max, total - done_after, total);
+    let gain = i64::from(old) - i64::from(new);
+    c.health = (i64::from(c.health) + gain).clamp(0, i64::from(c.max_health)) as i32;
 }
 
 /// Copy of the per-weapon numbers the tick needs (no allocation).
@@ -771,6 +831,9 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
             }
             Some(CombatOrder::Guard(g)) => {
                 let gpos = world.unit(g).map_or(pos, |g| g.pos);
+                // A builder assisting through Guard (WP-P) stays at its
+                // frame instead of following the guarded unit.
+                let assisting = world.unit(id).is_some_and(|u| u.build.assist.is_some());
                 let chase = chase_target(
                     world,
                     id,
@@ -783,9 +846,11 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
                     fire_state,
                     last_attacker,
                 );
-                step_chase(world, id, pos, chase, can_hit_any, || {
-                    (pos.distance(gpos) > GUARD_DISTANCE).then_some(gpos)
-                });
+                if !assisting {
+                    step_chase(world, id, pos, chase, can_hit_any, || {
+                        (pos.distance(gpos) > GUARD_DISTANCE).then_some(gpos)
+                    });
+                }
             }
             None => {
                 let origin = world
@@ -1394,4 +1459,7 @@ fn progress_death(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, n
         kind: corpse,
     });
     lifecycle::remove_unit(world, scripts, id);
+    // The FBI `corpse` feature (WP-P), blocking movement if the
+    // definition says so.
+    crate::features::spawn_corpse(world, def, pos, heading, corpse);
 }

@@ -75,6 +75,14 @@ pub struct Scenario {
     /// Economy rules and sacred sites (WP-N). Optional in JSON.
     #[serde(default)]
     pub economy: Box<crate::economy::EconomySetup>,
+    /// Feature definitions, placed map features and unit corpses (WP-P).
+    /// Optional in JSON; empty for synthetic scenarios.
+    #[serde(default, skip_serializing_if = "features_empty")]
+    pub features: Box<crate::features::FeatureSetup>,
+}
+
+fn features_empty(f: &crate::features::FeatureSetup) -> bool {
+    *f == crate::features::FeatureSetup::default()
 }
 
 impl Scenario {
@@ -103,6 +111,7 @@ impl Scenario {
             d.validate()?;
         }
         self.economy.validate()?;
+        self.features.validate(self.unit_defs.len())?;
         if self.players.len() > MAX_PLAYERS {
             return Err(ScenarioError::Invalid("too many players".into()));
         }

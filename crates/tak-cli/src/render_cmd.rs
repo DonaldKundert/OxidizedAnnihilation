@@ -1,8 +1,10 @@
 //! `render`: run a real-map match headless up to a tick and draw a top-down
 //! PNG: the terrain mosaic (downscaled, as `dump-map` builds it), impassable
 //! cells tinted red, each monarch's movement trail, its start position, its
-//! final position and a heading tick. Output can contain retail art; keep it
-//! outside the repo.
+//! final position and a heading tick; every other unit (structures as
+//! footprint outlines, others as dots, in the owner's colour); corpses as
+//! grey footprints, blocking wrecks outlined orange, sacred sites cyan.
+//! Output can contain retail art; keep it outside the repo.
 
 use image::{Rgb, RgbImage, imageops};
 use std::collections::BTreeMap;
@@ -126,6 +128,75 @@ pub fn run(vfs: &Vfs, a: RenderArgs) -> Res<()> {
         ring(&mut img, px(start.x), px(start.y), 6, [255, 255, 255]);
     }
     let mut summary = String::new();
+    // Features (WP-P): sacred sites outlined cyan; corpses grey, blocking
+    // wrecks with an orange outline.
+    let w = sim.world();
+    for (_, f) in w.features.iter() {
+        let Some(d) = w.features.def(f) else { continue };
+        let (x0, y0) = (px(f.rect.x * 16), px(f.rect.z * 16));
+        let (x1, y1) = (
+            px((f.rect.x + f.rect.w) * 16),
+            px((f.rect.z + f.rect.h) * 16),
+        );
+        let corpse = matches!(f.origin, tak_sim::features::Origin::Corpse(_));
+        if corpse {
+            for y in y0..y1.max(y0 + 1) {
+                for x in x0..x1.max(x0 + 1) {
+                    blend(&mut img, x, y, [40, 40, 40], 160);
+                }
+            }
+        }
+        let outline = if corpse && f.obstacle {
+            Some([255, 140, 0])
+        } else if d.sacred_site > tak_math::Fx::ZERO {
+            Some([0, 230, 230])
+        } else {
+            None
+        };
+        if let Some(c) = outline {
+            rect(&mut img, x0, y0, x1, y1, c);
+        }
+    }
+    // Every other unit: structures as footprint outlines, the rest as dots,
+    // in the owner's colour.
+    let monarchs: Vec<_> = w.players().iter().filter_map(|p| p.monarch).collect();
+    let mut counts: BTreeMap<(usize, String), usize> = BTreeMap::new();
+    for (id, u) in w.units() {
+        if monarchs.contains(&id) {
+            continue;
+        }
+        let Some(d) = w.defs().get(u.def) else {
+            continue;
+        };
+        let col = COLORS[usize::from(u.owner.0) % COLORS.len()];
+        *counts
+            .entry((usize::from(u.owner.0), d.name.clone()))
+            .or_default() += 1;
+        let (x, y) = (u.pos.x.to_int_floor(), u.pos.y.to_int_floor());
+        if d.maxvelocity == tak_math::Fx::ZERO {
+            let (hw, hh) = (i32::from(d.footprintx) * 8, i32::from(d.footprintz) * 8);
+            rect(
+                &mut img,
+                px(x - hw),
+                px(y - hh),
+                px(x + hw),
+                px(y + hh),
+                col,
+            );
+        } else {
+            disc(&mut img, px(x), px(y), 3, [0, 0, 0]);
+            disc(&mut img, px(x), px(y), 2, col);
+        }
+    }
+    for ((p, name), n) in &counts {
+        summary.push_str(&format!("player {p}: {n} x {name}\n"));
+    }
+    let corpses = w.features.corpses().count();
+    let wrecks = w.features.corpses().filter(|(_, f)| f.obstacle).count();
+    summary.push_str(&format!(
+        "corpses: {corpses} lying ({wrecks} blocking), {} spawned; deaths {}\n",
+        w.features.corpses_spawned, w.combat.deaths
+    ));
     for (i, p) in sim.world().players().iter().enumerate() {
         let Some(u) = p.monarch.and_then(|id| sim.world().unit(id)) else {
             continue;
@@ -243,6 +314,18 @@ fn line(img: &mut RgbImage, x0: i32, y0: i32, x1: i32, y1: i32, c: [u8; 3], r: i
             err += dx;
             y += sy;
         }
+    }
+}
+
+fn rect(img: &mut RgbImage, x0: i32, y0: i32, x1: i32, y1: i32, c: [u8; 3]) {
+    let (x1, y1) = (x1.max(x0 + 1), y1.max(y0 + 1));
+    for x in x0..x1 {
+        put(img, x, y0, c);
+        put(img, x, y1 - 1, c);
+    }
+    for y in y0..y1 {
+        put(img, x0, y, c);
+        put(img, x1 - 1, y, c);
     }
 }
 

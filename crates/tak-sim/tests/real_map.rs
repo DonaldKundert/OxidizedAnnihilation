@@ -85,7 +85,16 @@ fn monarchs_spawn_walk_and_their_scripts_see_moving() {
     };
     let sc = m.scenario.clone();
     assert_eq!(sc.map.width, 192 * 16);
-    assert_eq!(sc.unit_defs.len(), 2);
+    // `load_match` loads the whole build trees (WP-P); the monarchs keep
+    // ids 0 and 1, and the trees follow.
+    assert!(sc.unit_defs.len() > 2, "{}", sc.unit_defs.len());
+    assert!(sc.unit_defs.iter().any(|d| d.name == "ARAKEEP"));
+    assert!(
+        sc.unit_defs
+            .iter()
+            .any(|d| d.name.eq_ignore_ascii_case("TARWALL"))
+    );
+    assert!(!sc.features.corpses.is_empty() && !sc.features.placed.is_empty());
     assert_eq!(sc.unit_defs[0].name, "ARAKING");
     assert_eq!(sc.unit_defs[0].maxvelocity, Fx::from_ratio(17, 10).unwrap());
     assert_eq!(sc.unit_defs[0].turnrate, 1500);
@@ -278,4 +287,32 @@ fn monarch_routes_around_impassable_terrain() {
         Outcome::Unreachable => assert!(u.pos.distance(to) < Fx::from_int(160)),
         o => panic!("unexpected outcome {o:?} at {:?}", u.pos),
     }
+}
+
+#[test]
+fn monarchs_only_loader_keeps_two_defs() {
+    let Some(dir) = tak_vfs::testing::data_dir_or_skip("monarchs_only_loader_keeps_two_defs")
+    else {
+        return;
+    };
+    let vfs = tak_vfs::open_kingdoms(&dir).expect("open install");
+    let players = PlayerSetup::parse_list("ARA,TAR");
+    let m = tak_sim::load_match_monarchs(&vfs, MAP, &players, 7).expect("load match");
+    let names: Vec<&str> = m
+        .scenario
+        .unit_defs
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    assert_eq!(names, ["ARAKING", "TARNECRO"]);
+    let full = load_match(&vfs, MAP, &players, 7).expect("load match");
+    assert_eq!(full.scenario.unit_defs[0].name, "ARAKING");
+    assert_eq!(full.scenario.unit_defs[1].name, "TARNECRO");
+    assert!(m.scenario.unit_defs[0].build.canbuild.is_empty());
+    assert!(!full.scenario.unit_defs[0].build.canbuild.is_empty());
+    assert!(
+        full.scenario.unit_defs.len() > 20,
+        "{}",
+        full.scenario.unit_defs.len()
+    );
 }

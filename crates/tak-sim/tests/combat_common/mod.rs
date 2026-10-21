@@ -90,6 +90,7 @@ pub fn scenario(seed: u64) -> Scenario {
         version: SCENARIO_FORMAT_VERSION,
         seed,
         economy: Default::default(),
+        features: Default::default(),
         map: MapInfo::flat(
             2048,
             2048,

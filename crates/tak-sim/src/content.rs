@@ -231,6 +231,9 @@ impl Scenario {
                 monarch: UnitDefId(def as u32),
             });
         }
+        let features = Box::new(crate::features::FeatureSetup::from_content(
+            map, rs, &unit_defs,
+        ));
         let sc = Scenario {
             version: SCENARIO_FORMAT_VERSION,
             seed: 0,
@@ -238,6 +241,7 @@ impl Scenario {
             unit_defs,
             players: specs,
             economy: Box::new(crate::economy::EconomySetup::from_content(map, rs)),
+            features,
         };
         sc.validate()?;
         Ok(sc)
@@ -308,17 +312,46 @@ pub fn load_scripts(vfs: &Vfs, rs: &Ruleset, scenario: &Scenario) -> CobScripts 
 
 /// Load a match from an open install: base ruleset, the map at `map_name`
 /// (VFS path without extension, e.g. `kmap/Adamantine Gate`), one monarch
-/// per player, and their scripts.
+/// per player, every unit reachable through the monarchs' build menus
+/// (so `Build` commands work; see
+/// [`crate::construction::content::add_build_trees`]), the map's features
+/// and every unit's corpse, and all their scripts. The monarchs keep
+/// definition ids `0..` in first-use order.
 pub fn load_match(
     vfs: &Vfs,
     map_name: &str,
     players: &[PlayerSetup],
     seed: u64,
 ) -> Result<Match, ContentError> {
+    load_match_with(vfs, map_name, players, seed, true)
+}
+
+/// [`load_match`] with only the monarchs' definitions (no build trees):
+/// faster to load, for tools and tests that never build.
+pub fn load_match_monarchs(
+    vfs: &Vfs,
+    map_name: &str,
+    players: &[PlayerSetup],
+    seed: u64,
+) -> Result<Match, ContentError> {
+    load_match_with(vfs, map_name, players, seed, false)
+}
+
+fn load_match_with(
+    vfs: &Vfs,
+    map_name: &str,
+    players: &[PlayerSetup],
+    seed: u64,
+    build_trees: bool,
+) -> Result<Match, ContentError> {
     let rs = Ruleset::load(vfs, RulesetKind::Base);
     let map = MapDef::load(vfs, &rs, map_name)?;
     let mut scenario = Scenario::from_content(&map, &rs, players)?;
+    if build_trees {
+        scenario = scenario.with_build_trees(&rs);
+    }
     scenario.seed = seed;
+    scenario.validate()?;
     let scripts = load_scripts(vfs, &rs, &scenario);
     Ok(Match {
         map,

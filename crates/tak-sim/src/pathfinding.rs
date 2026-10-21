@@ -32,7 +32,7 @@ use crate::script::ScriptHost;
 use crate::systems::ARRIVAL_TOLERANCE;
 use crate::world::{MAX_ORDERS, Order, Unit, World};
 
-pub use grid::{ClassGrid, ClassKey};
+pub use grid::{CellRect, ClassGrid, ClassKey};
 
 // --- Tunables: every number lives here. Tags: docs/pathfinding.md. ---
 
@@ -358,6 +358,9 @@ pub struct PathState {
     cursor: u32,
     /// Counters.
     pub stats: PathStats,
+    /// Dynamic obstacles: blockers per attribute cell, row-major over the
+    /// map's terrain grid (empty until the first [`add_obstacle`]).
+    obstacles: Vec<u16>,
 }
 
 impl core::fmt::Debug for PathState {
@@ -427,6 +430,25 @@ impl PathState {
         h.u32(s.searches);
         h.u64(s.pops);
         h.u32(s.unreachable);
+        // Sparse: (index, count) of every blocked cell.
+        let n = self.obstacles.iter().filter(|&&c| c > 0).count();
+        h.len(n);
+        for (i, &c) in self.obstacles.iter().enumerate() {
+            if c > 0 {
+                h.u32(i as u32);
+                h.u16(c);
+            }
+        }
+    }
+
+    /// Dynamic blockers on attribute cell `(cx, cz)` (0 outside the map or
+    /// on maps without terrain).
+    pub fn obstacles_at(&self, cx: i32, cz: i32, cols: u32) -> u16 {
+        if cx < 0 || cz < 0 || cx as u32 >= cols {
+            return 0;
+        }
+        let i = cz as usize * cols as usize + cx as usize;
+        self.obstacles.get(i).copied().unwrap_or(0)
     }
 
     /// The layer for a unit definition, once built (`None` for flyers and
@@ -459,7 +481,8 @@ impl PathState {
             let i = match self.grids.iter().position(|g| g.key == key) {
                 Some(i) => i,
                 None => {
-                    self.grids.push(ClassGrid::build(key, world.map(), t));
+                    self.grids
+                        .push(ClassGrid::build_with(key, world.map(), t, &self.obstacles));
                     self.grids.len() - 1
                 }
             };
@@ -512,6 +535,70 @@ pub fn go_to(world: &mut World, unit: UnitId, to: WorldPos) {
         u.orders.clear();
         u.orders.push_back(Order::Move { to });
     }
+}
+
+// --- Dynamic obstacles (WP-P) ---
+//
+// The hook other lanes use for things that block movement after the map
+// is loaded (blocking features such as wrecks; later, structures). Each
+// call adds or removes one blocker on every cell of a rectangle; a cell is
+// blocked while its count is non-zero, exactly like a `FEATURE` cell of
+// the map. Every built layer is re-stamped around the rectangle at once,
+// so movement sees the change in the same tick; layers built later include
+// it. Units already standing there can still walk out (the step rule lets
+// a unit on a blocked anchor move to any point whose own cell is open);
+// followers whose path crosses it stall and replan.
+
+/// Add one blocker to every cell of `r` (clipped to the map). No effect on
+/// maps without a terrain grid (where nothing blocks).
+pub fn add_obstacle(world: &mut World, r: CellRect) {
+    change_obstacle(world, r, true);
+}
+
+/// Remove one blocker from every cell of `r` (the inverse of
+/// [`add_obstacle`]; counts never go below zero).
+pub fn remove_obstacle(world: &mut World, r: CellRect) {
+    change_obstacle(world, r, false);
+}
+
+/// `true` if attribute cell `(cx, cz)` holds a dynamic obstacle.
+pub fn is_obstacle(world: &World, cx: i32, cz: i32) -> bool {
+    let cols = world.map().terrain.as_ref().map_or(0, |t| t.cols);
+    world.pathing.obstacles_at(cx, cz, cols) > 0
+}
+
+fn change_obstacle(world: &mut World, r: CellRect, add: bool) {
+    let Some(t) = world.map().terrain.as_ref() else {
+        return;
+    };
+    let (cols, rows) = (t.cols, t.rows);
+    let (x0, x1, z0, z1) = r.clip(cols, rows);
+    if x0 >= x1 || z0 >= z1 {
+        return;
+    }
+    let mut ps = std::mem::take(&mut world.pathing);
+    let n = cols as usize * rows as usize;
+    if ps.obstacles.len() != n {
+        ps.obstacles = vec![0; n];
+    }
+    for z in z0..z1 {
+        for x in x0..x1 {
+            let c = &mut ps.obstacles[z as usize * cols as usize + x as usize];
+            *c = if add {
+                c.saturating_add(1)
+            } else {
+                c.saturating_sub(1)
+            };
+        }
+    }
+    if let Some(t) = world.map().terrain.as_ref() {
+        let obstacles = std::mem::take(&mut ps.obstacles);
+        for g in &mut ps.grids {
+            g.restamp(world.map(), t, &obstacles, r);
+        }
+        ps.obstacles = obstacles;
+    }
+    world.pathing = ps;
 }
 
 /// Runs after orders, before movement: builds the layers on the first

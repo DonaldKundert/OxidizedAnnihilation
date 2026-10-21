@@ -113,6 +113,7 @@ pub fn scenario() -> Scenario {
         version: SCENARIO_FORMAT_VERSION,
         seed: 3,
         economy: Default::default(),
+        features: Default::default(),
         map: MapInfo::flat(
             1024,
             1024,

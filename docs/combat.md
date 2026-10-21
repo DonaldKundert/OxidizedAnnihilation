@@ -136,8 +136,65 @@ When it writes port 26 or 31 (or returns at once, or after 150 ticks,
 Chosen), `Killed(severity, 0, kind)` runs, its corpse answer is recorded in
 `CombatState.corpses` (with position, heading and definition) and the unit is
 removed through `lifecycle::remove_unit`; `[EXPLODEAS]` goes off at that
-moment. **Follow-up**: spawning the FBI `corpse` feature once features exist
-in the sim.
+moment. Then the corpse feature is spawned (next section).
+
+## Frame health (WP-P)
+
+Units under construction ("frames") take part in combat: they can be
+targeted and damaged from the tick they are placed, but never act.
+
+| Rule | Value | Tag |
+|---|---|---|
+| Starting health | **0** | TA-Known (Nanolathe `05` "Nanoframe allocation": a new nanoframe has remaining fraction 1 and health 0) |
+| Gain per build step | `trunc(max × old_remaining) − trunc(max × new_remaining)`, remaining = `(total − done) / total`, capped at `maxdamage` | TA-Known ("Health gain and fractional carry": difference of truncations, so the steps sum to exactly `maxdamage`) |
+| Damage to a frame | plain health loss; build progress is untouched, so a damaged frame completes below full health | TA-Known (the work step and damage write different fields) |
+| Health 0 or less | the frame dies like any unit (`Dying`, `Killed`, corpse) | TA-Known (TA's health check is on damage) |
+| Regeneration (`healtime`) | only once complete | Believed |
+| Destroyed frame | the builder's order ends (`StopBuilding`, order dropped); a factory drops its whole queue (WP-O) | Believed |
+
+Code: `combat::build_progress` (called by construction after every work
+step), `combat::frame_health`. A frame first seen by combat without a work
+step gets the health its progress has earned. Consequence players know: a
+fresh frame dies to almost anything, so building under fire fails (the
+WP-P real-map run had to keep the Taros monarch out of fireball range of
+the keep's yard, or the first swordsman frame died at once and the keep
+dropped its queue). Confidence: high for TA; the Kingdoms scripts' port 4
+reads (health percent) during construction are consistent with it.
+
+## Corpses and features (WP-P)
+
+Module `tak_sim::features`; state `World::features` (hashed); static data
+`Scenario::features` (`FeatureSetup`: feature definitions, placed map
+features, the corpse of each unit definition).
+
+- **Placed features**: every TNT feature-grid entry whose definition matters
+  to gameplay (`blocking`, `reclaimable`, `damage`, `energy` or
+  `sacredsite`), anchored top-left on its cell with its footprint, health =
+  `damage`. Their blocking is already in the map's terrain grid (`FEATURE`
+  flag), so they add no obstacle. Adamantine Gate: 85 such features, 10 of
+  them sacred stones.
+- **Corpses**: when a unit is removed after `Killed`, its FBI `corpse`
+  feature is spawned for corpse answer 1; for answers above 1 the
+  `featuredead` chain is followed `answer − 1` steps (Believed, TA corpse
+  depth); answer 0 (Kingdoms scripts answer 0 for explosion deaths, kind 3)
+  or no `corpse` key leaves nothing. The footprint is centred on the unit
+  and snapped like a structure (Chosen; `corpseadjustx/z` not applied);
+  heading kept; health = the feature's `damage`.
+- **Blocking**: Known from the data, 52 of 140 corpse features block
+  (`blocking = 1`): walls, towers, keeps, siege engines, ships, big
+  monsters (3x3 to 12x10); the 88 infantry/animal bodies (mostly 2x2) do
+  not. A blocking corpse adds a dynamic obstacle over its footprint
+  (`pathfinding::add_obstacle`, `docs/pathfinding.md`): movement layers
+  route around it at once and placement refuses its cells
+  (`SiteError::Feature`).
+- **Decay**: a corpse with `decompose_time` vanishes that many seconds
+  after it appeared (**Believed**: the key, 30 on infantry bodies, is
+  absent on every blocking wreck). Runs at the end of the combat lane.
+- `CombatState.corpses` (the death log) is kept as before.
+- Not yet: reclaim (`reclaimable`, `energy` → mana via `economy::credit`),
+  damaging/burning features, resurrection, removing placed features (their
+  block lives in the static terrain grid; removal will need a "cleared"
+  overlay).
 
 ## Orders
 
@@ -147,7 +204,9 @@ in the sim.
   the last goal, and stop when any weapon is in reach. Unit attacks end when
   the target dies; ground attacks run until replaced.
 - `Guard`: stay within 96 units of the guarded unit (Chosen), chase enemies
-  within sight that are within the leash of the guarded unit.
+  within sight that are within the leash of the guarded unit. A mobile
+  builder guarding something under construction assists instead (WP-P,
+  `docs/construction.md`); while it assists it neither follows nor chases.
 - `CastSpell { spell: SpellId(slot) }`: fire spell weapon `slot` once
   (targetless: on the caster). Mana via the economy (TODO above).
 - Idle units at FireAtWill (or ReturnFire against their attacker) chase the
@@ -172,6 +231,13 @@ in the sim.
   (swordsmen win at about half health); 5 ARASWORD vs 5 ZONTROLL: trolls win
   without loss in about 360 ticks; 5 ARAARCH vs 5 ZONTER: Zhon win. Zero VM
   errors, zero runaway loops; ports 22, 23, 26/31 written as expected.
+- WP-P (`tests/open_items.rs`, synthetic): frames start at 0 health and
+  gain it to exactly `maxdamage` on the completion tick (6 hp after the
+  first monarch tick on a 1000-hp, 65-s wall); 300 damage mid-build leaves
+  the wall complete at 700; a fresh frame dies to a 50-damage hit; a 4x4
+  blocking wreck blocks the layer and a walker routes around it; a body
+  decomposes after 30 ticks. Real data (`tests/open_items_real_map.rs`):
+  see `docs/construction.md`.
 - **Runaway loops re-tested** under real combat (each unit attacks a troll,
   is ordered to walk off mid-attack, re-attacks): 10 of 11 no longer run
   away (ARAPULT, MONDEV, MONGHOUL, NPCAYLA, NPCPOW2, VERBAL, VERLIHR, VERPULT,
@@ -187,3 +253,5 @@ in the sim.
   veterancy (port 32, `veteranlevel`), auras, paralyzer, turn-to-stone,
   mind control.
 - Ports 21 (aim aborted ack, unused by the engine), 26/31 exact meanings.
+- Corpse placement offset (`corpseadjustx/z`), `decompose_time` units,
+  whether features can be shot.
