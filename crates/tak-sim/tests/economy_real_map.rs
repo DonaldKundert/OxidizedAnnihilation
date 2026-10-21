@@ -46,6 +46,49 @@ fn fbi_economy_keys_convert() {
     assert_eq!((divine.mogriumincome, divine.sacred_site), (20, true));
 }
 
+/// WP-P item 6, the evidence on `economybonus` (docs/economy.md): only
+/// monarch-class units carry it, always three times their own income; the
+/// Veruna monarch has none; the Crusades balance raises the Veruna
+/// monarch's income 10 -> 15 but also every priest-class unit's 1 -> 5, so
+/// the change reads as a general mana rebalance rather than a stand-in for
+/// the bonus. The default rule stays `Ignore`.
+#[test]
+fn economybonus_evidence() {
+    let Some((vfs, rs)) = setup("economybonus_evidence") else {
+        return;
+    };
+    let mut carriers = Vec::new();
+    for u in rs.units.values() {
+        let d = unit_def_from_fbi(u).economy;
+        if d.economybonus > 0 {
+            assert_eq!(d.economybonus, 3 * d.mogriumincome, "{}", u.unitname);
+            assert_eq!(d.mogriumstorage, 500 * d.mogriumincome, "{}", u.unitname);
+            carriers.push(u.unitname.to_ascii_uppercase());
+        }
+    }
+    carriers.sort();
+    assert_eq!(
+        carriers,
+        [
+            "ARAKING", "CRESAGE", "TARHEL", "TARNECR2", "TARNECRO", "ZONHUNT", "ZONHURT"
+        ]
+    );
+    let ver = unit_def_from_fbi(rs.unit("VERMAGE").unwrap()).economy;
+    assert_eq!((ver.mogriumincome, ver.economybonus), (10, 0));
+
+    let cb = Ruleset::load(&vfs, RulesetKind::Cb);
+    let inc = |rs: &Ruleset, n: &str| unit_def_from_fbi(rs.unit(n).unwrap()).economy.mogriumincome;
+    assert_eq!(inc(&cb, "VERMAGE"), 15);
+    assert_eq!(inc(&cb, "ARAKING"), 10, "bonus carriers unchanged");
+    for priest in ["ARAPRIES", "CRECHIE", "TARPRIES", "VERLIHR", "ZONSHAM"] {
+        assert_eq!((inc(&rs, priest), inc(&cb, priest)), (1, 5), "{priest}");
+    }
+    assert_eq!(
+        economy::EconomyRules::default().economy_bonus,
+        economy::EconomyBonusRule::Ignore
+    );
+}
+
 #[test]
 fn adamantine_gate_income() {
     let Some((vfs, rs)) = setup("adamantine_gate_income") else {
