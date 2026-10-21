@@ -53,6 +53,36 @@ without motion data default to `GROUND2` (Known: `CLASS0`, footprint 2×2,
 slope 30, water depth 20, water slope 30). All five monarchs but Zhon are
 `GROUND2` or `HOVER2` (Known); `ZONHUNT` flies.
 
+## Dynamic obstacles (WP-P)
+
+The hook for things that block movement after the map loads (today:
+blocking corpses, `docs/combat.md`; later structures):
+
+```rust
+pathfinding::add_obstacle(world, CellRect { x, z, w, h })    // one more blocker per cell
+pathfinding::remove_obstacle(world, rect)                    // one fewer (never below 0)
+pathfinding::is_obstacle(world, cx, cz) -> bool
+```
+
+- `PathState` keeps a blocker count per attribute cell (allocated on the
+  first add; hashed sparsely: index and count of every non-zero cell). A
+  cell with a non-zero count is classified exactly like a map `FEATURE`
+  cell (blocked for every class). Counts make overlapping obstacles
+  independent.
+- Each call re-stamps every built layer at once (`ClassGrid::restamp`):
+  the cells in the rectangle, every anchor whose footprint or one-cell ring
+  touches it (so footprint folding and ring demotion stay exact), then the
+  connected components of the whole layer (a flood fill; cheap next to a
+  search). Layers built later (`ClassGrid::build_with`) include the
+  current counts. Movement therefore sees the change in the same tick.
+- Units already under a new obstacle can walk out (the step rule lets a
+  unit on a blocked anchor move to any point whose own cell is open);
+  followers whose path crosses it are refused the step, stall and replan
+  (Chosen; TA re-validates paths in the same way through stalls).
+- Maps without a terrain grid (synthetic) ignore obstacles for movement
+  (nothing blocks there); placement still sees them.
+- No effect on the WP-K legacy centre-cell mover (`systems::move_unit`).
+
 ## Search
 
 | Item | Value | Tag |
@@ -208,7 +238,8 @@ because it is what TA does, but at high unit counts it is a known flaw: with
 - `roadmultiplier` / `watermultiplier` semantics (Believed: plain factors on
   the speed cap); whether Kingdoms keeps TA's half-speed rule for units
   without the key.
-- Building occupancy in the layers (construction adds buildings; the layers
-  are static for now), and dynamic features.
+- Building occupancy in the layers: the dynamic-obstacle hook exists
+  (below) and wrecks use it; structures do not yet (TA's occupancy also
+  holds structures and units).
 - Air movement beyond "ignores terrain"; boats and hovers are classified by
   their classes but untested on real water maps.

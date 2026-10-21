@@ -19,6 +19,44 @@ const CELL: i64 = 16;
 /// One cell in raw 16.16.
 const CELL_RAW: i64 = CELL << 16;
 
+/// A rectangle of attribute cells (16 world units each): top-left cell and
+/// size. Used for dynamic obstacles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CellRect {
+    /// Left column.
+    pub x: i32,
+    /// Top row.
+    pub z: i32,
+    /// Width in cells.
+    pub w: i32,
+    /// Height in cells.
+    pub h: i32,
+}
+
+impl CellRect {
+    /// The whole `cols x rows` grid.
+    pub fn whole(cols: u32, rows: u32) -> CellRect {
+        CellRect {
+            x: 0,
+            z: 0,
+            w: cols.min(i32::MAX as u32) as i32,
+            h: rows.min(i32::MAX as u32) as i32,
+        }
+    }
+
+    /// `(x0, x1, z0, z1)`, half-open, clipped to a `cols x rows` grid.
+    pub fn clip(&self, cols: u32, rows: u32) -> (u32, u32, u32, u32) {
+        let c = |lo: i32, len: i32, n: u32| {
+            let lo64 = i64::from(lo).max(0);
+            let hi64 = (i64::from(lo) + i64::from(len.max(0))).min(i64::from(n));
+            (lo64.min(hi64.max(0)) as u32, hi64.max(0) as u32)
+        };
+        let (x0, x1) = c(self.x, self.w, cols);
+        let (z0, z1) = c(self.z, self.h, rows);
+        (x0, x1.max(x0), z0, z1.max(z0))
+    }
+}
+
 /// The terrain limits that define a layer. Units whose [`super::Motion`]
 /// reduces to the same key share one layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -57,7 +95,44 @@ const STORED_MAX_DEPTH: i32 = 20;
 impl ClassGrid {
     /// Stamp the layer for `key` over `map` (whose terrain grid is `t`).
     pub fn build(key: ClassKey, map: &MapInfo, t: &TerrainGrid) -> ClassGrid {
-        let (cols, rows) = (t.cols, t.rows);
+        ClassGrid::build_with(key, map, t, &[])
+    }
+
+    /// [`ClassGrid::build`] with dynamic obstacles: a cell whose entry in
+    /// `obstacles` (row-major, one per attribute cell; empty = none) is
+    /// non-zero counts as holding a blocking feature (`docs/pathfinding.md`,
+    /// "Dynamic obstacles").
+    pub fn build_with(
+        key: ClassKey,
+        map: &MapInfo,
+        t: &TerrainGrid,
+        obstacles: &[u16],
+    ) -> ClassGrid {
+        let n = t.cols as usize * t.rows as usize;
+        let mut g = ClassGrid {
+            key,
+            cols: t.cols,
+            rows: t.rows,
+            cell: vec![BLOCKED; n],
+            anchor: vec![BLOCKED; n],
+            comp: Vec::new(),
+        };
+        g.stamp(map, t, obstacles, CellRect::whole(t.cols, t.rows));
+        g
+    }
+
+    /// Re-stamp after the obstacles changed inside `r`: its cells, every
+    /// anchor whose footprint or one-cell ring touches it, then the
+    /// connected components (whole map; a flood fill is cheap).
+    pub fn restamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u16], r: CellRect) {
+        if t.cols == self.cols && t.rows == self.rows {
+            self.stamp(map, t, obstacles, r);
+        }
+    }
+
+    fn stamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u16], r: CellRect) {
+        let key = self.key;
+        let (cols, rows) = (self.cols, self.rows);
         let n = cols as usize * rows as usize;
         let hg = &map.heights;
         let heights_match = hg.cols == cols && hg.rows == rows && hg.heights.len() == n;
@@ -69,9 +144,9 @@ impl ClassGrid {
             }
         };
         let sea = map.sea_level;
-        let mut cell = vec![BLOCKED; n];
-        for z in 0..rows {
-            for x in 0..cols {
+        let (x0, x1, z0, z1) = r.clip(cols, rows);
+        for z in z0..z1 {
+            for x in x0..x1 {
                 // Derived pair over the cell and its east, south and
                 // south-east neighbours (the four corners), edge-guarded.
                 let mut lo = h(x, z);
@@ -84,11 +159,24 @@ impl ClassGrid {
                         hi = hi.max(v);
                     }
                 }
-                let flags = t.flags_of_cell(x, z);
-                cell[z as usize * cols as usize + x as usize] = cell_tier(&key, flags, lo, hi, sea);
+                let i = z as usize * cols as usize + x as usize;
+                let mut flags = t.flags_of_cell(x, z);
+                if obstacles.get(i).is_some_and(|&c| c > 0) {
+                    flags |= terrain::FEATURE;
+                }
+                self.cell[i] = cell_tier(&key, flags, lo, hi, sea);
             }
         }
         let (fx, fz) = (i64::from(key.fx.max(1)), i64::from(key.fz.max(1)));
+        // Anchors whose footprint (or its one-cell ring) reaches into `r`.
+        let grown = CellRect {
+            x: r.x.saturating_sub(fx as i32),
+            z: r.z.saturating_sub(fz as i32),
+            w: r.w.saturating_add(fx as i32 + 1),
+            h: r.h.saturating_add(fz as i32 + 1),
+        };
+        let (ax0, ax1, az0, az1) = grown.clip(cols, rows);
+        let cell = &self.cell;
         let at = |x: i64, z: i64| -> u8 {
             if x < 0 || z < 0 || x >= i64::from(cols) || z >= i64::from(rows) {
                 BLOCKED
@@ -96,9 +184,9 @@ impl ClassGrid {
                 cell[z as usize * cols as usize + x as usize]
             }
         };
-        let mut anchor = vec![BLOCKED; n];
-        for z in 0..i64::from(rows) {
-            for x in 0..i64::from(cols) {
+        let mut anchor = std::mem::take(&mut self.anchor);
+        for z in i64::from(az0)..i64::from(az1) {
+            for x in i64::from(ax0)..i64::from(ax1) {
                 let mut m = CLEAR;
                 'fp: for j in z..z + fz {
                     for i in x..x + fx {
@@ -121,15 +209,8 @@ impl ClassGrid {
                 anchor[z as usize * cols as usize + x as usize] = m;
             }
         }
-        let comp = components(&anchor, cols, rows);
-        ClassGrid {
-            key,
-            cols,
-            rows,
-            cell,
-            anchor,
-            comp,
-        }
+        self.comp = components(&anchor, cols, rows);
+        self.anchor = anchor;
     }
 
     /// Cells in the layer.
