@@ -1,4 +1,4 @@
-# Bevy client (`client/`, WP-Q)
+# Bevy client (`client/`, WP-Q, WP-R)
 
 The first playable view of the core: a real Kingdoms map, animated 3DO
 units driven by their own COB scripts, selection and orders through
@@ -62,9 +62,13 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
   focus, for checking art by eye.
 - Each capture prints every unit (slot, def, owner, position, health,
   build progress, first orders), the feature count and the hash.
-- **Known** to work on this machine: Mesa lavapipe (Vulkan, llvmpipe),
-  1280×720, about 8 fps rendering with the sim at exactly 30 ticks/s.
-  `WGPU_BACKEND=gl` was not needed.
+- **Known** to work on this machine: Mesa lavapipe (Vulkan, llvmpipe,
+  software rendering on 2 CPU cores), 1280×720. WP-Q: about 8 fps. WP-R
+  (all map features, effects, minimap, HUD widgets, fog on), zoom 0.5:
+  6.0 fps on Adamantine Gate (7.7 with `--no-fog`), 5.4–6.0 fps on Grimm
+  Farms (1,160 features); zoom 1.0 on Gaerion Wood 5.7–6.0 fps; zoom 2.5
+  on Grimm Farms with hundreds of sprites on screen about 4.5 fps. The sim
+  runs at exactly 30 ticks/s regardless. `WGPU_BACKEND=gl` was not needed.
 
 ### Logs, hashes, replay
 
@@ -106,6 +110,9 @@ keyboard and a gamepad work together and share one selection.
 | Cursor | mouse | left stick (virtual cursor, magnetism, RT precision) |
 | Zoom | mouse wheel | |
 | Pause, game speed | Pause (or Ctrl+P), `=` / `-` | |
+| Jump the camera | LMB click / drag on the minimap | A with the cursor on the minimap |
+| HUD buttons (orders, build) | LMB on the button (same as its key) | A with the cursor on the button |
+| Fog of war on/off | F9 (`--no-fog` starts off) | |
 
 Game speed changes ticks per wall second only, never tick length.
 
