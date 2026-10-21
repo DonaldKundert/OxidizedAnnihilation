@@ -642,7 +642,12 @@ dependencies = [
 name = "tak-input"
 version = "0.1.0"
 dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
  "tak-commands",
+ "tak-math",
+ "thiserror",
 ]
 
 [[package]]

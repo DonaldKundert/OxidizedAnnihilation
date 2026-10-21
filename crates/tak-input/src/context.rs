@@ -1,0 +1,157 @@
+//! Cursor picking and context-order resolution.
+
+use tak_commands::{QueueMode, SimCommand, SpellId, Target, UnitDefId, UnitSet, WorldPos};
+
+use crate::world::{BuilderKind, UnitInfo, WorldView};
+
+/// A pending order mode: the next context action completes it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Mode {
+    /// Plain context orders.
+    #[default]
+    None,
+    /// Place a building of this type.
+    Build(UnitDefId),
+    /// Patrol to the cursor.
+    Patrol,
+    /// Guard the unit under the cursor.
+    Guard,
+    /// Cast this spell at the cursor.
+    CastSpell(SpellId),
+}
+
+/// The pickable unit under `pos`: the nearest whose pick radius contains it,
+/// ties broken by lower id.
+pub fn pick_unit<W: WorldView + ?Sized>(world: &W, pos: WorldPos) -> Option<UnitInfo> {
+    let mut best: Option<(tak_math::Fx, UnitInfo)> = None;
+    world.for_each_unit(&mut |u| {
+        if !u.selectable {
+            return;
+        }
+        let d = u.pos.distance(pos);
+        if d > u.radius {
+            return;
+        }
+        let better = match &best {
+            None => true,
+            Some((bd, b)) => d < *bd || (d == *bd && u.id < b.id),
+        };
+        if better {
+            best = Some((d, *u));
+        }
+    });
+    best.map(|(_, u)| u)
+}
+
+/// The units of `selection` that still exist and belong to the local player.
+pub fn own_units<W: WorldView + ?Sized>(world: &W, selection: &UnitSet) -> UnitSet {
+    let me = world.local_player();
+    selection
+        .iter()
+        .copied()
+        .filter(|&id| world.unit(id).is_some_and(|u| u.owner == me))
+        .collect()
+}
+
+/// Units of `units` that can build `def`, optionally only of one kind.
+pub fn builders_for<W: WorldView + ?Sized>(
+    world: &W,
+    units: &UnitSet,
+    def: UnitDefId,
+    kind: Option<BuilderKind>,
+) -> UnitSet {
+    units
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .unit(id)
+                .is_some_and(|u| u.builder.is_some() && kind.is_none_or(|k| u.builder == Some(k)))
+                && world.build_options(id).contains(&def)
+        })
+        .collect()
+}
+
+/// Units of `units` that can cast `spell`.
+pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: SpellId) -> UnitSet {
+    units
+        .iter()
+        .copied()
+        .filter(|&id| world.spells(id).contains(&spell))
+        .collect()
+}
+
+/// The order a context action issues for `units` (already filtered to own,
+/// living units) with the cursor at `cursor` over `hovered`:
+///
+/// - `Mode::Build(def)`: `Build { at: Some(cursor) }` by mobile builders
+///   that can build `def`.
+/// - `Mode::Patrol`: `Patrol { to: cursor }`.
+/// - `Mode::Guard`: `Guard` the hovered non-enemy unit; nothing over ground
+///   or an enemy.
+/// - `Mode::CastSpell(s)`: `CastSpell` at the hovered unit or the ground, by
+///   units that know `s`.
+/// - No mode: hovered enemy → `Attack`; hovered friendly unit outside the
+///   selection → `Guard`; otherwise → `Move { to: cursor }`.
+///
+/// `None` when no unit can carry out the order.
+pub fn resolve_context<W: WorldView + ?Sized>(
+    world: &W,
+    units: &UnitSet,
+    cursor: WorldPos,
+    hovered: Option<&UnitInfo>,
+    mode: Mode,
+    queue: QueueMode,
+) -> Option<SimCommand> {
+    if units.is_empty() {
+        return None;
+    }
+    let nonempty = |s: UnitSet| if s.is_empty() { None } else { Some(s) };
+    match mode {
+        Mode::Build(def) => Some(SimCommand::Build {
+            units: nonempty(builders_for(world, units, def, Some(BuilderKind::Mobile)))?,
+            def,
+            at: Some(cursor),
+            queue,
+        }),
+        Mode::Patrol => Some(SimCommand::Patrol {
+            units: units.clone(),
+            to: cursor,
+            queue,
+        }),
+        Mode::Guard => {
+            let h = hovered.filter(|h| !world.is_enemy(h.owner))?;
+            Some(SimCommand::Guard {
+                units: units.clone(),
+                target: h.id,
+                queue,
+            })
+        }
+        Mode::CastSpell(spell) => Some(SimCommand::CastSpell {
+            units: nonempty(casters_for(world, units, spell))?,
+            spell,
+            target: Some(match hovered {
+                Some(h) => Target::Unit(h.id),
+                None => Target::Ground(cursor),
+            }),
+            queue,
+        }),
+        Mode::None => Some(match hovered {
+            Some(h) if world.is_enemy(h.owner) => SimCommand::Attack {
+                units: units.clone(),
+                target: Target::Unit(h.id),
+                queue,
+            },
+            Some(h) if !units.contains(h.id) => SimCommand::Guard {
+                units: units.clone(),
+                target: h.id,
+                queue,
+            },
+            _ => SimCommand::Move {
+                units: units.clone(),
+                to: cursor,
+                queue,
+            },
+        }),
+    }
+}
