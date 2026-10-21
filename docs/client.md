@@ -129,15 +129,36 @@ projectiles); rendering lerps between the last two with
 - Render space: `x` = world x (east), `y` = height, `z` = world y (south).
   World units are map pixels. Height is the raw TNT byte (**Believed**,
   as the sim uses it).
-- Camera: orthographic, looking north, pitched down `atan(2)` = 63.4°
-  (**Chosen**): a unit of height rises half as far on screen as a unit of
-  ground recedes, as in TA's oblique view; the whole ground is
-  foreshortened by `sin(63.4°)` = 0.894 vertically.
-- `tak-input`'s `Camera` is an orthographic ground mapping with one scale.
-  The client gives it "virtual pixels" (`y / sin(pitch)`) and feeds pointer
-  positions as the virtual pixel of the terrain point under the mouse
-  (ray-marched against the heightfield), so picking and orders land on
-  what is under the cursor even on plateaus (`view.rs`, tested).
+- **Camera: TA's oblique projection (WP-R).** `screen_x = (x − cam_x) /
+  zoom`, `screen_y = (z − 0.5·height − cam_z) / zoom`: one pixel per world
+  unit on both ground axes at zoom 1 (no foreshortening), and height
+  shifts the image straight up by half its value (`view::SHEAR` = 0.5).
+  **Believed**: Nanolathe's TA research (`docs/DESIGN_PRESENTATION_CLIENT.md`
+  C1, `screenY = worldZ − (worldY >> 1)`), and Kingdoms agrees: drawing the
+  height map's contours over the terrain mosaic at `z − h/2` puts them
+  exactly on the painted cliff edges, crater rims and pond shores, while at
+  `z` they miss by tens of pixels (Adamantine Gate, checked by eye). So the
+  terrain art is screen-space: mosaic pixel `(x, y)` shows world `(x, y +
+  h/2)`.
+- Bevy has no oblique camera, so `app::ObliqueProjection` is a custom
+  `CameraProjection`: the camera sits at `(cam_x, 0, cam_z)` with no
+  rotation and the matrix does the shear (`ViewGeom::clip_from_view`).
+  Rays run along `(0, −1, −0.5)` (down and north); depth is `y + 0.5·z`
+  (reverse-Z over ±8000), so higher and more southern points are nearer.
+  Frustum culling uses the full matrix.
+- Terrain: vertices keep their real heights (for occlusion and picking)
+  but sample the mosaic at `(x, z − h/2)`, so on screen the art shows
+  exactly as the flat mosaic (chunk images carry a 128-px margin from the
+  chunk to the north). With this the sea-level plane now tints exactly the
+  painted water, island in the pond included.
+- Models are projected with the same shear (verticals shrink to half,
+  ground plan unforeshortened), as TA draws them.
+- `tak-input`'s `Camera` is an orthographic ground mapping with one scale;
+  with no foreshortening its pixels are screen pixels of the height-0
+  plane. The client feeds pointer positions as the pixel of the terrain
+  point under the mouse (ray-marched against the heightfield), so picking
+  and orders land on what is under the cursor even on plateaus (`view.rs`,
+  tested).
 
 ### Terrain
 
@@ -249,7 +270,5 @@ slots next to the cursor from `Mapper::wheel()`.
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet
   shown in the HUD.
-- The orthographic tilt is an approximation of TA's oblique projection
-  (ground slightly foreshortened).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies around tick 1,700. Behaviour is the sim's.

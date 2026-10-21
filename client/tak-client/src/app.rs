@@ -333,7 +333,7 @@ fn focus_point(s: &Session, focus: Focus) -> Option<[f32; 2]> {
             .map(|(_, u)| u.pos)?,
     };
     let h = f(w.map().height_at(pos));
-    Some([f(pos.x), f(pos.y) - h / crate::view::pitch().tan()])
+    Some([f(pos.x), f(pos.y) - crate::view::SHEAR * h])
 }
 
 fn rgba_image(w: u32, h: u32, data: Vec<u8>) -> Image {
@@ -361,10 +361,13 @@ fn setup_scene(
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
-        Projection::Orthographic(OrthographicProjection {
-            near: 1.0,
-            far: 16000.0,
-            ..OrthographicProjection::default_3d()
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
+        Projection::custom(ObliqueProjection {
+            geom: ViewGeom {
+                target: [0.0, 0.0],
+                zoom: 1.0,
+                size: [1280.0, 720.0],
+            },
         }),
         Transform::default(),
     ));
@@ -379,7 +382,8 @@ fn setup_scene(
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, cm.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, cm.uvs);
         mesh.insert_indices(Indices::U32(cm.indices));
-        let img = rgba_image(chunk.tiles.0 * 32, chunk.tiles.1 * 32, chunk.rgba.clone());
+        let (iw, ih) = chunk.image_size();
+        let img = rgba_image(iw, ih, chunk.rgba.clone());
         let mat = materials.add(StandardMaterial {
             base_color_texture: Some(images.add(img)),
             unlit: true,
@@ -898,22 +902,75 @@ fn sim_driver(time: Res<Time>, plan: Option<Res<ShotPlan>>, mut sim: NonSendMut<
     }
 }
 
+/// Depth range of the oblique projection, in units of `y + SHEAR * z`
+/// either side of the camera (covers a 4-world-unit-per-pixel view of a
+/// 1080-px window plus every height).
+const DEPTH_RANGE: f32 = 8000.0;
+
+/// TA's oblique projection as a Bevy camera projection (see
+/// [`ViewGeom`]): the camera sits at `(target.x, 0, target.z)` with no
+/// rotation and this matrix does the shear.
+#[derive(Debug, Clone)]
+struct ObliqueProjection {
+    geom: ViewGeom,
+}
+
+impl bevy::camera::CameraProjection for ObliqueProjection {
+    fn get_clip_from_view(&self) -> Mat4 {
+        Mat4::from_cols_array_2d(&self.geom.clip_from_view(DEPTH_RANGE))
+    }
+
+    fn get_clip_from_view_for_sub(&self, _sub_view: &bevy::camera::SubCameraView) -> Mat4 {
+        self.get_clip_from_view()
+    }
+
+    fn update(&mut self, width: f32, height: f32) {
+        self.geom.size = [width, height];
+    }
+
+    fn far(&self) -> f32 {
+        DEPTH_RANGE
+    }
+
+    fn get_frustum_corners(&self, _z_near: f32, _z_far: f32) -> [bevy::math::Vec3A; 8] {
+        let inv = self.get_clip_from_view().inverse();
+        let c = |x: f32, y: f32, z: f32| {
+            bevy::math::Vec3A::from(inv.project_point3(Vec3::new(x, y, z)))
+        };
+        [
+            c(1.0, -1.0, 1.0),
+            c(1.0, 1.0, 1.0),
+            c(-1.0, 1.0, 1.0),
+            c(-1.0, -1.0, 1.0),
+            c(1.0, -1.0, 0.0),
+            c(1.0, 1.0, 0.0),
+            c(-1.0, 1.0, 0.0),
+            c(-1.0, -1.0, 0.0),
+        ]
+    }
+
+    fn compute_frustum(
+        &self,
+        camera_transform: &GlobalTransform,
+    ) -> bevy::camera::primitives::Frustum {
+        let clip_from_world = self.get_clip_from_view() * camera_transform.affine().inverse();
+        bevy::camera::primitives::Frustum(bevy::shape::ViewFrustum::from_clip_from_world(
+            &clip_from_world,
+        ))
+    }
+}
+
 fn camera_system(
     cam: Res<CamState>,
     mut q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let g = cam.geom;
-    let back = g.back();
     for (mut tf, mut proj) in &mut q {
-        let target = Vec3::new(g.target[0], 0.0, g.target[1]);
-        let eye = target + Vec3::from_array(back) * 6000.0;
-        *tf = Transform::from_translation(eye).looking_at(target, Vec3::Y);
-        if let Projection::Orthographic(o) = &mut *proj {
-            o.scaling_mode = bevy::camera::ScalingMode::Fixed {
-                width: g.size[0] * g.zoom,
-                height: g.size[1] * g.zoom,
-            };
-            o.scale = 1.0;
+        *tf = Transform::from_xyz(g.target[0], 0.0, g.target[1]);
+        if let Projection::Custom(c) = &mut *proj
+            && let Some(o) = c.get_mut::<ObliqueProjection>()
+        {
+            o.geom = g;
         }
     }
 }

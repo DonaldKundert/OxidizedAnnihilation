@@ -2,6 +2,15 @@
 //! exactly as `tak-cli dump-map` assembles its mosaic (tile cell `(x, y)`
 //! shows the 32×32 piece `(col, row)` of `terrain/<id>.jpg`).
 //!
+//! The mosaic is screen-space art: mosaic pixel `(x, y)` shows the world
+//! point `(x, z)` with `y = z - SHEAR * height` (**Believed**, the height
+//! map's contours line up with the painted cliffs and craters this way and
+//! not without the shift; `docs/client.md`). So a mesh vertex at world
+//! `(x, h, z)` samples mosaic pixel `(x, z - SHEAR * h)`: under the oblique
+//! projection the art then shows on screen exactly as the flat mosaic, and
+//! the heights only give depth for occlusion. Chunk images therefore carry
+//! a margin of rows from the chunk to the north.
+//!
 //! World units = map pixels. One attribute cell is 16 units and carries one
 //! height sample (the raw TNT byte, **Believed** one world unit per step, as
 //! the sim uses it). Mesh vertices sit on cell corners with the average of
@@ -14,6 +23,12 @@ use std::collections::BTreeMap;
 use tak_formats::tnt::{self, PIECE_PX, TileGrid};
 use tak_vfs::Vfs;
 
+use crate::view::SHEAR;
+
+/// Tile rows of northern margin in each chunk image: enough for the
+/// largest shift, `SHEAR * 255` = 128 px.
+pub const MARGIN_TILES: u32 = 4;
+
 /// Tile cells per texture chunk side (32 × 32 px each, so 1024 px).
 pub const CHUNK_TILES: u32 = 32;
 /// World units per attribute cell.
@@ -21,12 +36,24 @@ pub const CELL: f32 = 16.0;
 
 /// One chunk's texture.
 pub struct ChunkImage {
-    /// First tile cell (x, y) covered.
+    /// First tile cell (x, y) covered by the mesh.
     pub tile0: (u32, u32),
-    /// Tile cells covered (w, h).
+    /// Tile cells covered by the mesh (w, h).
     pub tiles: (u32, u32),
-    /// RGBA8, `tiles.0 * 32` × `tiles.1 * 32`.
+    /// Tile rows of margin above `tile0.1` included in the image.
+    pub margin: u32,
+    /// RGBA8, `tiles.0 * 32` × `(tiles.1 + margin) * 32`.
     pub rgba: Vec<u8>,
+}
+
+impl ChunkImage {
+    /// Image size in pixels.
+    pub fn image_size(&self) -> (u32, u32) {
+        (
+            self.tiles.0 * PIECE_PX,
+            (self.tiles.1 + self.margin) * PIECE_PX,
+        )
+    }
 }
 
 /// Terrain data shared by the mesh builder and the picking ray.
@@ -164,12 +191,15 @@ fn chunk_images(vfs: &Vfs, tiles: &TileGrid) -> (Vec<ChunkImage>, usize) {
         for tx in (0..tiles.width).step_by(CHUNK_TILES as usize) {
             let cw = CHUNK_TILES.min(tiles.width - tx);
             let ch = CHUNK_TILES.min(tiles.height - ty);
-            let (iw, ih) = (cw * p, ch * p);
+            let margin = MARGIN_TILES.min(ty);
+            let (iw, ih) = (cw * p, (ch + margin) * p);
             let mut rgba = vec![0u8; (iw * ih * 4) as usize];
-            for y in 0..ch {
+            for y in 0..ch + margin {
                 for x in 0..cw {
-                    let Some((id, col, row)) = tiles.get(tx + x, ty + y) else {
-                        missing += 1;
+                    let Some((id, col, row)) = tiles.get(tx + x, ty - margin + y) else {
+                        if y >= margin {
+                            missing += 1;
+                        }
                         continue;
                     };
                     let jpg = cache.entry(id).or_insert_with(|| {
@@ -188,13 +218,15 @@ fn chunk_images(vfs: &Vfs, tiles: &TileGrid) -> (Vec<ChunkImage>, usize) {
                                 }
                             }
                         }
-                        _ => missing += 1,
+                        _ if y >= margin => missing += 1,
+                        _ => {}
                     }
                 }
             }
             chunks.push(ChunkImage {
                 tile0: (tx, ty),
                 tiles: (cw, ch),
+                margin,
                 rgba,
             });
         }
@@ -202,8 +234,9 @@ fn chunk_images(vfs: &Vfs, tiles: &TileGrid) -> (Vec<ChunkImage>, usize) {
     (chunks, missing)
 }
 
-/// Mesh arrays for one chunk: positions, UVs (0..1 over the chunk image),
-/// normals and triangle indices. Vertices are on attribute-cell corners.
+/// Mesh arrays for one chunk: positions, UVs (0..1 over the chunk image,
+/// sheared as the module docs say), normals and triangle indices. Vertices
+/// are on attribute-cell corners.
 pub struct ChunkMesh {
     /// Positions `[x, height, z]`.
     pub positions: Vec<[f32; 3]>,
@@ -227,12 +260,16 @@ pub fn chunk_mesh(t: &TerrainData, chunk: &ChunkImage) -> ChunkMesh {
         normals: Vec::new(),
         indices: Vec::new(),
     };
+    let (iw, ih) = chunk.image_size();
+    let top = (chunk.tile0.1 - chunk.margin) as f32 * PIECE_PX as f32;
     for z in 0..=nz {
         for x in 0..=nx {
             let (cx, cz) = (cx0 + x, cz0 + z);
-            m.positions
-                .push([cx as f32 * CELL, t.corner(cx, cz), cz as f32 * CELL]);
-            m.uvs.push([x as f32 / nx as f32, z as f32 / nz as f32]);
+            let h = t.corner(cx, cz);
+            m.positions.push([cx as f32 * CELL, h, cz as f32 * CELL]);
+            let v = (cz as f32 * CELL - SHEAR * h - top) / ih as f32;
+            debug_assert_eq!(iw, (nx as f32 * CELL) as u32);
+            m.uvs.push([x as f32 / nx as f32, v]);
             let dx = t.corner(cx + 1, cz) - t.corner(cx - 1, cz);
             let dz = t.corner(cx, cz + 1) - t.corner(cx, cz - 1);
             let n = [-dx, 2.0 * CELL, -dz];
@@ -288,11 +325,15 @@ mod tests {
         let c = ChunkImage {
             tile0: (0, 0),
             tiles: (2, 2),
+            margin: 0,
             rgba: Vec::new(),
         };
         let m = chunk_mesh(&t, &c);
         assert_eq!(m.positions.len(), 25);
         assert_eq!(m.indices.len(), 4 * 4 * 6);
         assert_eq!(m.positions[24], [64.0, 1.0, 64.0]);
+        // Sheared UV: height 1 moves the sample half a pixel north.
+        assert!((m.uvs[24][1] - (64.0 - 0.5) / 64.0).abs() < 1e-6);
+        assert!((m.uvs[24][0] - 1.0).abs() < 1e-6);
     }
 }
