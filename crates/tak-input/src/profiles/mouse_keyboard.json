@@ -1,0 +1,467 @@
+{
+  "name": "Default mouse and keyboard",
+  "bindings": [
+    {
+      "input": {
+        "button": "mouse_left"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "drag_select"
+      }
+    },
+    {
+      "input": {
+        "button": "mouse_right"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "context"
+      }
+    },
+    {
+      "input": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "queue_modifier"
+      }
+    },
+    {
+      "input": {
+        "key": "escape"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cancel"
+      }
+    },
+    {
+      "input": {
+        "key": "s"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "stop"
+      }
+    },
+    {
+      "input": {
+        "key": "p"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "patrol_mode"
+      }
+    },
+    {
+      "input": {
+        "key": "g"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "guard_mode"
+      }
+    },
+    {
+      "input": {
+        "key": "c"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cast_spell_mode"
+      }
+    },
+    {
+      "input": {
+        "key": "h"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "set_fire_state",
+        "state": "hold_fire"
+      }
+    },
+    {
+      "input": {
+        "key": "r"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "set_fire_state",
+        "state": "return_fire"
+      }
+    },
+    {
+      "input": {
+        "key": "f"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "set_fire_state",
+        "state": "fire_at_will"
+      }
+    },
+    {
+      "input": {
+        "key": "z"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "select_same_type",
+        "scope": "on_screen"
+      }
+    },
+    {
+      "input": {
+        "key": "z"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "select_same_type",
+        "scope": "map"
+      }
+    },
+    {
+      "input": {
+        "key": "space"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "jump_to_alert"
+      }
+    },
+    {
+      "input": {
+        "key": "period"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cycle_idle_builder"
+      }
+    },
+    {
+      "input": {
+        "key": "home"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "center_on_monarch"
+      }
+    },
+    {
+      "input": {
+        "key": "f1"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 0
+      }
+    },
+    {
+      "input": {
+        "key": "f2"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 1
+      }
+    },
+    {
+      "input": {
+        "key": "f3"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 2
+      }
+    },
+    {
+      "input": {
+        "key": "f4"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 3
+      }
+    },
+    {
+      "input": {
+        "key": "f5"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 4
+      }
+    },
+    {
+      "input": {
+        "key": "f6"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 5
+      }
+    },
+    {
+      "input": {
+        "key": "f7"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 6
+      }
+    },
+    {
+      "input": {
+        "key": "f8"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 7
+      }
+    },
+    {
+      "input": {
+        "key": "0"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 0
+      }
+    },
+    {
+      "input": {
+        "key": "0"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 0
+      }
+    },
+    {
+      "input": {
+        "key": "1"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 1
+      }
+    },
+    {
+      "input": {
+        "key": "1"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 1
+      }
+    },
+    {
+      "input": {
+        "key": "2"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 2
+      }
+    },
+    {
+      "input": {
+        "key": "2"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 2
+      }
+    },
+    {
+      "input": {
+        "key": "3"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 3
+      }
+    },
+    {
+      "input": {
+        "key": "3"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 3
+      }
+    },
+    {
+      "input": {
+        "key": "4"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 4
+      }
+    },
+    {
+      "input": {
+        "key": "4"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 4
+      }
+    },
+    {
+      "input": {
+        "key": "5"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 5
+      }
+    },
+    {
+      "input": {
+        "key": "5"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 5
+      }
+    },
+    {
+      "input": {
+        "key": "6"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 6
+      }
+    },
+    {
+      "input": {
+        "key": "6"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 6
+      }
+    },
+    {
+      "input": {
+        "key": "7"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 7
+      }
+    },
+    {
+      "input": {
+        "key": "7"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 7
+      }
+    },
+    {
+      "input": {
+        "key": "8"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 8
+      }
+    },
+    {
+      "input": {
+        "key": "8"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 8
+      }
+    },
+    {
+      "input": {
+        "key": "9"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 9
+      }
+    },
+    {
+      "input": {
+        "key": "9"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 9
+      }
+    }
+  ]
+}
