@@ -439,6 +439,7 @@ mod tests {
                 turnrate: 1000,
                 footprintx: 1,
                 footprintz: 1,
+                build: Default::default(),
             }],
             players: vec![PlayerSpec {
                 start: 0,

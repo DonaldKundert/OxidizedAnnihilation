@@ -34,6 +34,12 @@ pub struct UnitDef {
     pub footprintx: u8,
     /// FBI `FootprintZ`, in footprint squares.
     pub footprintz: u8,
+    /// Construction data (WP-O): cost, build time, worker time, build menu.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::construction::BuildDef::is_default"
+    )]
+    pub build: crate::construction::BuildDef,
 }
 
 impl UnitDef {
@@ -59,7 +65,7 @@ impl UnitDef {
         if self.name.len() > 256 {
             return bad("name too long");
         }
-        Ok(())
+        self.build.validate(&self.name)
     }
 
     pub(crate) fn hash(&self, h: &mut StateHasher) {
@@ -70,6 +76,7 @@ impl UnitDef {
         h.u16(self.turnrate);
         h.u8(self.footprintx);
         h.u8(self.footprintz);
+        self.build.hash(h);
     }
 }
 
