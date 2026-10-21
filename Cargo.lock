@@ -599,6 +599,7 @@ dependencies = [
  "serde_json",
  "tak-formats",
  "tak-headless",
+ "tak-math",
  "tak-script",
  "tak-vfs",
 ]
@@ -660,6 +661,8 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "tak-formats",
+ "tak-math",
+ "tak-vfs",
  "thiserror",
 ]
 
