@@ -50,8 +50,13 @@ WP-F  tak-math + tak-commands ──► WP-I  sim skeleton + replay ┤
 | [WP-H](work-packages/wp-h-content.md) | M3b | `tak-content`, `tak-cli content` | yes | A, E (merged) |
 | [WP-I](work-packages/wp-i-sim-skeleton.md) | M8, M9 | `tak-sim`, `tak-headless` | no | F (merged) |
 | [WP-J](work-packages/wp-j-input.md) | M11 | `tak-input` | no | F (merged) |
+| [WP-K](work-packages/wp-k-integration.md) | integration | `tak-sim`, `tak-headless`, `tak-cli render` | yes | all (merged) |
+| [WP-L](work-packages/wp-l-pathfinding.md) | M10 | `tak-sim/src/pathfinding.rs`, movement in `systems.rs` | yes | K |
+| [WP-M](work-packages/wp-m-combat.md) | M10 | `tak-sim/src/combat.rs` | yes | K |
+| [WP-N](work-packages/wp-n-economy.md) | M10 | `tak-sim/src/economy.rs` | yes | K |
+| [WP-O](work-packages/wp-o-construction.md) | M10 | `tak-sim/src/construction.rs` | yes | K |
 
-Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J), and so is [WP-K integration](work-packages/wp-k-integration.md): a real map runs headless with real unit stats and scripts. See `docs/sim.md`.
+Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J), and so is [WP-K integration](work-packages/wp-k-integration.md): a real map runs headless with real unit stats and scripts. See `docs/sim.md`. Wave 3 (WP-L..O) runs in parallel inside `tak-sim`, each in its own module wired into the tick by the prep commit; see the tick order in `crates/tak-sim/src/systems.rs`.
 
 ## Rules for parallel work
 

@@ -3,10 +3,20 @@
 //! 1. [`spawn_start_units`] (tick 0 only): one monarch per player, in player
 //!    order, at its start position, facing the map centre.
 //! 2. [`apply_commands`]: this tick's commands in `(tick, player, seq)` order.
-//! 3. [`orders`]: pop reached move waypoints.
-//! 4. [`movement`]: steer, accelerate/brake and advance every unit.
-//! 5. Scripts (`on_tick`), in the sim.
-//! 6. Advance the tick counter and hash.
+//!    Attack/Guard/CastSpell go to [`crate::combat`], Build to
+//!    [`crate::construction`], Patrol to [`crate::pathfinding`].
+//! 3. [`crate::construction::tick`]: build progress, factories.
+//! 4. [`crate::economy::tick`]: mana income and storage.
+//! 5. [`orders`]: pop reached move waypoints.
+//! 6. [`crate::pathfinding::tick`]: plan and follow paths.
+//! 7. [`movement`]: steer, accelerate/brake and advance every unit.
+//! 8. [`crate::combat::tick`]: targeting, weapons, damage, death.
+//! 9. Scripts (`on_tick`), in the sim.
+//! 10. Advance the tick counter and hash.
+//!
+//! Lanes 3, 4, 6 and 8 each own their module; they talk to each other only
+//! through the small APIs those modules expose (`economy::drain`,
+//! `pathfinding::go_to`) and through [`crate::lifecycle`].
 //!
 //! Units are always visited in ascending slot order.
 
@@ -88,11 +98,11 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
                 }
             }
         }
-        SimCommand::Attack { .. }
-        | SimCommand::Build { .. }
-        | SimCommand::Guard { .. }
-        | SimCommand::Patrol { .. }
-        | SimCommand::CastSpell { .. } => {}
+        SimCommand::Attack { .. } | SimCommand::Guard { .. } | SimCommand::CastSpell { .. } => {
+            crate::combat::apply_command(world, player, cmd);
+        }
+        SimCommand::Build { .. } => crate::construction::apply_command(world, player, cmd),
+        SimCommand::Patrol { .. } => crate::pathfinding::apply_command(world, player, cmd),
     }
 }
 

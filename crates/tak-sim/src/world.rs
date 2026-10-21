@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::hash::Hash;
 
-use tak_commands::{FireState, PlayerId, Tick, UnitDefId, UnitId};
+use tak_commands::{FireState, PlayerId, Target, Tick, UnitDefId, UnitId};
 use tak_math::{Angle, Fx, Rng};
 
 use crate::WorldPos;
@@ -29,6 +29,30 @@ pub enum Order {
         /// Destination.
         to: WorldPos,
     },
+    /// Attack a unit or a ground point (combat, WP-M).
+    Attack {
+        /// What to attack.
+        target: Target,
+    },
+    /// Follow and protect a unit (combat, WP-M).
+    Guard {
+        /// Unit to guard.
+        target: UnitId,
+    },
+    /// Patrol leg toward a point; re-queued at the back when reached
+    /// (pathfinding, WP-L).
+    Patrol {
+        /// Leg end.
+        to: WorldPos,
+    },
+    /// Build a unit: at a ground point for mobile builders, or in place
+    /// (`at: None`) for factories (construction, WP-O).
+    Build {
+        /// What to build.
+        def: UnitDefId,
+        /// Where, for builders that place structures.
+        at: Option<WorldPos>,
+    },
 }
 
 impl Order {
@@ -37,6 +61,32 @@ impl Order {
             Order::Move { to } => {
                 h.u8(0);
                 h.vec2(to);
+            }
+            Order::Attack { target } => {
+                h.u8(1);
+                match target {
+                    Target::Ground(p) => {
+                        h.u8(0);
+                        h.vec2(p);
+                    }
+                    Target::Unit(id) => {
+                        h.u8(1);
+                        h.unit_id(id);
+                    }
+                }
+            }
+            Order::Guard { target } => {
+                h.u8(2);
+                h.unit_id(target);
+            }
+            Order::Patrol { to } => {
+                h.u8(3);
+                h.vec2(to);
+            }
+            Order::Build { def, at } => {
+                h.u8(4);
+                h.unit_def(def);
+                h.option(at, StateHasher::vec2);
             }
         }
     }
@@ -70,6 +120,14 @@ pub struct Unit {
     /// Terrain flags under `pos` ([`crate::map::terrain`]), refreshed with
     /// `ground`.
     pub terrain: u8,
+    /// Pathfinding state (WP-L).
+    pub path: crate::pathfinding::UnitPath,
+    /// Combat state (WP-M).
+    pub combat: crate::combat::UnitCombat,
+    /// Economy state (WP-N).
+    pub economy: crate::economy::UnitEconomy,
+    /// Construction state (WP-O).
+    pub build: crate::construction::UnitBuild,
 }
 
 impl Unit {
@@ -96,6 +154,10 @@ impl Unit {
         for o in &self.orders {
             o.hash(h);
         }
+        self.path.hash(h);
+        self.combat.hash(h);
+        self.economy.hash(h);
+        self.build.hash(h);
     }
 }
 
@@ -130,6 +192,14 @@ pub struct World {
     /// Digest of the immutable match data (map, defs), folded into every
     /// state hash.
     static_digest: u64,
+    /// Pathfinding state (WP-L).
+    pub pathing: crate::pathfinding::PathState,
+    /// Combat state (WP-M).
+    pub combat: crate::combat::CombatState,
+    /// Economy state (WP-N).
+    pub economy: crate::economy::EconomyState,
+    /// Construction state (WP-O).
+    pub construction: crate::construction::ConstructionState,
 }
 
 impl World {
@@ -162,6 +232,10 @@ impl World {
             players,
             slots: Vec::new(),
             static_digest,
+            pathing: Default::default(),
+            combat: Default::default(),
+            economy: Default::default(),
+            construction: Default::default(),
         })
     }
 
@@ -272,6 +346,10 @@ impl World {
             orders: VecDeque::new(),
             ground: Fx::ZERO,
             terrain: 0,
+            path: Default::default(),
+            combat: Default::default(),
+            economy: Default::default(),
+            build: Default::default(),
         };
         unit.sample_terrain(&self.map);
         if let Some(i) = self.slots.iter().position(|s| s.unit.is_none()) {
@@ -312,7 +390,7 @@ impl World {
     /// count u32, orders (tag u8 + payload)`.
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.bytes(b"OXASIM");
-        h.u32(2);
+        h.u32(3);
         h.tick(self.tick);
         self.rng.hash(&mut LeHasher(h));
         h.u64(self.static_digest);
@@ -334,6 +412,10 @@ impl World {
                 }
             }
         }
+        self.pathing.hash(h);
+        self.combat.hash(h);
+        self.economy.hash(h);
+        self.construction.hash(h);
     }
 }
 

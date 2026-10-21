@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use tak_formats::model3do::Model;
 use tak_math::{Angle, Fx, Rng, Vec2};
-use tak_script::{Engine, Instance, Program, VmError, port};
+use tak_script::{CallOutcome, Engine, Instance, Program, VmError, port};
 
 use crate::hash::StateHasher;
 use crate::map::{MapInfo, terrain};
-use crate::script::{ScriptCtx, ScriptHost, ScriptStats};
+use crate::script::{ScriptCtx, ScriptHost, ScriptReturn, ScriptStats};
 use crate::{UnitDefId, UnitId, WorldPos};
 
 /// Port numbers above TA's 20 that the host implements. **Believed**: these
@@ -251,6 +251,39 @@ impl ScriptHost for CobScripts {
         }
     }
 
+    fn call_script(
+        &mut self,
+        ctx: &ScriptCtx,
+        rng: &mut Rng,
+        name: &str,
+        args: &[i32],
+    ) -> Option<ScriptReturn> {
+        let us = self.units.get_mut(&ctx.unit)?;
+        us.vm.program().function(name)?;
+        let mut eng = UnitEngine {
+            ctx,
+            map: &self.map,
+            rng,
+            regs: &mut us.regs,
+            stats: &mut self.stats,
+        };
+        match us.vm.call(&mut eng, name, args) {
+            Ok(CallOutcome::Returned { value, locals }) => Some(ScriptReturn { value, locals }),
+            _ => None,
+        }
+    }
+
+    fn start_script(&mut self, unit: UnitId, name: &str, args: &[i32]) -> bool {
+        self.units
+            .get_mut(&unit)
+            .is_some_and(|us| us.vm.start(name, args).is_ok())
+    }
+
+    fn remove_unit(&mut self, unit: UnitId) {
+        self.units.remove(&unit);
+        self.stats.units = self.units.len() as u64;
+    }
+
     fn hash_state(&self, h: &mut StateHasher) {
         h.bytes(b"COB");
         h.len(self.units.len());
@@ -308,8 +341,8 @@ impl UnitEngine<'_> {
                 tak_commands::FireState::ReturnFire => 1,
                 tak_commands::FireState::FireAtWill => 2,
             },
-            // No damage model yet: always at full health (percent).
-            port::HEALTH => 100,
+            // Percent, from the combat lane.
+            port::HEALTH => c.health_percent,
             // Piece positions are not resolved yet: the unit's own.
             port::PIECE_XZ | port::UNIT_XZ => pack_xz(c.pos),
             port::PIECE_Y | port::UNIT_Y => c.ground_height.raw(),
@@ -327,7 +360,8 @@ impl UnitEngine<'_> {
                 .raw(),
             port::GROUND_HEIGHT => self.map.height_at(unpack_xz(args[0])).raw(),
             // Every unit is fully built.
-            port::BUILD_PERCENT_LEFT => 0,
+            // Percent left to build, from the construction lane.
+            port::BUILD_PERCENT_LEFT => c.build_percent_left,
             kport::IN_WATER => i32::from(c.terrain & terrain::WATER != 0),
             kport::CURRENT_SPEED => {
                 let v = c.speed.raw();
@@ -417,6 +451,8 @@ mod tests {
             speed,
             moving: speed > Fx::ZERO,
             fire_state: FireState::FireAtWill,
+            health_percent: 100,
+            build_percent_left: 0,
         }
     }
 

@@ -17,6 +17,12 @@ Rust-only, headless, deterministic engine core for Total Annihilation: Kingdoms.
 - No `f32`/`f64` in sim state. One seeded RNG owned by the world. No `HashMap`/`HashSet` iteration in the sim; use `Vec` arenas with generational IDs, or `BTreeMap`.
 - Hash world state every tick. Commands are the only sim input.
 
+## Fidelity and multiplayer (Tyler's decisions)
+
+- **As original as possible.** Default behaviour matches the original game's rules and numbers wherever we can determine them from the data, the install's docs, or careful observation. Rebalancing is allowed, but only behind an explicit, named option (e.g. a ruleset flag), never as the default.
+- When the original rule is unknown, pick the most TA-faithful reading, tag it Believed or Chosen in the docs, and keep it in one easily changed place.
+- **Multiplayer is not a goal yet, but must stay possible.** Every system is deterministic: no floats in sim state, ordered iteration, one world RNG, integer budgets instead of time budgets, and a cross-process determinism test for each new system.
+
 ## Crate boundaries
 
 `tak-sim` must not depend on `tak-input`, `tak-cli`, or any renderer. `tak-script` exposes a trait the sim calls; it does not depend on `tak-sim`. `tak-formats` does not touch the filesystem: it takes `&[u8]`. Nothing in the workspace depends on `bevy`, a GPU, or a window stack.

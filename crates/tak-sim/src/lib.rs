@@ -26,10 +26,15 @@
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
 pub mod cob;
+pub mod combat;
+pub mod construction;
 pub mod content;
 pub mod defs;
+pub mod economy;
 pub mod hash;
+pub mod lifecycle;
 pub mod map;
+pub mod pathfinding;
 pub mod scenario;
 pub mod script;
 mod sim;
@@ -43,7 +48,7 @@ pub use defs::{UnitDef, UnitDefs};
 pub use hash::StateHasher;
 pub use map::{HeightGrid, MapInfo, StartPos, TerrainGrid};
 pub use scenario::{PlayerSpec, SCENARIO_FORMAT_VERSION, Scenario, ScenarioError};
-pub use script::{NoScripts, ScriptCtx, ScriptHost, ScriptStats};
+pub use script::{NoScripts, ScriptCtx, ScriptHost, ScriptReturn, ScriptStats};
 pub use sim::{Sim, run_scenario};
 pub use tak_commands::{PlayerId, Tick, UnitDefId, UnitId, WorldPos};
 pub use world::{Order, Player, Unit, World};

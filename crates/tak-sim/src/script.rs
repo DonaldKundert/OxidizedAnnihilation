@@ -43,6 +43,10 @@ pub struct ScriptCtx {
     pub moving: bool,
     /// Fire state toggle.
     pub fire_state: FireState,
+    /// Health in percent (port 4), from the combat lane.
+    pub health_percent: i32,
+    /// Percent still to build (port 17), from the construction lane.
+    pub build_percent_left: i32,
 }
 
 /// Unit script callbacks. Every method has a default.
@@ -78,6 +82,30 @@ pub trait ScriptHost {
         self.on_tick(ctx);
     }
 
+    /// Run a script function on a unit now (COB `call-script`) and return
+    /// its result. `None` if the unit has no script or no such function, or
+    /// if the call blocked (it then keeps running as a thread). Default: no
+    /// scripts.
+    fn call_script(
+        &mut self,
+        _ctx: &ScriptCtx,
+        _rng: &mut Rng,
+        _name: &str,
+        _args: &[i32],
+    ) -> Option<ScriptReturn> {
+        None
+    }
+
+    /// Start a script function on a unit as a new thread (COB
+    /// `start-script`); it first runs on the unit's next tick. Returns
+    /// whether it started. Default: no scripts.
+    fn start_script(&mut self, _unit: UnitId, _name: &str, _args: &[i32]) -> bool {
+        false
+    }
+
+    /// Forget a unit's script (it was removed from the world).
+    fn remove_unit(&mut self, _unit: UnitId) {}
+
     /// Feed all script state into the world hash.
     fn hash_state(&self, h: &mut StateHasher) {
         let _ = h;
@@ -87,6 +115,17 @@ pub trait ScriptHost {
     fn stats(&self) -> ScriptStats {
         ScriptStats::default()
     }
+}
+
+/// What a completed [`ScriptHost::call_script`] returned: the `return`
+/// value and the function's locals (query callbacks such as `QueryWeapon`
+/// write their answer into `locals[0]`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScriptReturn {
+    /// Value of the `return` instruction.
+    pub value: i32,
+    /// The function's locals when it returned.
+    pub locals: Vec<i32>,
 }
 
 /// A host that runs no scripts.

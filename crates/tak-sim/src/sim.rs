@@ -61,8 +61,12 @@ impl Sim {
             }
         }
         systems::apply_commands(&mut self.world, commands);
+        crate::construction::tick(&mut self.world, self.scripts.as_mut());
+        crate::economy::tick(&mut self.world, self.scripts.as_mut());
         systems::orders(&mut self.world);
+        crate::pathfinding::tick(&mut self.world, self.scripts.as_mut());
         systems::movement(&mut self.world);
+        crate::combat::tick(&mut self.world, self.scripts.as_mut());
         for id in self.world.unit_ids() {
             if let Some(ctx) = self.ctx(tick, id) {
                 self.scripts.tick_unit(&ctx, &mut self.world.rng);
@@ -92,21 +96,8 @@ impl Sim {
         h.finish()
     }
 
-    fn ctx(&self, tick: Tick, id: UnitId) -> Option<ScriptCtx> {
-        let u = self.world.unit(id)?;
-        Some(ScriptCtx {
-            tick,
-            unit: id,
-            def: u.def,
-            owner: u.owner,
-            pos: u.pos,
-            ground_height: u.ground,
-            terrain: u.terrain,
-            heading: u.heading,
-            speed: u.speed,
-            moving: !u.orders.is_empty(),
-            fire_state: u.fire_state,
-        })
+    fn ctx(&self, _tick: Tick, id: UnitId) -> Option<ScriptCtx> {
+        crate::lifecycle::script_ctx(&self.world, id)
     }
 
     /// The script host's diagnostics (not part of the hash).
