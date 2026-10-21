@@ -88,6 +88,11 @@ map, players, seed)` loads the base ruleset, the map and the scripts.
 
 ## Terrain in movement
 
+**Superseded by WP-L**: units now path around terrain on per-movement-class,
+footprint-aware layers, with TA-derived steering and road/water speed
+factors. See `docs/pathfinding.md`. The notes below describe the WP-K
+baseline (still used by `systems::move_unit` for a lone unit outside the sim).
+
 - Passability is `tak_content::PassGrid` with the default rule (`GROUND2`:
   max slope 30, max water depth 20, blocking features, top-left anchor). All
   monarchs are `GROUND2`. Flags: `WATER`, `DEEP`, `STEEP`, `FEATURE`, `PAVED`,
