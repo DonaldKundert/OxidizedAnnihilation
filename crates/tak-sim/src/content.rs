@@ -66,6 +66,7 @@ pub fn unit_def_from_fbi(u: &tak_content::UnitDef) -> UnitDef {
         turnrate: fbi_turnrate(m.turnrate.or(m.turninplacerate).unwrap_or(0)),
         footprintx: u.footprint.x.unwrap_or(1).max(1),
         footprintz: u.footprint.z.unwrap_or(1).max(1),
+        combat: crate::combat::combat_def_from_fbi(u),
     }
 }
 

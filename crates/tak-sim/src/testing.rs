@@ -22,6 +22,7 @@ pub fn monarch_def(name: &str) -> UnitDef {
         turnrate: 728,
         footprintx: 2,
         footprintz: 2,
+        combat: Default::default(),
     }
 }
 

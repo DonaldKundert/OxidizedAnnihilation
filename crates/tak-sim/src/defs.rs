@@ -34,6 +34,9 @@ pub struct UnitDef {
     pub footprintx: u8,
     /// FBI `FootprintZ`, in footprint squares.
     pub footprintz: u8,
+    /// Combat stats (WP-M); empty = not part of combat.
+    #[serde(default, skip_serializing_if = "crate::combat::CombatDef::is_empty")]
+    pub combat: crate::combat::CombatDef,
 }
 
 impl UnitDef {
@@ -59,6 +62,9 @@ impl UnitDef {
         if self.name.len() > 256 {
             return bad("name too long");
         }
+        if let Err(e) = self.combat.validate() {
+            return bad(&e);
+        }
         Ok(())
     }
 
@@ -70,6 +76,7 @@ impl UnitDef {
         h.u16(self.turnrate);
         h.u8(self.footprintx);
         h.u8(self.footprintz);
+        self.combat.hash(h);
     }
 }
 

@@ -3,6 +3,13 @@
 //! `Attack` and `Guard` commands are routed here by
 //! [`crate::systems::apply_commands`].
 
+mod defs;
+
+pub use defs::{
+    CombatDef, DEFAULT_AIM_TOLERANCE, DamageStats, MAX_WEAPONS, MELEE_MARGIN, WeaponKind,
+    WeaponStats, area_damage, combat_def_from_fbi, kind, melee_reach, reload_ticks,
+};
+
 use crate::hash::StateHasher;
 use crate::script::ScriptHost;
 use crate::world::World;
@@ -17,6 +24,9 @@ impl UnitCombat {
     pub fn health_percent(&self) -> i32 {
         100
     }
+
+    /// Drop the combat order and any chase (player `Move`/`Stop`).
+    pub fn cancel_orders(&mut self) {}
 
     pub(crate) fn hash(&self, h: &mut StateHasher) {
         h.bytes(b"C");
