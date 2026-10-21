@@ -75,6 +75,45 @@
     },
     {
       "input": {
+        "key": "f1"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cast_spell",
+        "index": 0
+      }
+    },
+    {
+      "input": {
+        "key": "f2"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cast_spell",
+        "index": 1
+      }
+    },
+    {
+      "input": {
+        "key": "f3"
+      },
+      "with": {
+        "key": "ctrl"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cast_spell",
+        "index": 2
+      }
+    },
+    {
+      "input": {
         "key": "h"
       },
       "gesture": "press",
@@ -231,6 +270,110 @@
       "action": {
         "type": "build_option",
         "index": 7
+      }
+    },
+    {
+      "input": {
+        "key": "f1"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 8
+      }
+    },
+    {
+      "input": {
+        "key": "f2"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 9
+      }
+    },
+    {
+      "input": {
+        "key": "f3"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 10
+      }
+    },
+    {
+      "input": {
+        "key": "f4"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 11
+      }
+    },
+    {
+      "input": {
+        "key": "f5"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 12
+      }
+    },
+    {
+      "input": {
+        "key": "f6"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 13
+      }
+    },
+    {
+      "input": {
+        "key": "f7"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 14
+      }
+    },
+    {
+      "input": {
+        "key": "f8"
+      },
+      "with": {
+        "key": "shift"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_option",
+        "index": 15
       }
     },
     {

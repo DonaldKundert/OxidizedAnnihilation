@@ -116,6 +116,13 @@ pub enum Action {
     GuardMode,
     /// Next context order casts the selection's first spell.
     CastSpellMode,
+    /// Next context order casts spell `index` of the selection's first
+    /// caster (in [`crate::WorldView::spells`] order). Refused while that
+    /// caster cannot pay for it ([`crate::WorldView::can_cast`]).
+    CastSpell {
+        /// Index into the caster's spells.
+        index: u8,
+    },
     /// Pick build option `index` of the selection's first builder: factories
     /// queue it immediately, mobile builders enter placement mode.
     BuildOption {

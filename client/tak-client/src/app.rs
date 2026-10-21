@@ -175,6 +175,18 @@ struct HudInfo;
 struct HudStatus;
 #[derive(Component)]
 struct HudAlert;
+/// The match-end banner ("Victory" / "Defeat" / "Draw") and its subtitle.
+#[derive(Component)]
+struct HudBanner;
+#[derive(Component)]
+struct HudBannerTitle;
+#[derive(Component)]
+struct HudBannerText;
+
+/// Ticks between the sim deciding the match and the end banner (TA showed
+/// its end screen about 150 ticks, 5 s, after the decisive kill, so the
+/// death animations play out first; **Believed** for TA:K, display only).
+const BANNER_DELAY_TICKS: u32 = 150;
 
 /// Width of the bottom-left panel.
 const HUD_PANEL_W: f32 = 400.0;
@@ -221,7 +233,9 @@ struct HudBarText(BarKind);
 enum ButtonKind {
     /// `ORDER_BUTTONS[i]`.
     Order(usize),
-    /// Build option `i` (key `f<i+1>`).
+    /// Spell `i` of the selection's caster (Ctrl+F<i+1>).
+    Spell(usize),
+    /// Build option `i` (F1-F8, then Shift+F1-F8).
     Build(usize),
 }
 
@@ -229,26 +243,61 @@ enum ButtonKind {
 struct HudButtonLabel;
 
 /// Order buttons: label and the mouse/keyboard profile's key.
-const ORDER_BUTTONS: [(&str, &str); 7] = [
+const ORDER_BUTTONS: [(&str, &str); 6] = [
     ("Stop", "s"),
     ("Patrol", "p"),
     ("Guard", "g"),
-    ("Spell", "c"),
     ("Hold", "h"),
     ("Return", "r"),
     ("Fire", "f"),
 ];
 
-/// Build buttons (the profile binds F1-F8).
-const BUILD_BUTTONS: usize = 8;
+/// Spell buttons (the profile binds Ctrl+F1-F3; no retail unit has more
+/// than three spells).
+const SPELL_BUTTONS: usize = 3;
+
+/// Build buttons: the profile binds F1-F8 and Shift+F1-F8 (retail menus
+/// have at most 9 entries; the build wheel shows up to 16).
+const BUILD_BUTTONS: usize = 16;
 
 impl ButtonKind {
-    fn key(self) -> String {
+    /// The key (and modifier held with it) the mouse/keyboard profile
+    /// binds to this button's action.
+    fn key(self) -> (Option<&'static str>, String) {
         match self {
-            ButtonKind::Order(i) => ORDER_BUTTONS[i].1.to_string(),
-            ButtonKind::Build(i) => format!("f{}", i + 1),
+            ButtonKind::Order(i) => (None, ORDER_BUTTONS[i].1.to_string()),
+            ButtonKind::Spell(i) => (Some("ctrl"), format!("f{}", i + 1)),
+            ButtonKind::Build(i) if i < 8 => (None, format!("f{}", i + 1)),
+            ButtonKind::Build(i) => (Some("shift"), format!("f{}", i - 7)),
         }
     }
+
+    /// The key as shown on the button.
+    fn key_label(self) -> String {
+        let (m, k) = self.key();
+        let k = k.to_ascii_uppercase();
+        match m {
+            Some("ctrl") => format!("^{k}"),
+            Some("shift") => format!("S-{k}"),
+            _ => k,
+        }
+    }
+}
+
+/// A HUD button's key press: modifier down, key down and up, modifier up.
+fn key_events((m, k): (Option<&'static str>, String)) -> Vec<EventKind> {
+    let mut v = Vec::new();
+    if let Some(m) = m {
+        v.push(EventKind::KeyDown { key: Key(m.into()) });
+    }
+    v.push(EventKind::KeyDown {
+        key: Key(k.clone()),
+    });
+    v.push(EventKind::KeyUp { key: Key(k) });
+    if let Some(m) = m {
+        v.push(EventKind::KeyUp { key: Key(m.into()) });
+    }
+    v
 }
 
 fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
@@ -438,6 +487,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 (
                     hud_system,
                     hud_widgets_system,
+                    banner_system,
                     minimap_system,
                     gizmo_system,
                     controls::cursor_system,
@@ -803,11 +853,55 @@ fn setup_hud(mut commands: Commands) {
     for i in 0..ORDER_BUTTONS.len() {
         spawn_button(&mut commands, orders, ButtonKind::Order(i), 92.0);
     }
+    let spells = grid(&mut commands, panel);
+    for i in 0..SPELL_BUTTONS {
+        spawn_button(&mut commands, spells, ButtonKind::Spell(i), 190.0);
+    }
     let builds = grid(&mut commands, panel);
     for i in 0..BUILD_BUTTONS {
         spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
     }
     commands.spawn((Text::new(""), hud_text(13.0), HudStatus, ChildOf(panel)));
+    // Match-end banner, centred near the top; display only (input still
+    // works behind it).
+    let banner = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(22.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+            GlobalZIndex(700),
+            HudBanner,
+        ))
+        .id();
+    let plate = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(36.0), Val::Px(10.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            BorderColor::all(Color::srgb(0.75, 0.62, 0.3)),
+            ChildOf(banner),
+        ))
+        .id();
+    commands.spawn((
+        Text::new(""),
+        hud_text(56.0),
+        HudBannerTitle,
+        ChildOf(plate),
+    ));
+    commands.spawn((Text::new(""), hud_text(16.0), HudBannerText, ChildOf(plate)));
     commands.spawn((
         Text::new(""),
         hud_text(16.0).0,
@@ -958,10 +1052,7 @@ fn shot_driver(
                     world: sim.session.sim.world(),
                     local: sim.session.local,
                 };
-                for kind in [
-                    EventKind::KeyDown { key: Key(k.key()) },
-                    EventKind::KeyUp { key: Key(k.key()) },
-                ] {
+                for kind in key_events(k.key()) {
                     let outs = input
                         .mapper
                         .handle(&InputEvent::new(2_000_000, kind), &view, tick);
@@ -1211,7 +1302,7 @@ fn input_system(
     }
     // HUD panel and buttons: a click there presses the button's key (the
     // same action as the keyboard) and never reaches the world.
-    let mut pressed_keys: Vec<String> = Vec::new();
+    let mut pressed_keys: Vec<(Option<&'static str>, String)> = Vec::new();
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
@@ -1312,10 +1403,7 @@ fn input_system(
         }
     }
     for k in pressed_keys {
-        events.push(EventKind::KeyDown {
-            key: Key(k.clone()),
-        });
-        events.push(EventKind::KeyUp { key: Key(k) });
+        events.extend(key_events(k));
     }
     for ev in wheel.read() {
         let steps = match ev.unit {
@@ -2888,7 +2976,7 @@ fn fog_system(
         for z in 0..i64::from(gh) {
             for x in 0..i64::from(gw) {
                 let a = match grid.cell(x, z) {
-                    crate::fog::FogCell::Unexplored => 255,
+                    crate::fog::FogCell::Unexplored => MINIMAP_UNEXPLORED_ALPHA,
                     crate::fog::FogCell::Explored => 140,
                     crate::fog::FogCell::Seen => 0,
                 };
@@ -2898,6 +2986,12 @@ fn fog_system(
         im.data = Some(px);
     }
 }
+
+/// Minimap fog opacity over unexplored cells (**Chosen**): dark but not
+/// black, so the map's shape reads from the first tick (TA:K-style: the
+/// minimap is a map, not a scouting record; units there stay hidden).
+/// 255 would match the main view's black.
+const MINIMAP_UNEXPLORED_ALPHA: u8 = 205;
 
 /// Whether the local player can see a world point (always, with the fog
 /// off).
@@ -2914,11 +3008,6 @@ const FOG_MIN_SIGHT: f32 = 32.0;
 /// for the overlay cost about 3 fps on lavapipe.
 const FOG_SORT_BIAS: f32 = 100_000.0;
 
-/// Minimap width on screen, logical pixels (height follows the image).
-const MINIMAP_W: f32 = 230.0;
-/// Gap to the window edge.
-const MINIMAP_MARGIN: f32 = 8.0;
-
 /// Minimap layout and pointer state.
 #[derive(Resource, Default)]
 struct MinimapState {
@@ -2934,23 +3023,18 @@ struct MinimapState {
 }
 
 impl MinimapState {
-    /// Where the minimap is for a viewport (bottom-right corner).
+    /// Where the minimap is for a viewport (bottom-right corner, fitted
+    /// to the window keeping the image's aspect: [`MinimapGeom::fit`]).
     fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
-        let (iw, ih) = self.image?;
-        let w = MINIMAP_W;
-        let h = w * ih as f32 / iw.max(1) as f32;
-        Some(MinimapGeom {
-            rect: [
-                view[0] - w - MINIMAP_MARGIN,
-                view[1] - h - MINIMAP_MARGIN,
-                w,
-                h,
-            ],
-            map: self.map,
-        })
+        Some(MinimapGeom::fit(view, self.image?, self.map))
     }
 }
 
+/// The minimap panel (frame).
+#[derive(Component)]
+struct MinimapPanel;
+/// The minimap image; fog, dots and the camera rectangle are its children,
+/// so they scale with it.
 #[derive(Component)]
 struct MinimapRoot;
 #[derive(Component)]
@@ -2991,19 +3075,30 @@ fn setup_minimap(
     };
     mm.image = Some((*w, *h));
     let img = images.add(rgba_image(*w, *h, rgba.clone()));
-    let mh = MINIMAP_W * *h as f32 / (*w).max(1) as f32;
+    // Sizes and places are set every frame from `MinimapGeom::fit`.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+        BorderColor::all(Color::srgb(0.45, 0.4, 0.3)),
+        MinimapPanel,
+    ));
     let root = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(MINIMAP_MARGIN),
-                bottom: Val::Px(MINIMAP_MARGIN),
-                width: Val::Px(MINIMAP_W),
-                height: Val::Px(mh),
                 overflow: Overflow::clip(),
                 ..default()
             },
-            ImageNode::new(img),
+            ImageNode {
+                image: img,
+                image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                ..default()
+            },
+            ZIndex(1),
             MinimapRoot,
         ))
         .id();
@@ -3027,8 +3122,17 @@ fn minimap_system(
     cam: Res<CamState>,
     mm: Res<MinimapState>,
     fog: Res<FogRes>,
-    root: Query<Entity, With<MinimapRoot>>,
-    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>)>,
+    mut root: Query<(Entity, &mut Node), With<MinimapRoot>>,
+    mut panel: Query<
+        &mut Node,
+        (
+            With<MinimapPanel>,
+            Without<MinimapRoot>,
+            Without<MinimapView>,
+            Without<MinimapDot>,
+        ),
+    >,
+    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>, Without<MinimapRoot>)>,
     mut dots: Query<
         (
             &MinimapDot,
@@ -3036,13 +3140,25 @@ fn minimap_system(
             &mut BackgroundColor,
             &mut Visibility,
         ),
-        Without<MinimapView>,
+        (Without<MinimapView>, Without<MinimapRoot>),
     >,
 ) {
-    let Ok(root) = root.single() else { return };
+    let Ok((root, mut root_node)) = root.single_mut() else {
+        return;
+    };
     let Some(g) = mm.geom(cam.geom.size) else {
         return;
     };
+    let place = |n: &mut Node, r: [f32; 4]| {
+        let want = (Val::Px(r[0]), Val::Px(r[1]), Val::Px(r[2]), Val::Px(r[3]));
+        if (n.left, n.top, n.width, n.height) != want {
+            (n.left, n.top, n.width, n.height) = want;
+        }
+    };
+    place(&mut root_node, g.rect);
+    if let Ok(mut n) = panel.single_mut() {
+        place(&mut n, g.panel);
+    }
     if let Ok(mut n) = view.single_mut() {
         let r = g.view_rect(&cam.geom);
         n.left = Val::Px(r[0]);
@@ -3150,7 +3266,7 @@ fn hud_system(
             let side = s
                 .def(p.monarch_def)
                 .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
-            if player_defeated(w, p) {
+            if w.is_defeated(p.id) {
                 line.push_str(&format!("   P{} {}: DEFEATED", p.id.0, side));
             } else if let Some(e) = tak_sim::economy::player(w, p.id) {
                 line.push_str(&format!(
@@ -3207,16 +3323,84 @@ fn hud_system(
     }
 }
 
-/// A player is shown as defeated once its monarch is dead (**Believed**:
-/// TA:K's default game ends for a player with its monarch) or it has no
-/// units left. Display only; the sim has no defeat rule yet.
-fn player_defeated(w: &tak_sim::World, p: &tak_sim::Player) -> bool {
-    let monarch_alive = p
-        .monarch
-        .and_then(|m| w.unit(m))
-        .is_some_and(|u| !u.combat.is_dying());
-    let any = w.units().any(|(_, u)| u.owner == p.id);
-    (p.monarch.is_some() && !monarch_alive) || (!any && w.tick().0 > 0)
+/// The match-end banner for the local player, once the sim has decided
+/// the match (`tak_sim::victory`) and [`BANNER_DELAY_TICKS`] have passed:
+/// (title, colour, subtitle).
+fn banner_for(s: &Session) -> Option<(String, Color, String)> {
+    let w = s.sim.world();
+    let tak_sim::victory::MatchState::Over { winners } = s.sim.match_state() else {
+        return None;
+    };
+    let at = w.victory().decided_at()?;
+    if s.tick().0 < at.0.saturating_add(BANNER_DELAY_TICKS) {
+        return None;
+    }
+    let side = |p: PlayerId| {
+        w.players()
+            .iter()
+            .find(|x| x.id == p)
+            .and_then(|x| s.def(x.monarch_def))
+            .map_or_else(
+                || "?".to_string(),
+                |d| d.unitname[..3.min(d.unitname.len())].to_string(),
+            )
+    };
+    let names: Vec<String> = winners
+        .iter()
+        .map(|&p| format!("P{} {}", p.0, side(p)))
+        .collect();
+    let when = format!("{:.0}s", at.0 as f32 / 30.0);
+    Some(if winners.is_empty() {
+        (
+            "Draw".into(),
+            Color::srgb(0.85, 0.85, 0.85),
+            format!("Everyone was defeated at {when}"),
+        )
+    } else if winners.contains(&s.local) {
+        (
+            "Victory".into(),
+            Color::srgb(1.0, 0.82, 0.3),
+            format!("{} won at {when}", names.join(", ")),
+        )
+    } else {
+        (
+            "Defeat".into(),
+            Color::srgb(0.9, 0.3, 0.25),
+            format!("{} won at {when}", names.join(", ")),
+        )
+    })
+}
+
+/// Show or hide the match-end banner.
+fn banner_system(
+    sim: NonSend<SimRes>,
+    mut root: Query<&mut Visibility, With<HudBanner>>,
+    mut title: Query<(&mut Text, &mut TextColor), (With<HudBannerTitle>, Without<HudBannerText>)>,
+    mut text: Query<&mut Text, (With<HudBannerText>, Without<HudBannerTitle>)>,
+) {
+    let b = banner_for(&sim.session);
+    if let Ok(mut v) = root.single_mut() {
+        let want = if b.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *v != want {
+            *v = want;
+        }
+    }
+    let Some((t, c, sub)) = b else { return };
+    if let Ok((mut tt, mut tc)) = title.single_mut() {
+        if tt.0 != t {
+            tt.0 = t;
+        }
+        tc.0 = c;
+    }
+    if let Ok(mut st) = text.single_mut()
+        && st.0 != sub
+    {
+        st.0 = sub;
+    }
 }
 
 /// Selection bars, buttons, the status line and the build-rejection alert.
@@ -3258,7 +3442,7 @@ fn hud_widgets_system(
         ),
         Without<HudAlert>,
     >,
-    mut labels: Query<&mut Text, (With<HudButtonLabel>, Without<HudAlert>)>,
+    mut labels: Query<(&mut Text, &mut TextColor), (With<HudButtonLabel>, Without<HudAlert>)>,
     mut alert: Query<(&mut Text, &mut Visibility), (With<HudAlert>, Without<ButtonKind>)>,
 ) {
     let s = &sim.session;
@@ -3335,6 +3519,17 @@ fn hud_widgets_system(
                     "Place {}: RMB / X on the map, Esc / B cancels",
                     s.def(d).map_or("?", |d| d.display.as_str())
                 ),
+                Mode::CastSpell(sp) => {
+                    let info = crate::view::caster_spells(w, s.local, input.mapper.selection())
+                        .and_then(|(_, v)| v.into_iter().find(|x| x.id == sp));
+                    match info {
+                        Some(i) => format!(
+                            "Cast {} ({} mana): RMB / X on the target, Esc / B cancels",
+                            i.name, i.cost
+                        ),
+                        None => "Cast: RMB / X on the target, Esc / B cancels".into(),
+                    }
+                }
                 m => format!("mode: {m:?}"),
             };
         }
@@ -3345,16 +3540,21 @@ fn hud_widgets_system(
         .and_then(|(_, u)| w.defs().get(u.def))
         .map(|d| d.build.canbuild.clone())
         .unwrap_or_default();
+    let spells = own
+        .and_then(|_| crate::view::caster_spells(w, s.local, input.mapper.selection()))
+        .map(|(_, sp)| sp)
+        .unwrap_or_default();
     for (kind, mut vis, mut node, mut bg, children) in &mut buttons {
+        let mut usable = true;
         let (label, shown, active) = match *kind {
             ButtonKind::Order(i) => {
                 let fs = own.map(|(_, u)| u.fire_state);
                 let active = match i {
                     1 => mode == Mode::Patrol,
                     2 => mode == Mode::Guard,
-                    4 => fs == Some(tak_commands::FireState::HoldFire),
-                    5 => fs == Some(tak_commands::FireState::ReturnFire),
-                    6 => fs == Some(tak_commands::FireState::FireAtWill),
+                    3 => fs == Some(tak_commands::FireState::HoldFire),
+                    4 => fs == Some(tak_commands::FireState::ReturnFire),
+                    5 => fs == Some(tak_commands::FireState::FireAtWill),
                     _ => false,
                 };
                 (
@@ -3367,11 +3567,22 @@ fn hud_widgets_system(
                     active,
                 )
             }
+            ButtonKind::Spell(i) => match spells.get(i) {
+                Some(sp) => {
+                    usable = sp.ready;
+                    (
+                        format!("{} {} ({})", kind.key_label(), sp.name, sp.cost),
+                        true,
+                        mode == Mode::CastSpell(sp.id),
+                    )
+                }
+                None => (String::new(), false, false),
+            },
             ButtonKind::Build(i) => match opts.get(i) {
                 Some(&o) => (
                     format!(
-                        "F{} {} ({})",
-                        i + 1,
+                        "{} {} ({})",
+                        kind.key_label(),
                         s.def(o).map_or("?", |d| d.display.as_str()),
                         w.defs().get(o).map_or(0, |d| d.build.buildcost)
                     ),
@@ -3396,14 +3607,21 @@ fn hud_widgets_system(
         }
         bg.0 = if active {
             Color::srgb(0.45, 0.36, 0.12)
+        } else if !usable {
+            Color::srgb(0.1, 0.1, 0.1)
         } else {
             Color::srgb(0.16, 0.14, 0.11)
         };
         for c in children.iter() {
-            if let Ok(mut t) = labels.get_mut(c)
-                && t.0 != label
-            {
-                t.0 = label.clone();
+            if let Ok((mut t, mut col)) = labels.get_mut(c) {
+                if t.0 != label {
+                    t.0 = label.clone();
+                }
+                col.0 = if usable {
+                    Color::srgb(0.95, 0.92, 0.85)
+                } else {
+                    Color::srgb(0.5, 0.48, 0.45)
+                };
             }
         }
     }

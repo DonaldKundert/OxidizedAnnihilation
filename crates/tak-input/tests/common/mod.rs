@@ -33,6 +33,9 @@ pub struct UnitSpec {
     pub build_options: Vec<u32>,
     #[serde(default)]
     pub spells: Vec<u32>,
+    /// Spells this unit cannot pay for now.
+    #[serde(default)]
+    pub no_mana: Vec<u32>,
     #[serde(default)]
     pub idle: bool,
     #[serde(default = "yes")]
@@ -100,6 +103,10 @@ impl WorldView for TestWorld {
         self.find(unit)
             .map(|u| u.spells.iter().map(|&s| SpellId(s)).collect())
             .unwrap_or_default()
+    }
+    fn can_cast(&self, unit: UnitId, spell: SpellId) -> bool {
+        self.find(unit)
+            .is_some_and(|u| !u.no_mana.contains(&spell.0))
     }
     fn is_idle(&self, unit: UnitId) -> bool {
         self.find(unit).is_some_and(|u| u.idle)

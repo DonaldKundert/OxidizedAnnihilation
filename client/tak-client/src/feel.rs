@@ -387,6 +387,7 @@ pub fn action_label(a: &Action) -> String {
         Action::PatrolMode => "Patrol".into(),
         Action::GuardMode => "Guard".into(),
         Action::CastSpellMode => "Cast spell".into(),
+        Action::CastSpell { index } => format!("Spell {}", index + 1),
         Action::SetFireState { state } => match state {
             FireState::HoldFire => "Hold fire".into(),
             FireState::ReturnFire => "Return fire".into(),

@@ -54,8 +54,9 @@ selection.
 | All own units on the map ("global") | Y Y (second tap) | Triangle Triangle | Ctrl+Q |
 | Context order: move, attack enemy, guard friend, place building | X | Square | RMB |
 | Queue the order | RB + X | R1 + Square | Shift + RMB |
-| Orders wheel (stop, patrol, guard, fire states, spell, idle builder) | hold LT, stick to a slot, release | hold L2 | S, P, G, H, R, F, C |
-| Build wheel (selected builder) | hold LB, stick to a slot, release | hold L1 | F1–F8, then RMB to place |
+| Orders wheel (stop, patrol, guard, fire states, each spell, idle builder) | hold LT, stick to a slot, release | hold L2 | S, P, G, H, R, F |
+| Spells of the selection's first caster (then target with X / RMB) | orders wheel, one slot per spell | orders wheel | C (first spell), Ctrl+F1–F3 (spells 1–3) |
+| Build wheel (selected builder, up to 16 entries) | hold LB, stick to a slot, release | hold L1 | F1–F8, Shift+F1–F8 (options 9–16), then RMB to place |
 | Cancel wheel / brush / order mode, then deselect | B | Circle | Esc |
 | Control groups 1–4: recall / store | D-pad / RB + D-pad | D-pad / R1 + D-pad | 0–9 / Ctrl+0–9 |
 | Pan | Right stick, or push the cursor into the screen edge | Right stick | Arrow keys |
@@ -68,8 +69,17 @@ selection.
 
 With nothing selected the orders wheel shows the *idle wheel* instead
 (idle builder, last alert, monarch, all on screen, all units). With units
-selected it shows only what they can do (no "Cast spell" without a
-caster), AoE IV style (`wheel_context`).
+selected it shows only what they can do (no spells without a caster),
+AoE IV style (`wheel_context`), and one slot per spell of the first caster
+in the selection (WP-T, `tak_input::expand_spells`) labelled with the
+spell's name and mana cost, e.g. "Meteor (200 mana)". A spell the caster
+cannot pay for is greyed and does nothing (`WorldView::can_cast`, the
+caster's own mana against `manapershot`); the same holds for C, Ctrl+F1–F3
+and the HUD's spell buttons. Ctrl+F1–F3 follow the TA:K readme's "Select
+weapon 1..3" keys (**Chosen**: here they pick spells 1–3 of the caster, in
+weapon-slot order). Retail casters have at most three spells and retail
+build menus at most nine entries (Aramon Castle, Taros Hell Gate, Veruna
+Liege, Zhon Beast Tamer), so Shift+F1 is the most a retail menu needs.
 
 **Halo Wars comparison (Chosen).** WP-J put same-type select on Y /
 double Y. Halo Wars puts it on a double tap of A and has separate "local"
@@ -180,8 +190,13 @@ Slot from stick angle (slot 0 at the top, clockwise), a deadzone
 release keeps the last slot unless `wheel_recentre_clears`. Confirm on
 release (default) or, with `wheel_confirm_on_press`, the wheel stays open
 after its button is released and A / X confirms, B or the wheel button
-cancels. Slot count and labels are drawn around the cursor; the wheel's
-centre says how many slots and how to confirm.
+cancels. Labels are drawn around the cursor on a radius that grows with
+the slot count and the label widths (WP-T, `view::wheel_radius`): the
+smallest radius at which no two slot boxes come within 6 px and no box
+comes within 26 px of the cursor. The wheel's title ("Orders", "Build")
+sits above the top slot, never over the cursor; how to confirm and cancel
+is in the hint bar. The highlighted slot is gold with dark text and a
+thicker light border; unusable slots (spells without mana) are greyed.
 
 ### Brush
 

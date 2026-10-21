@@ -2,7 +2,7 @@
 //! and the camera geometry shared by rendering and input ([`ViewGeom`]).
 //! No Bevy types.
 
-use tak_commands::{PlayerId, UnitDefId, UnitId};
+use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId};
 use tak_input::{BuilderKind, Camera, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 use tak_sim::World;
@@ -77,9 +77,104 @@ impl WorldView for SimView<'_> {
         check_site(self.world, def, site_center(d, pos), None).is_ok()
     }
 
+    fn spells(&self, unit: UnitId) -> Vec<SpellId> {
+        unit_spells(self.world, unit)
+            .into_iter()
+            .map(|s| s.id)
+            .collect()
+    }
+
+    fn can_cast(&self, unit: UnitId, spell: SpellId) -> bool {
+        unit_spells(self.world, unit)
+            .iter()
+            .any(|s| s.id == spell && s.ready)
+    }
+
     fn is_idle(&self, unit: UnitId) -> bool {
         self.world.unit(unit).is_some_and(|u| u.orders.is_empty())
     }
+}
+
+/// One spell of a unit: a weapon slot with `manapershot > 0`
+/// (`docs/combat.md`), cast with `SimCommand::CastSpell { spell:
+/// SpellId(slot) }`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpellInfo {
+    /// `SpellId(weapon slot)`, 0-based.
+    pub id: SpellId,
+    /// The weapon's FBI `name` (e.g. "Meteor").
+    pub name: String,
+    /// `manapershot`.
+    pub cost: i32,
+    /// The caster's own mana covers the cost now.
+    pub ready: bool,
+}
+
+/// `unit`'s spells in weapon-slot order (the menu order `tak-input` uses).
+pub fn unit_spells(world: &World, unit: UnitId) -> Vec<SpellInfo> {
+    let Some(d) = world.unit(unit).and_then(|u| world.defs().get(u.def)) else {
+        return Vec::new();
+    };
+    let mana = tak_sim::economy::unit_mana(world, unit).map_or(Fx::ZERO, |m| m.mana);
+    d.combat
+        .weapons
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.is_spell())
+        .map(|(slot, w)| SpellInfo {
+            id: SpellId(slot as u32),
+            name: w.name.clone(),
+            cost: w.mana_per_shot,
+            ready: mana >= Fx::from_int(w.mana_per_shot),
+        })
+        .collect()
+}
+
+/// The caster the mapper's cast actions use: the first own, live unit of
+/// the selection (id order) that has spells, with its spells.
+pub fn caster_spells(
+    world: &World,
+    local: PlayerId,
+    selection: &tak_commands::UnitSet,
+) -> Option<(UnitId, Vec<SpellInfo>)> {
+    selection.iter().copied().find_map(|id| {
+        world.unit(id).filter(|u| u.owner == local)?;
+        let s = unit_spells(world, id);
+        (!s.is_empty()).then_some((id, s))
+    })
+}
+
+/// Radius for a radial wheel whose slot boxes (`sizes`, logical px) sit at
+/// `dirs` (unit vectors, screen `+y` down) around the cursor: the smallest
+/// (from `min`, in 2-px steps) at which no two boxes come closer than
+/// `gap` and every box stays `clear` px away from the centre on at least
+/// one axis, so the cursor and the boxes never overlap. Long labels and
+/// many slots push it out.
+pub fn wheel_radius(dirs: &[[f32; 2]], sizes: &[[f32; 2]], min: f32, gap: f32, clear: f32) -> f32 {
+    let n = dirs.len().min(sizes.len());
+    let fits = |r: f32| {
+        let c: Vec<[f32; 2]> = dirs[..n].iter().map(|d| [d[0] * r, d[1] * r]).collect();
+        for i in 0..n {
+            let [w, h] = sizes[i];
+            if c[i][0].abs() - w / 2.0 < clear && c[i][1].abs() - h / 2.0 < clear {
+                return false;
+            }
+            for j in i + 1..n {
+                let [w2, h2] = sizes[j];
+                if (c[i][0] - c[j][0]).abs() < (w + w2) / 2.0 + gap
+                    && (c[i][1] - c[j][1]).abs() < (h + h2) / 2.0 + gap
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    };
+    let mut r = min;
+    while r < 900.0 && !fits(r) {
+        r += 2.0;
+    }
+    r
 }
 
 /// The camera, in world terms: the ground point at the screen centre, the
@@ -186,16 +281,53 @@ impl ViewGeom {
 /// plane).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MinimapGeom {
-    /// `(left, top, width, height)` in logical pixels.
+    /// The image: `(left, top, width, height)` in logical pixels.
     pub rect: [f32; 4],
+    /// The panel around it (frame included), same units. Clicks anywhere
+    /// on it belong to the minimap.
+    pub panel: [f32; 4],
     /// Map size in world units (cells × 16).
     pub map: [f32; 2],
 }
 
+/// Largest minimap panel as a share of the viewport (width, height)
+/// (**Chosen**: about TA:K's sidebar minimap at 640×480, a quarter of the
+/// width; a third of the height keeps it clear of the HUD panel).
+pub const MINIMAP_SHARE: [f32; 2] = [0.24, 0.36];
+/// Panel size limits, logical pixels: never smaller than this box ...
+pub const MINIMAP_MIN: [f32; 2] = [200.0, 160.0];
+/// ... nor larger than this one.
+pub const MINIMAP_MAX: [f32; 2] = [560.0, 560.0];
+/// Gap between the panel and the window edge.
+pub const MINIMAP_MARGIN: f32 = 8.0;
+/// Frame between the panel edge and the image.
+pub const MINIMAP_PAD: f32 = 3.0;
+
 impl MinimapGeom {
-    /// Whether a screen pixel is on the minimap.
+    /// Lay the minimap out in the bottom-right corner of a `view`-sized
+    /// window: the image (`image` pixels, any aspect: retail maps run from
+    /// 512×107 to 129×431) is scaled to fit the largest box the window
+    /// allows ([`MINIMAP_SHARE`], clamped to [`MINIMAP_MIN`] /
+    /// [`MINIMAP_MAX`]) keeping its aspect, and the panel is the image plus
+    /// a [`MINIMAP_PAD`] frame.
+    pub fn fit(view: [f32; 2], image: (u32, u32), map: [f32; 2]) -> Self {
+        let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+        let bh = (view[1] * MINIMAP_SHARE[1]).clamp(MINIMAP_MIN[1], MINIMAP_MAX[1]);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let s = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * s).round().max(1.0), (ih * s).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = (view[0] - pw - MINIMAP_MARGIN, view[1] - ph - MINIMAP_MARGIN);
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
+    /// Whether a screen pixel is on the minimap panel.
     pub fn contains(&self, sx: f32, sy: f32) -> bool {
-        let [l, t, w, h] = self.rect;
+        let [l, t, w, h] = self.panel;
         sx >= l && sy >= t && sx < l + w && sy < t + h
     }
 
@@ -299,6 +431,7 @@ mod tests {
     fn minimap_round_trip_and_view_rect() {
         let m = MinimapGeom {
             rect: [1000.0, 500.0, 200.0, 100.0],
+            panel: [1000.0, 500.0, 200.0, 100.0],
             map: [3000.0, 1500.0],
         };
         assert!(m.contains(1100.0, 550.0) && !m.contains(990.0, 550.0));
@@ -317,6 +450,66 @@ mod tests {
         assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
         assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
         assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn minimap_fits_every_aspect() {
+        // Square, the widest and the tallest retail minimaps, at three
+        // window sizes: the image keeps its aspect, stays inside the box
+        // and the window, and one side fills the box.
+        for view in [[1280.0, 720.0], [1920.0, 1080.0], [3456.0, 2160.0]] {
+            for image in [(446, 431), (512, 107), (129, 431), (432, 432)] {
+                let m = MinimapGeom::fit(view, image, [3072.0, 3072.0]);
+                let [l, t, w, h] = m.rect;
+                let a = image.0 as f32 / image.1 as f32;
+                assert!((w / h - a).abs() / a < 0.03, "{view:?} {image:?} {w}x{h}");
+                let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+                let bh = (view[1] * MINIMAP_SHARE[1]).clamp(MINIMAP_MIN[1], MINIMAP_MAX[1]);
+                let inner = [bw - 2.0 * MINIMAP_PAD, bh - 2.0 * MINIMAP_PAD];
+                assert!(w <= inner[0] + 0.5 && h <= inner[1] + 0.5);
+                assert!(w >= inner[0] - 1.0 || h >= inner[1] - 1.0);
+                assert!(l > 0.0 && t > 0.0);
+                assert!((l + w + MINIMAP_PAD + MINIMAP_MARGIN - view[0]).abs() < 1e-3);
+                assert!((t + h + MINIMAP_PAD + MINIMAP_MARGIN - view[1]).abs() < 1e-3);
+                assert!(m.contains(m.panel[0] + 1.0, m.panel[1] + 1.0));
+                // The map's corners land on the image's corners.
+                let c = m.to_mini(m.map[0], m.map[1]);
+                assert!((c[0] - w).abs() < 1e-3 && (c[1] - h).abs() < 1e-3);
+            }
+        }
+        // 1280x720, square map: about 260 px (was a fixed 230-px width).
+        let m = MinimapGeom::fit([1280.0, 720.0], (446, 431), [3072.0, 3072.0]);
+        assert!(m.rect[3] > 240.0, "{:?}", m.rect);
+    }
+
+    #[test]
+    fn wheel_radius_separates_slots_and_clears_the_cursor() {
+        let dirs = |n: usize| -> Vec<[f32; 2]> {
+            (0..n)
+                .map(|k| {
+                    let a =
+                        std::f32::consts::FRAC_PI_2 - k as f32 * std::f32::consts::TAU / n as f32;
+                    [a.cos(), -a.sin()]
+                })
+                .collect()
+        };
+        // "Return fire" beside "Hold fire": the case that crowded.
+        let wide = [[110.0, 26.0]; 8];
+        let r8 = wheel_radius(&dirs(8), &wide, 60.0, 6.0, 24.0);
+        let c: Vec<[f32; 2]> = dirs(8).iter().map(|d| [d[0] * r8, d[1] * r8]).collect();
+        for i in 0..8 {
+            assert!(c[i][0].abs() - 55.0 >= 24.0 || c[i][1].abs() - 13.0 >= 24.0);
+            for j in i + 1..8 {
+                assert!(
+                    (c[i][0] - c[j][0]).abs() >= 116.0 || (c[i][1] - c[j][1]).abs() >= 32.0,
+                    "{i} {j} at r {r8}"
+                );
+            }
+        }
+        // More slots or wider labels need a larger radius.
+        let r12 = wheel_radius(&dirs(12), &[[110.0, 26.0]; 12], 60.0, 6.0, 24.0);
+        let r8n = wheel_radius(&dirs(8), &[[50.0, 26.0]; 8], 60.0, 6.0, 24.0);
+        assert!(r12 > r8 && r8 > r8n, "{r12} {r8} {r8n}");
     }
 
     #[test]

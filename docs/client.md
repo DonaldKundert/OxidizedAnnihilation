@@ -340,9 +340,18 @@ Findings and choices:
 - Not done: build sparkles (`sidedata` `buildsparklygaf`), dust when
   walking, Remote Effect rings (`radiusart*`), weapon `shadowart`, sound.
 
-### Minimap (WP-R)
+### Minimap (WP-R, WP-T)
 
-Bottom right, 230 px wide: the TNT's large minimap in the OTA kingdom's
+Bottom right, in a framed panel fitted to the window (WP-T,
+`MinimapGeom::fit`, tested for every aspect): the image is scaled to the
+largest box of 24 % of the window width × 36 % of its height (clamped to
+200×160 … 560×560 px; **Chosen**), keeping its aspect, so a square 6×6
+map is about 260 px at 1280×720 and the extremes (Waterworks 512×107,
+Ghost Shipping 129×431) neither shrink to a strip nor run off screen.
+Fog, unit dots and the camera rectangle are children of the image node,
+so they scale with it. It was a fixed 230 px wide with the height taken
+from the image (wide maps a strip, tall maps off screen, and small on big
+windows: the window's scale factor is forced to 1). It is the TNT's large minimap in the OTA kingdom's
 palette (`palettes/<kingdom>.pcx`, as `tak-cli dump-map` draws it). Like
 the terrain mosaic it is screen-space art covering the whole map, so it
 maps linearly to projected coordinates `(x, z − height/2)`; a camera
@@ -376,27 +385,41 @@ sim's job.
   minimap dots). Features and the player's own units always are (under
   the overlay).
 - The minimap gets the same fog as a texture, one texel per cell
-  (heights ignored, so edges can sit a few pixels off on hills).
+  (heights ignored, so edges can sit a few pixels off on hills), except
+  that unexplored cells are dark (opacity 205/255) rather than black
+  (**Chosen**, WP-T: with black, the minimap at the start was a black
+  panel with the start area as a small patch in one corner; the map's
+  shape now reads from the first tick, and enemy dots there stay hidden).
 - `--no-fog` starts with it off; F9 toggles it.
 
 ### HUD and overlays
 
 Top bar: map, tick, pause/speed, every player's mana, storage and income;
-a player whose monarch is dead or who has no units left shows as
-`DEFEATED` (**Believed**: TA:K's default game end is the monarch's death;
-display only, the sim has no defeat rule). The side is taken from the
-player's monarch definition, so it survives the monarch.
+a defeated player shows as `DEFEATED`, straight from the sim
+(`World::is_defeated`, WP-U's `tak_sim::victory`: by default the monarch's
+death or having no units; WP-T replaced the client's own guess). The side
+is taken from the player's monarch definition, so it survives the monarch.
+Once `Sim::match_state()` is `Over`, a banner in the upper middle says
+**Victory** (the local player is among the winners), **Defeat** or
+**Draw** (no winners), with the winners and the time of the decision. It
+appears 150 ticks (5 s) after the deciding tick (**Believed**: TA waited
+about that long before its end screen, so the last death animations play
+first); display only, the camera and input keep working.
 
 Bottom-left panel (WP-R): the first selected unit's name, def and order
 count; bars for health (for a frame, a dim segment under it shows the
 health its progress has earned), the unit's own mana pool
 (`economy::unit_mana`, spellcasters) and build progress (frames); then
-clickable buttons: orders (Stop, Patrol, Guard, Spell, Hold / Return /
-Fire, the active fire state and order mode highlighted) for own units,
-and the build menu (F1–F8 with costs, the option in placement mode
-highlighted) for own builders. A button presses the key the
-mouse/keyboard profile binds to that action, so it does exactly what the
-key and the wheel slot do. Clicks on the panel never select or order
+clickable buttons: orders (Stop, Patrol, Guard, Hold / Return / Fire,
+the active fire state and order mode highlighted) for own units; one
+button per spell of the selection's caster (WP-T: `^F1 Meteor (200)`,
+the weapon's name and `manapershot`, greyed while the caster's own mana
+is short, highlighted in its cast mode); and the whole build menu (F1–F8
+then S-F1… for Shift+F1–F8, with costs, the option in placement mode
+highlighted) for own builders. A button presses the key (and modifier)
+the mouse/keyboard profile binds to that action, so it does exactly what
+the key and the wheel slot do. While casting, the status line names the
+spell and its cost, and the cursor is the game's cast cursor. Clicks on the panel never select or order
 behind it; with a gamepad, A with the virtual cursor over a button does
 the same. Below: the placement hint while placing. A red line under the
 top bar shows the local player's latest refused build for 5 s
@@ -427,7 +450,8 @@ the controller buttons for the current context (WP-S, `controller.md`).
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No audio, no spell UI beyond the cast mode; build buttons stop at F8
-  (the profile's bindings).
+- No audio. Spell and build buttons are text, not the game's button art
+  (`buttonimageup` etc. in the weapon/unit data).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
-  Zhon monarch dies around tick 1,700. Behaviour is the sim's.
+  Zhon monarch dies at tick 1,620 (the match is decided then; the Victory
+  banner shows from tick 1,770). Behaviour is the sim's.

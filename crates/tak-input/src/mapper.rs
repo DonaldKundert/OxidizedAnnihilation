@@ -18,7 +18,7 @@ use crate::cursor::{
 };
 use crate::event::{Axis, EventKind, Input, InputEvent};
 use crate::tuning::Tuning;
-use crate::wheel::{Wheel, WheelKind, context_slots};
+use crate::wheel::{Wheel, WheelKind, context_slots, expand_spells};
 use crate::world::{BuilderKind, Camera, UnitInfo, WorldView, fx_int, units_sorted};
 
 /// One thing the mapper produced, in order.
@@ -1113,15 +1113,18 @@ impl Mapper {
             Action::CommandWheel => {
                 let slots = if self.tuning.wheel_context {
                     let units = own_units(cx.world, &self.selection);
-                    let casters = units.iter().any(|&u| !cx.world.spells(u).is_empty());
+                    let spells = first_caster(cx.world, &units).map_or(0, |(_, s)| s.len());
                     let builders = first_builder(cx.world, &units).is_some();
-                    context_slots(
+                    let slots = context_slots(
                         &self.profile.command_wheel,
                         &self.profile.idle_wheel,
                         !units.is_empty(),
-                        casters,
+                        spells > 0,
                         builders,
-                    )
+                    );
+                    let mut slots = expand_spells(slots, spells);
+                    slots.truncate(usize::from(self.tuning.wheel_max_slots));
+                    slots
                 } else {
                     self.profile.command_wheel.clone()
                 };
@@ -1269,15 +1272,8 @@ impl Mapper {
             }
             Action::PatrolMode => self.set_mode_if_units(Mode::Patrol, cx),
             Action::GuardMode => self.set_mode_if_units(Mode::Guard, cx),
-            Action::CastSpellMode => {
-                let units = own_units(cx.world, &self.selection);
-                if let Some(s) = units
-                    .iter()
-                    .find_map(|&u| cx.world.spells(u).first().copied())
-                {
-                    self.mode = Mode::CastSpell(s);
-                }
-            }
+            Action::CastSpellMode => self.cast_spell_mode(0, cx),
+            Action::CastSpell { index } => self.cast_spell_mode(usize::from(index), cx),
             Action::BuildOption { index } => self.build_option(usize::from(index), cx),
             Action::Brush
             | Action::DragSelect
@@ -1302,6 +1298,18 @@ impl Mapper {
             .collect();
         self.set_selection(units.clone());
         cx.out.push(Output::SelectAll { scope, units });
+    }
+
+    /// Enter cast mode for spell `index` of the selection's first caster,
+    /// if it has that spell and can pay for it.
+    fn cast_spell_mode<W: WorldView + ?Sized>(&mut self, index: usize, cx: &mut Cx<'_, W>) {
+        let units = own_units(cx.world, &self.selection);
+        if let Some((caster, spells)) = first_caster(cx.world, &units)
+            && let Some(&s) = spells.get(index)
+            && cx.world.can_cast(caster, s)
+        {
+            self.mode = Mode::CastSpell(s);
+        }
     }
 
     fn set_mode_if_units<W: WorldView + ?Sized>(&mut self, mode: Mode, cx: &mut Cx<'_, W>) {
@@ -1504,4 +1512,15 @@ fn first_builder<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<Un
         .iter()
         .copied()
         .find(|&id| world.unit(id).is_some_and(|u| u.builder.is_some()))
+}
+
+/// The first unit of `units` with spells, and its spells (menu order).
+fn first_caster<W: WorldView + ?Sized>(
+    world: &W,
+    units: &UnitSet,
+) -> Option<(UnitId, Vec<tak_commands::SpellId>)> {
+    units.iter().copied().find_map(|id| {
+        let s = world.spells(id);
+        (!s.is_empty()).then_some((id, s))
+    })
 }
