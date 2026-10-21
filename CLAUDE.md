@@ -19,7 +19,8 @@ Rust-only, headless, deterministic engine core for Total Annihilation: Kingdoms.
 
 ## Fidelity and multiplayer (Tyler's decisions)
 
-- **As original as possible.** Default behaviour matches the original game's rules and numbers wherever we can determine them from the data, the install's docs, or careful observation. Rebalancing is allowed, but only behind an explicit, named option (e.g. a ruleset flag), never as the default.
+- **Familiar to experienced TA:K players.** Aim to match TA:K's behaviour wherever possible: its rules and numbers from the data, the install's docs, or careful observation, and how things feel in play (speeds, timings, targeting, build times, pathing quirks that players rely on). It does not have to be 1:1: where an exact match is complicated, costly, or reproduces a known flaw, get close, document the difference, and move on.
+- Rebalancing is allowed, but only behind an explicit, named option (e.g. a ruleset flag), never as the default.
 - When the original rule is unknown, pick the most TA-faithful reading, tag it Believed or Chosen in the docs, and keep it in one easily changed place.
 - **Multiplayer is not a goal yet, but must stay possible.** Every system is deterministic: no floats in sim state, ordered iteration, one world RNG, integer budgets instead of time budgets, and a cross-process determinism test for each new system.
 
