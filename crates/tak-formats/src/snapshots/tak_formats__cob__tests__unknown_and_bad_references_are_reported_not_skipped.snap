@@ -1,0 +1,25 @@
+---
+source: crates/tak-formats/src/cob.rs
+expression: d.text
+---
+; cob v6: 2 functions, 2 pieces, 1 statics, 1 sounds, 9 code words
+.piece 0 base
+.piece 1 lleg
+.sound 0 "footstep"
+.function 0 Create @00000
+.function 1 bad @00001
+
+Create:
+  00000  push-constant 1
+  00002  .word 0xdeadbeef  ; UNKNOWN
+  00003  jump bad
+  00005  turn piece#9, axis#7
+  00008  .word 0x10001000  ; TRUNCATED
+
+; 6 issues
+;   unknown opcode 0xdeadbeef at word 2
+;   move at word 8 needs 2 operand words, only 0 remain
+;   bad entry point 1 at word 1
+;   bad jump target 1 at word 3
+;   bad piece index 9 at word 5
+;   bad axis 7 at word 5

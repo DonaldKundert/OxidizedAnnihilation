@@ -1,0 +1,41 @@
+---
+source: crates/tak-formats/src/cob.rs
+expression: d.text
+---
+; cob v6: 2 functions, 2 pieces, 1 statics, 1 sounds, 45 code words
+.piece 0 base
+.piece 1 lleg
+.sound 0 "footstep"
+.function 0 Create @00000
+.function 1 walk @00005
+
+Create:
+  00000  start-script walk, argc=0
+  00003  alloc-local
+  00004  return
+
+walk:
+  00005  alloc-local
+.L00006:
+  00006  push-static static[0]
+  00008  not
+  00009  jump-if-false .L00043
+  00011  push-constant 16380
+  00013  push-constant 5460
+  00015  turn lleg, x-axis
+  00018  wait-for-turn lleg, x-axis
+  00021  push-constant -229376
+  00023  move-now base, y-axis
+  00026  push-constant 4
+  00028  play-sound "footstep"
+  00030  discard
+  00031  push-constant 7
+  00033  push-constant 3
+  00035  mod
+  00036  pop-local local[0]
+  00038  push-constant 100
+  00040  sleep
+  00041  jump .L00006
+.L00043:
+  00043  alloc-local
+  00044  return

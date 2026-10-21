@@ -1,0 +1,19 @@
+---
+source: crates/tak-formats/src/cob.rs
+expression: d.text
+---
+; cob v6: 1 functions, 0 pieces, 1 statics, 2 sounds, 17 code words
+.sound 0 "create TESTUNIT"
+.sound 1 "SetTrigger"
+.function 0 Start @00000
+
+Start:
+  00000  push-constant 150
+  00002  push-constant 68
+  00004  mission-command "create TESTUNIT", argc=2
+  00007  pop-static static[0]
+  00009  push-static static[0]
+  00011  mission-command "SetTrigger", argc=1
+  00014  discard
+  00015  alloc-local
+  00016  return

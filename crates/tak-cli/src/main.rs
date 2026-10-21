@@ -2,6 +2,7 @@
 //! game binary.
 
 mod archive_cmds;
+mod disasm_cmd;
 mod report;
 mod survey;
 
@@ -60,6 +61,12 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Disassemble a COB script; with --stats, opcode counts under a prefix.
+    Disasm {
+        path: String,
+        #[arg(long)]
+        stats: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -78,6 +85,7 @@ fn main() -> ExitCode {
                 let out = out.unwrap_or_else(|| std::env::temp_dir().join("tak-census"));
                 archive_cmds::census(vfs, &out)
             }
+            Cmd::Disasm { path, stats } => disasm_cmd::run(vfs, &path, stats),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
