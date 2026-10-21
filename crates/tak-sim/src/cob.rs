@@ -321,6 +321,10 @@ impl ScriptHost for CobScripts {
         }
     }
 
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn hash_state(&self, h: &mut StateHasher) {
         h.bytes(b"COB");
         h.len(self.units.len());

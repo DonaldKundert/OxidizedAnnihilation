@@ -128,6 +128,17 @@ impl Sim {
         )
     }
 
+    /// The script host, read-only (renderers read piece poses through
+    /// [`ScriptHost::as_any`]).
+    pub fn scripts(&self) -> &dyn ScriptHost {
+        self.scripts.as_ref()
+    }
+
+    /// The COB host, if this match runs one (for renderers).
+    pub fn cob(&self) -> Option<&crate::CobScripts> {
+        self.scripts.as_any()?.downcast_ref()
+    }
+
     /// The script host's diagnostics (not part of the hash).
     pub fn script_stats(&self) -> ScriptStats {
         self.scripts.stats()
