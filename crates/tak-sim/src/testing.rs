@@ -51,6 +51,39 @@ pub fn example_scenario(seed: u64, players: usize) -> Scenario {
     }
 }
 
+/// A sensible "go for a walk" log: from tick 1, every `every` ticks (at
+/// least 1), each player orders its monarch (slot `i` belongs to player
+/// `i`) to a random point at least 64 units inside the map. Unlike
+/// [`random_log`] every command is valid, so the monarchs actually walk (and
+/// halt at blocking terrain on real maps).
+pub fn walk_log(scenario: &Scenario, ticks: u32, every: u32, seed: u64) -> CommandLog {
+    let mut rng = Rng::with_stream(seed, 0x3a1c);
+    let mut log = CommandLog::new();
+    let (w, h) = (scenario.map.width, scenario.map.height);
+    let margin = 64.min(w / 4).min(h / 4);
+    let every = every.max(1);
+    let mut t = 1;
+    while t < ticks {
+        for i in 0..scenario.players.len() {
+            let to = Vec2::from_ints(
+                rng.range_i32(margin, (w - margin).max(margin + 1)),
+                rng.range_i32(margin, (h - margin).max(margin + 1)),
+            );
+            log.record(
+                Tick(t),
+                PlayerId(i as u8),
+                SimCommand::Move {
+                    units: UnitSet::single(UnitId::new(i as u32, 0)),
+                    to,
+                    queue: QueueMode::Replace,
+                },
+            );
+        }
+        t = t.saturating_add(every);
+    }
+    log
+}
+
 /// A random but reproducible command log over `ticks` ticks for a scenario
 /// whose units are the tick-0 monarchs (slot `i` belongs to player `i`).
 /// Mixes valid orders with stale ids, other players' units, unknown players,

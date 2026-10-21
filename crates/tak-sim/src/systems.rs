@@ -140,9 +140,19 @@ pub fn movement(world: &mut World) {
 /// - If the unit is aligned and this tick's travel reaches the waypoint, it
 ///   lands exactly on it; otherwise it advances along its heading.
 /// - Idle units brake to a halt along their heading.
+/// - Terrain: a step whose destination cell blocks
+///   ([`MapInfo::blocks_step`]) is not taken. The unit stops dead (speed 0)
+///   and drops its active order; later queued orders still run. No
+///   pathfinding: the unit does not look for a way round.
 ///
-/// Positions are clamped to the map.
+/// Positions are clamped to the map. `ground` and `terrain` are refreshed
+/// at the end.
 pub fn move_unit(u: &mut Unit, def: &UnitDef, map: &MapInfo) {
+    drive(u, def, map);
+    u.sample_terrain(map);
+}
+
+fn drive(u: &mut Unit, def: &UnitDef, map: &MapInfo) {
     let Some(&Order::Move { to }) = u.orders.front() else {
         u.speed = u.speed.saturating_sub(def.brakerate).max(Fx::ZERO);
         advance(u, map);
@@ -177,17 +187,33 @@ pub fn move_unit(u: &mut Unit, def: &UnitDef, map: &MapInfo) {
         u.speed.saturating_sub(def.brakerate).max(want)
     };
 
-    if aligned && u.speed >= dist {
-        u.pos = to;
+    let moved = if aligned && u.speed >= dist {
+        step_to(u, map, to)
     } else {
-        advance(u, map);
+        advance(u, map)
+    };
+    if !moved {
+        // Halted by terrain: give up on this waypoint.
+        u.orders.pop_front();
     }
 }
 
-fn advance(u: &mut Unit, map: &MapInfo) {
+/// Advance along the heading; `false` if terrain blocked the step.
+fn advance(u: &mut Unit, map: &MapInfo) -> bool {
     if u.speed == Fx::ZERO {
-        return;
+        return true;
     }
     let step: WorldPos = Vec2::from_angle(u.heading).scale(u.speed);
-    u.pos = map.clamp(u.pos + step);
+    let next = map.clamp(u.pos + step);
+    step_to(u, map, next)
+}
+
+/// Move to `to` unless terrain blocks it, in which case stop dead.
+fn step_to(u: &mut Unit, map: &MapInfo, to: WorldPos) -> bool {
+    if map.blocks_step(u.pos, to) {
+        u.speed = Fx::ZERO;
+        return false;
+    }
+    u.pos = to;
+    true
 }

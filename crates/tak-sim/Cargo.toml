@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 tak-content.workspace = true
 tak-script.workspace = true
+tak-formats.workspace = true
+tak-vfs.workspace = true
 tak-math.workspace = true
 tak-commands.workspace = true
 xxhash-rust.workspace = true

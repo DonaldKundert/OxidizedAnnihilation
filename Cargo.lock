@@ -602,6 +602,7 @@ dependencies = [
  "tak-headless",
  "tak-math",
  "tak-script",
+ "tak-sim",
  "tak-vfs",
 ]
 
@@ -645,6 +646,7 @@ dependencies = [
  "tak-commands",
  "tak-input",
  "tak-sim",
+ "tak-vfs",
  "thiserror",
 ]
 
@@ -688,8 +690,10 @@ dependencies = [
  "serde_json",
  "tak-commands",
  "tak-content",
+ "tak-formats",
  "tak-math",
  "tak-script",
+ "tak-vfs",
  "thiserror",
  "xxhash-rust",
 ]

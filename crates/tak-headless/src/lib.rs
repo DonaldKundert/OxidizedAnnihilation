@@ -1,5 +1,6 @@
-//! Runs a sim from a scenario and a command log and prints per-tick hashes.
-//! Renders nothing.
+//! Runs a sim from a scenario (synthetic JSON, or a real map loaded from an
+//! install with COB scripts running) and a command log, and prints per-tick
+//! hashes. Renders nothing.
 //!
 //! # Hash file format
 //!
@@ -18,7 +19,10 @@
 use std::path::Path;
 
 use tak_commands::{CommandLog, LogError};
-use tak_sim::{Scenario, ScenarioError, run_scenario};
+use tak_sim::content::ContentError;
+use tak_sim::{
+    Match, PlayerSetup, Scenario, ScenarioError, ScriptStats, Sim, load_match, run_scenario,
+};
 
 /// Header written at the top of hash files.
 pub const HASH_FILE_HEADER: &str = "# tak-headless hashes v1";
@@ -43,6 +47,12 @@ pub enum Error {
     /// Bad command log.
     #[error("command log: {0}")]
     Log(#[from] LogError),
+    /// Real map or install could not be loaded.
+    #[error("{0}")]
+    Content(#[from] ContentError),
+    /// Inconsistent arguments.
+    #[error("{0}")]
+    Setup(String),
     /// Bad hash file.
     #[error("hash file line {line}: {msg}")]
     HashFile {
@@ -84,6 +94,82 @@ pub fn load_log(path: Option<&Path>) -> Result<CommandLog, Error> {
 /// Run a scenario with a log for `ticks` ticks.
 pub fn run(scenario: &Scenario, log: &CommandLog, ticks: u32) -> Result<Vec<u64>, Error> {
     Ok(run_scenario(scenario, log, ticks)?)
+}
+
+/// Load a real-map match from an install: `map` is a VFS path without
+/// extension (`kmap/Adamantine Gate`), `players` a comma-separated side
+/// list (`ARA,ZON`).
+pub fn load_map(data: &Path, map: &str, players: &str, seed: u64) -> Result<Match, Error> {
+    let players = PlayerSetup::parse_list(players);
+    if players.is_empty() {
+        return Err(Error::Setup("--players names no side".into()));
+    }
+    let vfs = tak_vfs::open_kingdoms(data).map_err(ContentError::from)?;
+    Ok(load_match(&vfs, map, &players, seed)?)
+}
+
+/// What a real-map run produced besides its hashes.
+pub struct MatchRun {
+    /// Per-tick hashes.
+    pub hashes: Vec<u64>,
+    /// Script diagnostics (not part of the hashes).
+    pub stats: ScriptStats,
+    /// Wall-clock milliseconds spent stepping (excludes loading).
+    pub millis: u128,
+    /// Final position of each player's monarch, whole world units.
+    pub monarchs: Vec<Option<(i32, i32)>>,
+}
+
+impl MatchRun {
+    /// Ticks per wall-clock second (integer).
+    pub fn ticks_per_second(&self) -> u128 {
+        (self.hashes.len() as u128).saturating_mul(1000) / self.millis.max(1)
+    }
+
+    /// Human-readable summary for stderr.
+    pub fn report(&self) -> String {
+        let mut s = format!(
+            "ran {} ticks in {} ms ({} ticks/s)\n",
+            self.hashes.len(),
+            self.millis,
+            self.ticks_per_second()
+        );
+        for (i, p) in self.monarchs.iter().enumerate() {
+            match p {
+                Some((x, y)) => s.push_str(&format!("player {i} monarch at ({x}, {y})\n")),
+                None => s.push_str(&format!("player {i} has no monarch\n")),
+            }
+        }
+        s.push_str(&self.stats.report());
+        s
+    }
+}
+
+/// Run a loaded match with its COB scripts (or none) for `ticks` ticks.
+pub fn run_match(m: Match, log: &CommandLog, ticks: u32, scripts: bool) -> Result<MatchRun, Error> {
+    let mut sim = if scripts {
+        Sim::with_scripts(&m.scenario, Box::new(m.scripts))?
+    } else {
+        Sim::new(&m.scenario)?
+    };
+    let start = std::time::Instant::now();
+    let hashes = sim.run(log, ticks);
+    let millis = start.elapsed().as_millis();
+    let monarchs = sim
+        .world()
+        .players()
+        .iter()
+        .map(|p| {
+            let u = sim.world().unit(p.monarch?)?;
+            Some((u.pos.x.to_int_floor(), u.pos.y.to_int_floor()))
+        })
+        .collect();
+    Ok(MatchRun {
+        hashes,
+        stats: sim.script_stats(),
+        millis,
+        monarchs,
+    })
 }
 
 /// Render hashes in the hash file format.

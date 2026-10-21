@@ -8,6 +8,7 @@ mod disasm_cmd;
 mod keys_cmd;
 mod map_cmd;
 mod model_cmd;
+mod render_cmd;
 mod report;
 mod sprite_cmd;
 mod survey;
@@ -132,6 +133,8 @@ enum Cmd {
     Keys(keys_cmd::KeysArgs),
     /// Load typed content (units, features, build menus, maps) and print a summary or one def as JSON.
     Content(content_cmd::ContentArgs),
+    /// Run a real map headless to a tick and draw terrain, monarch trails and markers as a PNG.
+    Render(render_cmd::RenderArgs),
 }
 
 fn main() -> ExitCode {
@@ -185,6 +188,7 @@ fn main() -> ExitCode {
                 },
             ),
             Cmd::Content(args) => content_cmd::run(vfs, args),
+            Cmd::Render(args) => render_cmd::run(vfs, args),
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
