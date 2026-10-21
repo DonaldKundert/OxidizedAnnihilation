@@ -5,6 +5,7 @@ mod archive_cmds;
 mod disasm_cmd;
 mod model_cmd;
 mod report;
+mod sprite_cmd;
 mod survey;
 
 use clap::{Parser, Subcommand};
@@ -75,6 +76,15 @@ enum Cmd {
         #[arg(long)]
         stats: bool,
     },
+    /// Write every frame of a GAF/TAF/GAO or PCX as PNG. Keep the output outside the repo.
+    DumpSprite {
+        path: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Palette for indexed art (.pal or .pcx path in the archives).
+        #[arg(long)]
+        palette: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -95,6 +105,9 @@ fn main() -> ExitCode {
             }
             Cmd::Disasm { path, stats } => disasm_cmd::run(vfs, &path, stats),
             Cmd::DumpModel { path, out } => model_cmd::dump_model(vfs, &path, &out),
+            Cmd::DumpSprite { path, out, palette } => {
+                sprite_cmd::dump_sprite(vfs, &path, &out, palette.as_deref())
+            }
             Cmd::Survey { .. } => unreachable!("handled above"),
         }),
     };
