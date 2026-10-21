@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["tak-client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# Bevy systems routinely take many parameters and complex query types.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# Debug builds of the client, with optimised dependencies so Bevy and the
+# core crates run at playable speed.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

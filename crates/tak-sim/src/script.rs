@@ -149,6 +149,13 @@ pub trait ScriptHost {
     fn stats(&self) -> ScriptStats {
         ScriptStats::default()
     }
+
+    /// Read-only access to the concrete host, so renderers can downcast
+    /// (e.g. to [`crate::CobScripts`] for piece poses). Never used by the
+    /// sim itself. Default: `None`.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 /// What a completed [`ScriptHost::call_script`] returned: the `return`

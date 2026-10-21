@@ -1,0 +1,386 @@
+//! The match: the deterministic sim plus its command log, with no Bevy types.
+//!
+//! The client steps [`Session`] exactly the way `tak-headless` steps a
+//! match (`Sim::with_scripts(&scenario, Box::new(scripts))`, then
+//! `step(log.for_tick(tick))` once per tick), so a log recorded here replays
+//! to the same hashes there. Orders from the input layer go into the same
+//! log, stamped with the tick they will execute on.
+
+use std::path::Path;
+
+use tak_commands::{CommandLog, PlayerId, SimCommand, Tick, UnitDefId, UnitId};
+use tak_content::{MapDef, Ruleset, RulesetKind};
+use tak_script::PieceTransform;
+use tak_sim::load_match;
+use tak_sim::{PlayerSetup, Sim};
+use tak_vfs::Vfs;
+
+/// Errors while setting up a match.
+#[derive(Debug)]
+pub struct SetupError(pub String);
+
+impl std::fmt::Display for SetupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for SetupError {}
+
+fn err(e: impl std::fmt::Display) -> SetupError {
+    SetupError(e.to_string())
+}
+
+/// What the renderer needs to know about one unit definition.
+#[derive(Clone, Debug)]
+pub struct DefInfo {
+    /// FBI `unitname` (sim name), e.g. `ARAKING`.
+    pub unitname: String,
+    /// Display name, e.g. `Elsin`.
+    pub display: String,
+    /// 3DO model name without extension (`objectname`, lowercase).
+    pub object: String,
+    /// Footprint in 16-px cells.
+    pub footprint: (u8, u8),
+}
+
+/// A running match and its log.
+pub struct Session {
+    /// The simulation.
+    pub sim: Sim,
+    /// Every command of the match (fixture plus anything submitted).
+    pub log: CommandLog,
+    /// Commands submitted by this client (for `--record`).
+    pub recorded: CommandLog,
+    /// The local player.
+    pub local: PlayerId,
+    /// Hash after every tick run so far (index = tick).
+    pub hashes: Vec<u64>,
+    /// Per-definition render info, indexed by `UnitDefId`.
+    pub defs: Vec<DefInfo>,
+    /// The loaded map (heights, features, OTA).
+    pub map: MapDef,
+    /// Map VFS path without extension.
+    pub map_name: String,
+    /// Placed map features, for markers.
+    pub features: Vec<FeatureBox>,
+}
+
+/// A placed map feature as a marker box.
+#[derive(Clone, Debug)]
+pub struct FeatureBox {
+    /// Feature name.
+    pub name: String,
+    /// Anchor cell (top-left, **Chosen** as in `tak-content`).
+    pub cell: (u32, u32),
+    /// Footprint in cells.
+    pub footprint: (u8, u8),
+    /// Blocks movement.
+    pub blocking: bool,
+    /// Height hint from the feature def.
+    pub height: f32,
+}
+
+/// Open an install's VFS.
+pub fn open_vfs(data: &Path) -> Result<Vfs, SetupError> {
+    tak_vfs::open_kingdoms(data).map_err(|e| SetupError(format!("{}: {e}", data.display())))
+}
+
+impl Session {
+    /// Load a real map with every player's build tree (the
+    /// `load_match_with_builds` path) and the given fixture log.
+    pub fn load(
+        vfs: &Vfs,
+        map: &str,
+        players: &str,
+        seed: u64,
+        log: CommandLog,
+    ) -> Result<Session, SetupError> {
+        let setups = PlayerSetup::parse_list(players);
+        if setups.is_empty() {
+            return Err(SetupError("--players names no side".into()));
+        }
+        let m = load_match(vfs, map, &setups, seed).map_err(err)?;
+        let rs = Ruleset::load(vfs, RulesetKind::Base);
+        let defs = m
+            .scenario
+            .unit_defs
+            .iter()
+            .map(|d| {
+                let fbi = rs.unit(&d.name);
+                DefInfo {
+                    unitname: d.name.clone(),
+                    display: fbi
+                        .and_then(|u| u.name.clone())
+                        .unwrap_or_else(|| d.name.clone()),
+                    object: fbi
+                        .and_then(|u| u.objectname.clone())
+                        .unwrap_or_else(|| d.name.clone())
+                        .to_ascii_lowercase(),
+                    footprint: (d.footprintx.max(1), d.footprintz.max(1)),
+                }
+            })
+            .collect();
+        let features = m
+            .map
+            .features
+            .iter()
+            .map(|pf| {
+                let fd = rs.feature(pf.def.as_deref().unwrap_or(&pf.name));
+                FeatureBox {
+                    name: pf.name.clone(),
+                    cell: (pf.x, pf.z),
+                    footprint: fd.map_or((1, 1), |d| (d.footprint_x.max(1), d.footprint_z.max(1))),
+                    blocking: fd.is_some_and(|d| d.blocking),
+                    height: fd.and_then(|d| d.height).unwrap_or(12).clamp(4, 60) as f32,
+                }
+            })
+            .collect();
+        let sim = Sim::with_scripts(&m.scenario, Box::new(m.scripts)).map_err(err)?;
+        Ok(Session {
+            sim,
+            log,
+            recorded: CommandLog::new(),
+            local: PlayerId(0),
+            hashes: Vec::new(),
+            defs,
+            map: m.map,
+            map_name: map.to_string(),
+            features,
+        })
+    }
+
+    /// The next tick to run.
+    pub fn tick(&self) -> Tick {
+        self.sim.tick()
+    }
+
+    /// Run one tick with its logged commands; returns the hash.
+    pub fn step(&mut self) -> u64 {
+        let t = self.sim.tick();
+        let h = self.sim.step(self.log.for_tick(t));
+        self.hashes.push(h);
+        h
+    }
+
+    /// Queue an order from the local player for the next tick to run.
+    /// Returns the tick it was stamped with.
+    pub fn submit(&mut self, command: SimCommand) -> Tick {
+        let t = self.sim.tick();
+        self.log.record(t, self.local, command.clone());
+        self.recorded.record(t, self.local, command);
+        t
+    }
+
+    /// Render info for a definition.
+    pub fn def(&self, id: UnitDefId) -> Option<&DefInfo> {
+        self.defs.get(id.0 as usize)
+    }
+
+    /// The last hash, if any tick ran.
+    pub fn last_hash(&self) -> Option<u64> {
+        self.hashes.last().copied()
+    }
+
+    /// Snapshot the world for rendering.
+    pub fn snapshot(&self) -> Snapshot {
+        let w = self.sim.world();
+        let cob = self.sim.cob();
+        let units = w
+            .units()
+            .map(|(id, u)| UnitSnap {
+                id,
+                def: u.def,
+                owner: u.owner.0,
+                x: u.pos.x.raw() as f32 / 65536.0,
+                y: u.pos.y.raw() as f32 / 65536.0,
+                ground: u.ground.raw() as f32 / 65536.0,
+                heading: u.heading.raw(),
+                pieces: cob
+                    .and_then(|c| c.instance(id))
+                    .map(|i| i.transforms())
+                    .unwrap_or_default(),
+                health_percent: u.combat.health_percent(),
+                build_percent_left: u.build.percent_left(),
+                dying: u.combat.is_dying(),
+            })
+            .collect();
+        let projectiles = w
+            .combat
+            .projectiles
+            .iter()
+            .map(|p| {
+                let (x, y) = (
+                    p.pos.x.raw() as f32 / 65536.0,
+                    p.pos.y.raw() as f32 / 65536.0,
+                );
+                let h = w.map().height_at(p.pos).raw() as f32 / 65536.0;
+                [x, y, h]
+            })
+            .collect();
+        Snapshot {
+            tick: w.tick().0,
+            units,
+            projectiles,
+        }
+    }
+}
+
+/// The scripted demo session (`--demo`): player 0's monarch builds a wall
+/// next to its start, then both monarchs attack each other across the map.
+/// Sites are searched with the sim's own placement check, so the log is a
+/// pure function of the match. Run on a freshly loaded session (tick 0).
+pub fn demo_log(s: &Session) -> CommandLog {
+    use tak_commands::{QueueMode, Target, UnitSet};
+    use tak_math::{Angle, Fx, Vec2};
+    use tak_sim::construction::content::def_by_name;
+    use tak_sim::construction::placement;
+
+    let w = s.sim.world();
+    let mut log = CommandLog::new();
+    // Monarchs spawn on tick 0 in player order into the lowest free slots.
+    let king = |p: usize| UnitId::new(p as u32, 0);
+    let Some(p0) = w.players().first() else {
+        return log;
+    };
+    let wall = def_by_name(w.defs(), "ARAWALL").or_else(|| {
+        let d = w.defs().get(p0.monarch_def)?;
+        d.build.canbuild.first().copied()
+    });
+    if let Some(wall) = wall
+        && let Some(wd) = w.defs().get(wall)
+    {
+        let start = p0.start;
+        let site = (0..64).find_map(|i| {
+            let a = Angle::from_raw((i as u16).wrapping_mul(4096 + 512));
+            let r = 96 + (i / 16) * 32;
+            let p = start + Vec2::from_angle(a).scale(Fx::from_int(r));
+            let c = placement::site_center(wd, p);
+            placement::check_site(w, wall, c, None).ok()?;
+            Some(c)
+        });
+        if let Some(site) = site {
+            log.record(
+                Tick(1),
+                PlayerId(0),
+                SimCommand::Build {
+                    units: UnitSet::single(king(0)),
+                    def: wall,
+                    at: Some(site),
+                    queue: QueueMode::Replace,
+                },
+            );
+        }
+    }
+    if w.players().len() >= 2 {
+        log.record(
+            Tick(1),
+            PlayerId(0),
+            SimCommand::Attack {
+                units: UnitSet::single(king(0)),
+                target: Target::Unit(king(1)),
+                queue: QueueMode::Append,
+            },
+        );
+        log.record(
+            Tick(1),
+            PlayerId(1),
+            SimCommand::Attack {
+                units: UnitSet::single(king(1)),
+                target: Target::Unit(king(0)),
+                queue: QueueMode::Replace,
+            },
+        );
+    }
+    log
+}
+
+/// One unit at one tick, in render-side floats (positions) and raw script
+/// poses.
+#[derive(Clone, Debug)]
+pub struct UnitSnap {
+    /// Handle.
+    pub id: UnitId,
+    /// Definition.
+    pub def: UnitDefId,
+    /// Owner index.
+    pub owner: u8,
+    /// World x (east).
+    pub x: f32,
+    /// World y (south).
+    pub y: f32,
+    /// Terrain height under the unit.
+    pub ground: f32,
+    /// Heading, 65536 per turn, 0 = east, 0x4000 = south.
+    pub heading: u16,
+    /// COB piece poses, indexed by COB piece.
+    pub pieces: Vec<PieceTransform>,
+    /// Health 0..=100.
+    pub health_percent: i32,
+    /// Build percent left (0 = complete).
+    pub build_percent_left: i32,
+    /// Playing its death animation.
+    pub dying: bool,
+}
+
+/// The world at one tick.
+#[derive(Clone, Debug, Default)]
+pub struct Snapshot {
+    /// Ticks run when taken.
+    pub tick: u32,
+    /// Live units in slot order.
+    pub units: Vec<UnitSnap>,
+    /// Projectiles: `[x, y, ground height]`.
+    pub projectiles: Vec<[f32; 3]>,
+}
+
+/// Linear interpolation.
+pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Interpolate a binary angle the short way round; returns radians.
+pub fn lerp_angle(a: u16, b: u16, t: f32) -> f32 {
+    let d = b.wrapping_sub(a) as i16;
+    angle_rad(a) + f32::from(d) * t * std::f32::consts::TAU / 65536.0
+}
+
+/// A binary angle in radians.
+pub fn angle_rad(a: u16) -> f32 {
+    f32::from(a) * std::f32::consts::TAU / 65536.0
+}
+
+/// Interpolated piece pose: offsets in model units, rotations in radians.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Pose {
+    /// Script move per axis.
+    pub offset: [f32; 3],
+    /// Script turn per axis (radians).
+    pub rotation: [f32; 3],
+    /// Visible (`hide`/`show`).
+    pub visible: bool,
+}
+
+/// Blend two script poses (`b` wins on visibility).
+pub fn lerp_pose(a: Option<&PieceTransform>, b: &PieceTransform, t: f32) -> Pose {
+    let a = a.unwrap_or(b);
+    let fx = |v: tak_math::Fx| v.raw() as f32 / 65536.0;
+    Pose {
+        offset: [0, 1, 2].map(|i| lerp(fx(a.offset[i]), fx(b.offset[i]), t)),
+        rotation: [0, 1, 2].map(|i| lerp_angle(a.rotation[i].raw(), b.rotation[i].raw(), t)),
+        visible: b.visible,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn angles_take_the_short_way() {
+        let r = lerp_angle(65000, 500, 0.5);
+        let expect = (65000.0 + 518.0) * std::f32::consts::TAU / 65536.0;
+        assert!((r - expect).abs() < 1e-3, "{r} vs {expect}");
+        assert!((lerp_angle(0x4000, 0x4000, 0.3) - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+    }
+}

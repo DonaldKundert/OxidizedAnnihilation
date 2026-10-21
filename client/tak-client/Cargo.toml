@@ -1,0 +1,25 @@
+[package]
+name = "tak-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tak-vfs = { path = "../../crates/tak-vfs" }
+tak-formats = { path = "../../crates/tak-formats" }
+tak-content = { path = "../../crates/tak-content" }
+tak-script = { path = "../../crates/tak-script" }
+tak-math = { path = "../../crates/tak-math" }
+tak-commands = { path = "../../crates/tak-commands" }
+tak-sim = { path = "../../crates/tak-sim" }
+tak-input = { path = "../../crates/tak-input" }
+tak-headless = { path = "../../crates/tak-headless" }
+bevy = { version = "=0.20.0", default-features = false, features = ["3d", "ui"] }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
