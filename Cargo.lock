@@ -634,8 +634,11 @@ dependencies = [
 name = "tak-headless"
 version = "0.1.0"
 dependencies = [
+ "clap",
+ "tak-commands",
  "tak-input",
  "tak-sim",
+ "thiserror",
 ]
 
 [[package]]
@@ -667,10 +670,13 @@ dependencies = [
 name = "tak-sim"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tak-commands",
  "tak-content",
  "tak-math",
  "tak-script",
+ "thiserror",
  "xxhash-rust",
 ]
 

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "seed": 42,
+  "map": {
+    "width": 1024,
+    "height": 1024,
+    "heights": { "cols": 64, "rows": 64, "cell_size": 16, "fill": 20 },
+    "start_positions": [ { "x": 128, "y": 128 }, { "x": 896, "y": 896 } ]
+  },
+  "unit_defs": [
+    {
+      "name": "monarch",
+      "maxvelocity": 98304,
+      "acceleration": 8192,
+      "brakerate": 16384,
+      "turnrate": 728,
+      "footprintx": 2,
+      "footprintz": 2
+    }
+  ],
+  "players": [ { "start": 0, "monarch": 0 }, { "start": 1, "monarch": 0 } ]
+}
