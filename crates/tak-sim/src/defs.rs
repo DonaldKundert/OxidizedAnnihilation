@@ -43,6 +43,9 @@ pub struct UnitDef {
         skip_serializing_if = "crate::construction::BuildDef::is_default"
     )]
     pub build: crate::construction::BuildDef,
+    /// Combat stats (WP-M); empty = not part of combat.
+    #[serde(default, skip_serializing_if = "crate::combat::CombatDef::is_empty")]
+    pub combat: crate::combat::CombatDef,
 }
 
 impl UnitDef {
@@ -68,6 +71,9 @@ impl UnitDef {
         if self.name.len() > 256 {
             return bad("name too long");
         }
+        if let Err(e) = self.combat.validate() {
+            return bad(&e);
+        }
         self.economy.validate(&self.name)?;
         self.build.validate(&self.name)
     }
@@ -82,6 +88,7 @@ impl UnitDef {
         h.u8(self.footprintz);
         self.economy.hash(h);
         self.build.hash(h);
+        self.combat.hash(h);
     }
 }
 

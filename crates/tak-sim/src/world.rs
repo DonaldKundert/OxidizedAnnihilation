@@ -441,6 +441,7 @@ mod tests {
                 footprintz: 1,
                 economy: Default::default(),
                 build: Default::default(),
+                combat: Default::default(),
             }],
             players: vec![PlayerSpec {
                 start: 0,

@@ -303,6 +303,24 @@ impl ScriptHost for CobScripts {
         self.stats.units = self.units.len() as u64;
     }
 
+    fn has_function(&self, unit: UnitId, name: &str) -> bool {
+        self.units
+            .get(&unit)
+            .is_some_and(|us| us.vm.program().function(name).is_some())
+    }
+
+    fn port(&self, unit: UnitId, port: i32) -> Option<i32> {
+        self.units
+            .get(&unit)
+            .map(|us| us.regs.get(&port).copied().unwrap_or(0))
+    }
+
+    fn set_port(&mut self, unit: UnitId, port: i32, value: i32) {
+        if let Some(us) = self.units.get_mut(&unit) {
+            us.regs.insert(port, value);
+        }
+    }
+
     fn hash_state(&self, h: &mut StateHasher) {
         h.bytes(b"COB");
         h.len(self.units.len());
