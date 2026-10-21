@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use tak_commands::CommandLog;
 use tak_headless::{
     Error, MAX_TICKS, first_mismatch, format_hashes, load_log, load_map, load_scenario,
-    parse_hashes, run, run_match, write,
+    parse_hashes, run_match, run_with_outcome, write,
 };
 use tak_sim::Match;
 use tak_sim::testing::{example_scenario, random_log, walk_log};
@@ -60,7 +60,11 @@ impl Loaded {
     /// stats on stderr.
     fn run(self, log: &CommandLog, ticks: u32) -> Result<Vec<u64>, Error> {
         match self {
-            Loaded::Synthetic(s) => run(&s, log, ticks),
+            Loaded::Synthetic(s) => {
+                let (hashes, outcome) = run_with_outcome(&s, log, ticks)?;
+                eprintln!("{outcome}");
+                Ok(hashes)
+            }
             Loaded::Map(m, scripts) => {
                 let r = run_match(*m, log, ticks, scripts)?;
                 eprint!("{}", r.report());

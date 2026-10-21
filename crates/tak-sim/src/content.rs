@@ -242,6 +242,7 @@ impl Scenario {
             players: specs,
             economy: Box::new(crate::economy::EconomySetup::from_content(map, rs)),
             features,
+            victory: Default::default(),
         };
         sc.validate()?;
         Ok(sc)

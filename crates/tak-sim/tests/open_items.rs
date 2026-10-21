@@ -198,6 +198,7 @@ fn scenario() -> Scenario {
         ],
         economy: Box::new(economy),
         features: Box::new(features),
+        victory: Default::default(),
     }
 }
 

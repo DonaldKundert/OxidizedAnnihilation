@@ -41,6 +41,7 @@ pub mod script;
 mod sim;
 pub mod systems;
 pub mod testing;
+pub mod victory;
 pub mod world;
 
 pub use cob::{CobScripts, ScriptType};
@@ -52,6 +53,7 @@ pub use scenario::{PlayerSpec, SCENARIO_FORMAT_VERSION, Scenario, ScenarioError}
 pub use script::{NoScripts, ScriptCtx, ScriptHost, ScriptReturn, ScriptStats};
 pub use sim::{Sim, run_scenario};
 pub use tak_commands::{PlayerId, Tick, UnitDefId, UnitId, WorldPos};
+pub use victory::{DefeatRule, DefeatedUnits, MatchState, VictorySetup};
 pub use world::{Order, Player, Unit, World};
 
 /// Simulation rate. Game speed changes ticks per wall-second, never this.

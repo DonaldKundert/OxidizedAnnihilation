@@ -86,6 +86,7 @@ fn scenario(players: usize) -> Scenario {
             .collect(),
         economy: Box::new(setup),
         features: Default::default(),
+        victory: Default::default(),
     }
 }
 

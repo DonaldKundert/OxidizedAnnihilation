@@ -11,8 +11,9 @@
 //! 6. [`crate::pathfinding::tick`]: plan and follow paths.
 //! 7. [`movement`]: steer, accelerate/brake and advance every unit.
 //! 8. [`crate::combat::tick`]: targeting, weapons, damage, death.
-//! 9. Scripts (`on_tick`), in the sim.
-//! 10. Advance the tick counter and hash.
+//! 9. [`crate::victory::tick`]: defeat, the defeat sweep, match result.
+//! 10. Scripts (`on_tick`), in the sim.
+//! 11. Advance the tick counter and hash.
 //!
 //! Lanes 3, 4, 6 and 8 each own their module; they talk to each other only
 //! through the small APIs those modules expose (`economy::drain`,
@@ -58,12 +59,12 @@ pub fn spawn_start_units(world: &mut World) -> Vec<UnitId> {
 }
 
 /// Apply the commands for the current tick. Entries for other ticks, unknown
-/// players, and unit ids that are stale or owned by someone else are dropped
+/// or defeated players, and unit ids that are stale or owned by someone else are dropped
 /// silently. Orders the skeleton does not implement yet (attack, build,
 /// guard, patrol, spells) are ignored entirely and do not touch the queue.
 pub fn apply_commands(world: &mut World, commands: &[LoggedCommand]) {
     for c in commands {
-        if c.tick != world.tick || !world.has_player(c.player) {
+        if c.tick != world.tick || !world.has_player(c.player) || world.is_defeated(c.player) {
             continue;
         }
         apply_one(world, c.player, &c.command);

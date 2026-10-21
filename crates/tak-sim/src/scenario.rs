@@ -79,6 +79,15 @@ pub struct Scenario {
     /// Optional in JSON; empty for synthetic scenarios.
     #[serde(default, skip_serializing_if = "features_empty")]
     pub features: Box<crate::features::FeatureSetup>,
+    /// Victory rules (WP-U): skirmish defeat rule, teams, or mission
+    /// conditions. Optional in JSON; the default is "monarch killed,
+    /// units self-destruct, free-for-all".
+    #[serde(default, skip_serializing_if = "victory_default")]
+    pub victory: Box<crate::victory::VictorySetup>,
+}
+
+fn victory_default(v: &crate::victory::VictorySetup) -> bool {
+    v.is_default()
 }
 
 fn features_empty(f: &crate::features::FeatureSetup) -> bool {
@@ -112,6 +121,8 @@ impl Scenario {
         }
         self.economy.validate()?;
         self.features.validate(self.unit_defs.len())?;
+        self.victory
+            .validate(self.players.len(), self.unit_defs.len())?;
         if self.players.len() > MAX_PLAYERS {
             return Err(ScenarioError::Invalid("too many players".into()));
         }
