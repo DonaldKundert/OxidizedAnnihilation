@@ -38,6 +38,13 @@ impl Sim {
         &self.world
     }
 
+    /// Mutable world access for tests and tools (e.g. spawning many units
+    /// before a run). Commands stay the only input of a replayable match:
+    /// anything done here must be repeated identically to reproduce a run.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// The next tick to run.
     pub fn tick(&self) -> Tick {
         self.world.tick()

@@ -34,6 +34,11 @@ pub struct UnitDef {
     pub footprintx: u8,
     /// FBI `FootprintZ`, in footprint squares.
     pub footprintz: u8,
+    /// Pathing and terrain-speed data (WP-L): movement class limits,
+    /// flight, road/water speed factors. Defaults to a `GROUND2`-like
+    /// walker, so synthetic scenarios may omit it.
+    #[serde(default)]
+    pub motion: crate::pathfinding::Motion,
 }
 
 impl UnitDef {
@@ -70,6 +75,7 @@ impl UnitDef {
         h.u16(self.turnrate);
         h.u8(self.footprintx);
         h.u8(self.footprintz);
+        self.motion.hash(h);
     }
 }
 
