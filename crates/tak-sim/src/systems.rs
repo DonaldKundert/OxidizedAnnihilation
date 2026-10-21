@@ -77,6 +77,7 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
                 if let Some(u) = world.unit_mut_owned(id, player) {
                     if *queue == QueueMode::Replace {
                         u.orders.clear();
+                        u.combat.cancel_orders();
                     }
                     if u.orders.len() < MAX_ORDERS {
                         u.orders.push_back(Order::Move { to });
@@ -88,6 +89,7 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             for &id in units {
                 if let Some(u) = world.unit_mut_owned(id, player) {
                     u.orders.clear();
+                    u.combat.cancel_orders();
                 }
             }
         }
