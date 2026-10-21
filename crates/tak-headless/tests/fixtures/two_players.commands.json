@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "tick": 1, "player": 0, "seq": 0,
+      "command": {
+        "type": "move",
+        "units": [ { "index": 0, "generation": 0 } ],
+        "to": { "x": 39321600, "y": 19660800 },
+        "queue": "replace"
+      }
+    },
+    {
+      "tick": 1, "player": 0, "seq": 1,
+      "command": {
+        "type": "move",
+        "units": [ { "index": 0, "generation": 0 } ],
+        "to": { "x": 39321600, "y": 39321600 },
+        "queue": "append"
+      }
+    },
+    {
+      "tick": 30, "player": 1, "seq": 0,
+      "command": {
+        "type": "move",
+        "units": [ { "index": 1, "generation": 0 } ],
+        "to": { "x": 13107200, "y": 52428800 },
+        "queue": "replace"
+      }
+    },
+    {
+      "tick": 400, "player": 1, "seq": 0,
+      "command": { "type": "stop", "units": [ { "index": 1, "generation": 0 } ] }
+    }
+  ]
+}

@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 tak-sim.workspace = true
 tak-input.workspace = true
+tak-commands.workspace = true
+clap.workspace = true
+thiserror.workspace = true
