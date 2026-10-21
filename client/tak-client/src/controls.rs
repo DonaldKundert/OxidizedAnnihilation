@@ -999,12 +999,23 @@ fn chip_image_size(g: &Glyph) -> (f32, f32) {
 
 const WHEEL_SLOTS: usize = 24;
 
+/// Slot box padding and border (logical px).
+const WHEEL_PAD: [f32; 2] = [8.0, 4.0];
+const WHEEL_BORDER: f32 = 2.0;
+/// Gap kept between neighbouring slots, and between any slot and the
+/// cursor at the centre (game cursors are about 32 px).
+const WHEEL_GAP: f32 = 6.0;
+const WHEEL_CLEAR: f32 = 26.0;
+/// Smallest wheel radius.
+const WHEEL_MIN_R: f32 = 64.0;
+
 #[derive(Component)]
 pub(super) struct WheelRoot;
 #[derive(Component)]
 pub(super) struct WheelSlot(usize);
 #[derive(Component)]
 pub(super) struct WheelSlotText(usize);
+/// The wheel's title, above its top slot (never over the cursor).
 #[derive(Component)]
 pub(super) struct WheelCentre;
 
@@ -1024,14 +1035,13 @@ pub(super) fn setup_wheel(mut commands: Commands) {
         .id();
     commands.spawn((
         Text::new(""),
-        hud_text(14.0),
+        hud_text(13.0),
         Node {
             position_type: PositionType::Absolute,
-            width: Val::Px(190.0),
-            padding: UiRect::all(Val::Px(4.0)),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
         WheelCentre,
         ChildOf(root),
     ));
@@ -1040,8 +1050,8 @@ pub(super) fn setup_wheel(mut commands: Commands) {
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
-                    border: UiRect::all(Val::Px(2.0)),
+                    padding: UiRect::axes(Val::Px(WHEEL_PAD[0]), Val::Px(WHEEL_PAD[1])),
+                    border: UiRect::all(Val::Px(WHEEL_BORDER)),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.08, 0.07, 0.05, 0.85)),
@@ -1052,6 +1062,44 @@ pub(super) fn setup_wheel(mut commands: Commands) {
             ))
             .id();
         commands.spawn((Text::new(""), hud_text(14.0), WheelSlotText(i), ChildOf(s)));
+    }
+}
+
+/// A wheel slot's label and whether it can be used now (spells need the
+/// caster's mana).
+fn wheel_label(
+    a: &Action,
+    s: &Session,
+    w: &tak_sim::World,
+    sel: &tak_commands::UnitSet,
+) -> (String, bool) {
+    match a {
+        Action::BuildOption { index } => {
+            let def = sel
+                .iter()
+                .filter_map(|id| w.unit(*id))
+                .find_map(|u| w.defs().get(u.def).filter(|d| d.build.builder))
+                .and_then(|d| d.build.canbuild.get(usize::from(*index)).copied());
+            let label = def.and_then(|o| {
+                let cost = w.defs().get(o).map_or(0, |d| d.build.buildcost);
+                s.def(o).map(|d| format!("{} ({cost})", d.display))
+            });
+            (label.unwrap_or_else(|| feel::action_label(a)), true)
+        }
+        Action::CastSpell { index } => {
+            match crate::view::caster_spells(w, s.local, sel)
+                .and_then(|(_, sp)| sp.get(usize::from(*index)).cloned())
+            {
+                Some(sp) => (format!("{} ({} mana)", sp.name, sp.cost), sp.ready),
+                None => (feel::action_label(a), false),
+            }
+        }
+        Action::CastSpellMode => (
+            feel::action_label(a),
+            crate::view::caster_spells(w, s.local, sel)
+                .is_some_and(|(_, sp)| sp.first().is_some_and(|x| x.ready)),
+        ),
+        other => (feel::action_label(other), true),
     }
 }
 
@@ -1085,19 +1133,15 @@ pub(super) fn wheel_system(
         ),
         (Without<WheelRoot>, Without<WheelCentre>),
     >,
-    mut texts: Query<(&WheelSlotText, &mut Text), Without<WheelCentre>>,
+    mut texts: Query<(&WheelSlotText, &mut Text, &mut TextColor), Without<WheelCentre>>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
     let ghost = feel.ghost.as_ref().and_then(|r| r.ghost_at(s.tick().0));
-    let (wheel, at, sticky) = match (&ghost, input.mapper.wheel()) {
-        (Some(g), _) => (g.wheel.clone(), g.cursor_world, false),
-        (None, Some(wh)) => (
-            Some(wh.clone()),
-            input.mapper.cursor_world(),
-            input.mapper.tuning().wheel_confirm_on_press,
-        ),
-        (None, None) => (None, input.mapper.cursor_world(), false),
+    let (wheel, at) = match (&ghost, input.mapper.wheel()) {
+        (Some(g), _) => (g.wheel.clone(), g.cursor_world),
+        (None, Some(wh)) => (Some(wh.clone()), input.mapper.cursor_world()),
+        (None, None) => (None, input.mapper.cursor_world()),
     };
     let Ok((mut rn, mut rv)) = root.single_mut() else {
         return;
@@ -1111,65 +1155,106 @@ pub(super) fn wheel_system(
     rn.left = Val::Px(p[0]);
     rn.top = Val::Px(p[1]);
     let n = wh.slots.len().min(WHEEL_SLOTS);
-    let radius = 78.0 + 5.0 * n as f32;
-    let label = |a: &Action| match a {
-        Action::BuildOption { index } => input
-            .mapper
-            .selection()
-            .iter()
-            .filter_map(|id| w.unit(*id))
-            .find_map(|u| w.defs().get(u.def).filter(|d| d.build.builder))
-            .and_then(|d| d.build.canbuild.get(usize::from(*index)).copied())
-            .and_then(|o| s.def(o))
-            .map_or(feel::action_label(a), |d| d.display.clone()),
-        other => feel::action_label(other),
-    };
-    if let Ok((mut t, mut node, cn)) = centre.single_mut() {
-        let kind = match wh.kind {
-            WheelKind::Command => "Orders",
-            WheelKind::Build => "Build",
-        };
-        let how = if ghost.is_some() {
-            "(ghost)"
-        } else if sticky {
-            "A: confirm  B: cancel"
-        } else {
-            "release to confirm"
-        };
-        t.0 = format!("{kind} ({n})\n{how}");
-        node.left = Val::Px(-cn.size.x / 2.0);
-        node.top = Val::Px(-cn.size.y / 2.0);
+    let sel = input.mapper.selection();
+    let labels: Vec<(String, bool)> = wh.slots[..n]
+        .iter()
+        .map(|a| wheel_label(a, s, w, sel))
+        .collect();
+    // Directions (screen +y down) and last frame's box sizes; the radius
+    // grows with slot count and label width so neighbours never touch and
+    // the cursor stays clear (`view::wheel_radius`).
+    let dirs: Vec<[f32; 2]> = (0..n)
+        .map(|k| {
+            let (sn, cs) = tak_input::slot_direction(k, n).sin_cos();
+            [f(cs), -f(sn)]
+        })
+        .collect();
+    let mut sizes = vec![[0.0f32, 0.0f32]; n];
+    for (sl, _, _, _, _, cn) in &slots {
+        if sl.0 < n {
+            // Before the first layout, estimate from the label (14-px font,
+            // about 8.4 px per character).
+            sizes[sl.0] = if cn.size.x > 0.0 {
+                [cn.size.x, cn.size.y]
+            } else {
+                let chars = labels[sl.0].0.chars().count() as f32;
+                [
+                    chars * 8.4 + 2.0 * (WHEEL_PAD[0] + WHEEL_BORDER),
+                    18.0 + 2.0 * (WHEEL_PAD[1] + WHEEL_BORDER),
+                ]
+            };
+        }
     }
+    let radius = crate::view::wheel_radius(&dirs, &sizes, WHEEL_MIN_R, WHEEL_GAP, WHEEL_CLEAR);
+    let mut top = 0.0f32;
     for (sl, mut node, mut v, mut bg, mut border, cn) in &mut slots {
         if sl.0 >= n {
             *v = Visibility::Hidden;
             continue;
         }
         *v = Visibility::Inherited;
-        let dir = tak_input::slot_direction(sl.0, n);
-        let (sn, cs) = dir.sin_cos();
-        // Math angle, +y up; screen +y is down.
-        let (dx, dy) = (f(cs) * radius, -f(sn) * radius);
-        node.left = Val::Px(dx - cn.size.x / 2.0);
-        node.top = Val::Px(dy - cn.size.y / 2.0);
-        let hi = wh.highlighted == Some(sl.0);
-        bg.0 = if hi {
-            Color::srgba(0.85, 0.65, 0.2, 0.95)
+        let [dx, dy] = [dirs[sl.0][0] * radius, dirs[sl.0][1] * radius];
+        let [bw, bh] = if cn.size.x > 0.0 {
+            [cn.size.x, cn.size.y]
         } else {
-            Color::srgba(0.08, 0.07, 0.05, 0.85)
+            sizes[sl.0]
+        };
+        node.left = Val::Px(dx - bw / 2.0);
+        node.top = Val::Px(dy - bh / 2.0);
+        top = top.min(dy - bh / 2.0);
+        let hi = wh.highlighted == Some(sl.0);
+        let usable = labels[sl.0].1;
+        bg.0 = match (hi, usable) {
+            (true, true) => Color::srgba(0.95, 0.72, 0.2, 0.97),
+            (true, false) => Color::srgba(0.24, 0.23, 0.22, 0.97),
+            (false, _) => Color::srgba(0.06, 0.05, 0.04, 0.82),
         };
         *border = BorderColor::all(if hi {
-            Color::srgb(1.0, 0.95, 0.7)
+            Color::srgb(1.0, 1.0, 0.9)
         } else {
             Color::srgb(0.45, 0.4, 0.28)
         });
+        let bw = Val::Px(if hi { WHEEL_BORDER + 1.0 } else { WHEEL_BORDER });
+        let want = UiRect::all(bw);
+        if node.border != want {
+            node.border = want;
+            // Keep the box size steady when the border thickens.
+            let pad = if hi { -1.0 } else { 0.0 };
+            node.padding = UiRect::axes(Val::Px(WHEEL_PAD[0] + pad), Val::Px(WHEEL_PAD[1] + pad));
+        }
     }
-    for (st, mut t) in &mut texts {
-        t.0 = wh
-            .slots
-            .get(st.0)
-            .filter(|_| st.0 < n)
-            .map_or(String::new(), label);
+    for (st, mut t, mut col) in &mut texts {
+        let (label, usable, hi) = match labels.get(st.0).filter(|_| st.0 < n) {
+            Some((l, u)) => (l.clone(), *u, wh.highlighted == Some(st.0)),
+            None => (String::new(), true, false),
+        };
+        if t.0 != label {
+            t.0 = label;
+        }
+        col.0 = match (hi, usable) {
+            (true, true) => Color::srgb(0.08, 0.05, 0.0),
+            (true, false) => Color::srgb(0.8, 0.78, 0.74),
+            (false, false) => Color::srgb(0.55, 0.53, 0.5),
+            (false, true) => Color::srgb(0.95, 0.92, 0.85),
+        };
+    }
+    // Title above the top slot; the confirm / cancel buttons are in the
+    // hint bar at the bottom.
+    if let Ok((mut t, mut node, cn)) = centre.single_mut() {
+        let kind = match wh.kind {
+            WheelKind::Command => "Orders",
+            WheelKind::Build => "Build",
+        };
+        let title = if ghost.is_some() {
+            format!("{kind} (ghost)")
+        } else {
+            kind.to_string()
+        };
+        if t.0 != title {
+            t.0 = title;
+        }
+        node.left = Val::Px(-cn.size.x / 2.0);
+        node.top = Val::Px(top - cn.size.y - 4.0);
     }
 }
 
