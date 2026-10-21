@@ -26,7 +26,9 @@ Rust-only, headless, deterministic engine core for Total Annihilation: Kingdoms.
 
 ## Crate boundaries
 
-`tak-sim` must not depend on `tak-input`, `tak-cli`, or any renderer. `tak-script` exposes a trait the sim calls; it does not depend on `tak-sim`. `tak-formats` does not touch the filesystem: it takes `&[u8]`. Nothing in the workspace depends on `bevy`, a GPU, or a window stack.
+`tak-sim` must not depend on `tak-input`, `tak-cli`, or any renderer. `tak-script` exposes a trait the sim calls; it does not depend on `tak-sim`. `tak-formats` does not touch the filesystem: it takes `&[u8]`. Nothing in the core workspace depends on `bevy`, a GPU, or a window stack.
+
+The Bevy client lives in `client/`, a separate Cargo workspace excluded from the core one (`exclude = ["client"]`). It depends on the core crates by path; the core never depends on it. Core CI does not build it. The client reads sim state and submits commands; it never changes sim rules. Anything gameplay-relevant belongs in `tak-sim`.
 
 ## Game data
 
