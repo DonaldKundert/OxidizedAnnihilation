@@ -44,7 +44,7 @@ WP-F  tak-math + tak-commands ──► WP-I  sim skeleton + replay ┤
 | [WP-I](work-packages/wp-i-sim-skeleton.md) | M8, M9 | `tak-sim`, `tak-headless` | no | F (merged) |
 | [WP-J](work-packages/wp-j-input.md) | M11 | `tak-input` | no | F (merged) |
 
-Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Wave 1 is fully merged (WP-A..F).
+Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J). Next: [WP-K integration](work-packages/wp-k-integration.md).
 
 ## Rules for parallel work
 
