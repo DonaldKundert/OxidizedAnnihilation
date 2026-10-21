@@ -395,10 +395,16 @@ sim's job.
 ### HUD and overlays
 
 Top bar: map, tick, pause/speed, every player's mana, storage and income;
-a player whose monarch is dead or who has no units left shows as
-`DEFEATED` (**Believed**: TA:K's default game end is the monarch's death;
-display only, the sim has no defeat rule). The side is taken from the
-player's monarch definition, so it survives the monarch.
+a defeated player shows as `DEFEATED`, straight from the sim
+(`World::is_defeated`, WP-U's `tak_sim::victory`: by default the monarch's
+death or having no units; WP-T replaced the client's own guess). The side
+is taken from the player's monarch definition, so it survives the monarch.
+Once `Sim::match_state()` is `Over`, a banner in the upper middle says
+**Victory** (the local player is among the winners), **Defeat** or
+**Draw** (no winners), with the winners and the time of the decision. It
+appears 150 ticks (5 s) after the deciding tick (**Believed**: TA waited
+about that long before its end screen, so the last death animations play
+first); display only, the camera and input keep working.
 
 Bottom-left panel (WP-R): the first selected unit's name, def and order
 count; bars for health (for a frame, a dim segment under it shows the
@@ -447,4 +453,5 @@ the controller buttons for the current context (WP-S, `controller.md`).
 - No audio. Spell and build buttons are text, not the game's button art
   (`buttonimageup` etc. in the weapon/unit data).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
-  Zhon monarch dies around tick 1,700. Behaviour is the sim's.
+  Zhon monarch dies at tick 1,620 (the match is decided then; the Victory
+  banner shows from tick 1,770). Behaviour is the sim's.

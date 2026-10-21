@@ -175,6 +175,18 @@ struct HudInfo;
 struct HudStatus;
 #[derive(Component)]
 struct HudAlert;
+/// The match-end banner ("Victory" / "Defeat" / "Draw") and its subtitle.
+#[derive(Component)]
+struct HudBanner;
+#[derive(Component)]
+struct HudBannerTitle;
+#[derive(Component)]
+struct HudBannerText;
+
+/// Ticks between the sim deciding the match and the end banner (TA showed
+/// its end screen about 150 ticks, 5 s, after the decisive kill, so the
+/// death animations play out first; **Believed** for TA:K, display only).
+const BANNER_DELAY_TICKS: u32 = 150;
 
 /// Width of the bottom-left panel.
 const HUD_PANEL_W: f32 = 400.0;
@@ -475,6 +487,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 (
                     hud_system,
                     hud_widgets_system,
+                    banner_system,
                     minimap_system,
                     gizmo_system,
                     controls::cursor_system,
@@ -849,6 +862,46 @@ fn setup_hud(mut commands: Commands) {
         spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
     }
     commands.spawn((Text::new(""), hud_text(13.0), HudStatus, ChildOf(panel)));
+    // Match-end banner, centred near the top; display only (input still
+    // works behind it).
+    let banner = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(22.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+            GlobalZIndex(700),
+            HudBanner,
+        ))
+        .id();
+    let plate = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(36.0), Val::Px(10.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            BorderColor::all(Color::srgb(0.75, 0.62, 0.3)),
+            ChildOf(banner),
+        ))
+        .id();
+    commands.spawn((
+        Text::new(""),
+        hud_text(56.0),
+        HudBannerTitle,
+        ChildOf(plate),
+    ));
+    commands.spawn((Text::new(""), hud_text(16.0), HudBannerText, ChildOf(plate)));
     commands.spawn((
         Text::new(""),
         hud_text(16.0).0,
@@ -3213,7 +3266,7 @@ fn hud_system(
             let side = s
                 .def(p.monarch_def)
                 .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
-            if player_defeated(w, p) {
+            if w.is_defeated(p.id) {
                 line.push_str(&format!("   P{} {}: DEFEATED", p.id.0, side));
             } else if let Some(e) = tak_sim::economy::player(w, p.id) {
                 line.push_str(&format!(
@@ -3270,16 +3323,84 @@ fn hud_system(
     }
 }
 
-/// A player is shown as defeated once its monarch is dead (**Believed**:
-/// TA:K's default game ends for a player with its monarch) or it has no
-/// units left. Display only; the sim has no defeat rule yet.
-fn player_defeated(w: &tak_sim::World, p: &tak_sim::Player) -> bool {
-    let monarch_alive = p
-        .monarch
-        .and_then(|m| w.unit(m))
-        .is_some_and(|u| !u.combat.is_dying());
-    let any = w.units().any(|(_, u)| u.owner == p.id);
-    (p.monarch.is_some() && !monarch_alive) || (!any && w.tick().0 > 0)
+/// The match-end banner for the local player, once the sim has decided
+/// the match (`tak_sim::victory`) and [`BANNER_DELAY_TICKS`] have passed:
+/// (title, colour, subtitle).
+fn banner_for(s: &Session) -> Option<(String, Color, String)> {
+    let w = s.sim.world();
+    let tak_sim::victory::MatchState::Over { winners } = s.sim.match_state() else {
+        return None;
+    };
+    let at = w.victory().decided_at()?;
+    if s.tick().0 < at.0.saturating_add(BANNER_DELAY_TICKS) {
+        return None;
+    }
+    let side = |p: PlayerId| {
+        w.players()
+            .iter()
+            .find(|x| x.id == p)
+            .and_then(|x| s.def(x.monarch_def))
+            .map_or_else(
+                || "?".to_string(),
+                |d| d.unitname[..3.min(d.unitname.len())].to_string(),
+            )
+    };
+    let names: Vec<String> = winners
+        .iter()
+        .map(|&p| format!("P{} {}", p.0, side(p)))
+        .collect();
+    let when = format!("{:.0}s", at.0 as f32 / 30.0);
+    Some(if winners.is_empty() {
+        (
+            "Draw".into(),
+            Color::srgb(0.85, 0.85, 0.85),
+            format!("Everyone was defeated at {when}"),
+        )
+    } else if winners.contains(&s.local) {
+        (
+            "Victory".into(),
+            Color::srgb(1.0, 0.82, 0.3),
+            format!("{} won at {when}", names.join(", ")),
+        )
+    } else {
+        (
+            "Defeat".into(),
+            Color::srgb(0.9, 0.3, 0.25),
+            format!("{} won at {when}", names.join(", ")),
+        )
+    })
+}
+
+/// Show or hide the match-end banner.
+fn banner_system(
+    sim: NonSend<SimRes>,
+    mut root: Query<&mut Visibility, With<HudBanner>>,
+    mut title: Query<(&mut Text, &mut TextColor), (With<HudBannerTitle>, Without<HudBannerText>)>,
+    mut text: Query<&mut Text, (With<HudBannerText>, Without<HudBannerTitle>)>,
+) {
+    let b = banner_for(&sim.session);
+    if let Ok(mut v) = root.single_mut() {
+        let want = if b.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *v != want {
+            *v = want;
+        }
+    }
+    let Some((t, c, sub)) = b else { return };
+    if let Ok((mut tt, mut tc)) = title.single_mut() {
+        if tt.0 != t {
+            tt.0 = t;
+        }
+        tc.0 = c;
+    }
+    if let Ok(mut st) = text.single_mut()
+        && st.0 != sub
+    {
+        st.0 = sub;
+    }
 }
 
 /// Selection bars, buttons, the status line and the build-rejection alert.
