@@ -20,10 +20,15 @@ tak-sim = { path = "crates/tak-sim" }
 tak-input = { path = "crates/tak-input" }
 tak-headless = { path = "crates/tak-headless" }
 
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+insta = "1"
+proptest = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

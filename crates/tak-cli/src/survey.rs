@@ -192,7 +192,7 @@ pub fn hex(bytes: &[u8]) -> String {
         })
 }
 
-fn ascii(bytes: &[u8]) -> String {
+pub fn ascii(bytes: &[u8]) -> String {
     bytes
         .iter()
         .map(|&b| {

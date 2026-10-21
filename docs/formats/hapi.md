@@ -45,7 +45,32 @@ In these files the header's names size can run past the block into the next SQSH
 
 ## Directory block
 
-Decompressed, it is a flat table of u32s that references the names block by offset (e.g. `data.hpi` starts `00000000 14000000 0e000000 14000000 ...`). Entry layout: **Unknown**, the first M2 task.
+Decompressed, the directory is a tree of fixed-size little-endian records. Offsets are byte offsets into the decompressed directory block; name offsets point into the names block. **Known**: all 13,174 files in all 198 mounted archives resolve, extract, and match their sizes.
+
+Directory entry, 20 bytes. The root is at offset 0 and has the empty name (names offset 0).
+
+| Offset | Type | Meaning |
+|--:|---|---|
+| 0 | u32 | Name offset |
+| 4 | u32 | Offset of the first subdirectory entry (subdirectories are contiguous) |
+| 8 | u32 | Number of subdirectories |
+| 12 | u32 | Offset of the first file entry (files are contiguous) |
+| 16 | u32 | Number of files |
+
+File entry, 24 bytes:
+
+| Offset | Type | Meaning | Status |
+|--:|---|---|---|
+| 0 | u32 | Name offset | **Known** |
+| 4 | u32 | Absolute offset of the file data in the archive | **Known** |
+| 8 | u32 | Decompressed size | **Known** |
+| 12 | u32 | Stored size: the whole SQSH chunk including its 19-byte header, or `0` when the file is stored raw | **Known** |
+| 16 | u32 | Unix modification time (1999 for Cavedog files, 2013 for GOG's mod) | **Known** |
+| 20 | u32 | Checksum. Not CRC-32, Adler-32, byte sum, MD5 prefix, or CRC-32/MPEG-2 of either form | **Unknown** (not needed: the SQSH chunk has its own checksum) |
+
+Each compressed file is exactly one SQSH chunk, even for files over 500 KB. TA's per-file chunk tables do not exist here. 3,477 files are stored raw. **Known**
+
+Names are Latin-1 and keep their original case (`Anims/activity_fires.GAF` next to `anims/actionbuttons.gaf`); lookups must be case-insensitive.
 
 ## Contents by archive (names only)
 
@@ -65,4 +90,8 @@ Formats seen only inside archives, and not in TA docs: `taf` (274), `crt` (214),
 
 ## Mount precedence
 
-Which archive wins on a path clash (base vs Iron Plague vs V2/V3 patches vs loose `.kmp`): **Unknown**. Needs a clash census in M2.
+12,442 distinct paths (case-insensitive) across 13,174 files; 521 paths come from more than one archive, and 276 of those differ in content. Main overlaps: `data.hpi` < `V3Rocket.hpi` (248 paths), `data.hpi` < `V3Rocket.hpi` < `IPData.hpi` (174), `english.hpi` < `V3Rocket.hpi` < `IPEnglish.hpi` (17), `V2Rocket` < `V3Rocket` (12 + 4).
+
+The original executable's load order is **Unknown**. Archive timestamps give a clean chronology: base data (1999) < V2Rocket < V3Rocket (2000-01-05) < Iron Plague (2000-01-14) < gog-mod (2013). `tak_vfs::kingdoms_mount_order` uses that order, later winning, then loose `.kmp` maps on top. **Believed**. Confirm by finding a shadowed file whose effect is visible in game (e.g. `ai/default.txt`, a unit `.fbi` stat) and checking which version the original uses.
+
+`data/data.hpi` is a byte-identical copy of `data.hpi` and is not mounted. `tak-cli shadowed` lists every overlap.
