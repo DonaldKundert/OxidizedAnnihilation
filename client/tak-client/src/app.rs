@@ -59,12 +59,28 @@ pub struct SimRes {
     /// Ticks per wall second multiplier (game speed).
     speed: f32,
     paused: bool,
+    /// The local player's visual fog, updated after every tick (so runs
+    /// that skip frames, like screenshot mode, still explore the path).
+    fog: crate::fog::FogGrid,
+    /// Fog changed since the overlay was last painted.
+    fog_changed: bool,
 }
 
 impl SimRes {
     fn step(&mut self) {
         self.session.step();
         self.prev = std::mem::replace(&mut self.curr, self.session.snapshot());
+        let w = self.session.sim.world();
+        let local = self.session.local;
+        let eyes: Vec<(f32, f32, f32)> = w
+            .units()
+            .filter(|(_, u)| u.owner == local)
+            .map(|(_, u)| {
+                let sight = w.defs().get(u.def).map_or(0, |d| d.combat.sight);
+                (f(u.pos.x), f(u.pos.y), (sight as f32).max(FOG_MIN_SIGHT))
+            })
+            .collect();
+        self.fog_changed |= self.fog.update(&eyes);
     }
 
     fn alpha(&self) -> f32 {
@@ -174,6 +190,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         t0.elapsed().as_secs_f32()
     );
     let kingdom = session.map.kingdom.clone();
+    let fog_cells = ground.cells;
     let (w, h) = args.window_size();
     let focus = parse_focus(&args.focus).ok_or("bad --focus")?;
     let snap = session.snapshot();
@@ -216,6 +233,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             acc: 0.0,
             speed: 1.0,
             paused: false,
+            fog: crate::fog::FogGrid::new(fog_cells.0, fog_cells.1),
+            fog_changed: true,
         })
         .insert_resource(Ground(Arc::new(ground)))
         .insert_resource(CamState {
@@ -237,6 +256,10 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .init_resource::<UnitTops>()
         .init_resource::<FxState>()
         .init_resource::<MinimapState>()
+        .insert_resource(FogRes {
+            enabled: !args.no_fog,
+            ..default()
+        })
         .add_systems(
             Startup,
             (
@@ -245,7 +268,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 setup_gizmos,
                 spawn_scenery,
                 setup_minimap,
-            ),
+                setup_fog,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
@@ -259,6 +284,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 effects_system,
                 animate_sprites,
                 showcase_system,
+                fog_system,
                 hud_system,
                 minimap_system,
                 gizmo_system,
@@ -1193,6 +1219,7 @@ fn units_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut build_mats: ResMut<Assets<BuildMat>>,
     mut tops: ResMut<UnitTops>,
+    fog: Res<FogRes>,
     mut vis_q: Query<&mut UnitVis>,
     mut tf_q: Query<&mut Transform>,
     mut v_q: Query<&mut Visibility>,
@@ -1370,6 +1397,18 @@ fn units_system(
         };
         if let Ok(mut tf) = tf_q.get_mut(e) {
             *tf = root_tf;
+        }
+        // Enemies outside the local player's sight are not drawn.
+        let shown = PlayerId(u.owner) == sim.session.local || fog_visible(&fog, &sim, x, y);
+        if let Ok(mut v) = v_q.get_mut(e) {
+            let want = if shown {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
         }
         let Ok(mut vis) = vis_q.get_mut(e) else {
             continue;
@@ -2185,6 +2224,218 @@ fn showcase_system(
     }
 }
 
+/// Visual fog of war (`fog.rs`): one overlay mesh per terrain chunk, its
+/// vertex colours black with the fog opacity.
+#[derive(Resource, Default)]
+struct FogRes {
+    enabled: bool,
+    /// Per chunk: mesh, first corner (x, z), corners (nx, nz).
+    chunks: Vec<(Handle<Mesh>, i64, i64, i64, i64)>,
+    /// Minimap fog image.
+    mini: Option<Handle<Image>>,
+    /// Shown state last applied (to react to toggling).
+    applied: Option<bool>,
+}
+
+/// Height the fog layer is moved toward the viewer along the view ray: it
+/// stays over the same screen pixels but in front of everything below it
+/// (the tallest models are about 200 high), so units and features in
+/// unexplored ground are hidden too.
+const FOG_LIFT: f32 = 400.0;
+
+#[derive(Component)]
+struct FogMini;
+
+fn setup_fog(
+    mut commands: Commands,
+    ground: Res<Ground>,
+    mut fog: ResMut<FogRes>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mm_root: Query<Entity, With<MinimapRoot>>,
+) {
+    let t = &ground.0;
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        depth_bias: FOG_SORT_BIAS,
+        ..default()
+    });
+    let b = Vec3::from_array(ViewGeom::back()) * FOG_LIFT;
+    for chunk in &t.chunks {
+        let cx0 = i64::from(chunk.tile0.0 * 2);
+        let cz0 = i64::from(chunk.tile0.1 * 2);
+        let nx = i64::from(chunk.tiles.0 * 2);
+        let nz = i64::from(chunk.tiles.1 * 2);
+        let mut pos = Vec::new();
+        for z in 0..=nz {
+            for x in 0..=nx {
+                let (cx, cz) = (cx0 + x, cz0 + z);
+                let p = Vec3::new(
+                    cx as f32 * terrain::CELL,
+                    t.corner(cx, cz),
+                    cz as f32 * terrain::CELL,
+                ) + b;
+                pos.push(p.to_array());
+            }
+        }
+        let row = (nx + 1) as u32;
+        let mut idx = Vec::new();
+        for z in 0..nz as u32 {
+            for x in 0..nx as u32 {
+                let i = z * row + x;
+                idx.extend_from_slice(&[i, i + row, i + 1, i + 1, i + row, i + row + 1]);
+            }
+        }
+        let n = pos.len();
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0, 0.0, 0.0, 1.0]; n]);
+        mesh.insert_indices(Indices::U32(idx));
+        let h = meshes.add(mesh);
+        commands.spawn((
+            Mesh3d(h.clone()),
+            MeshMaterial3d(mat.clone()),
+            FogMesh(fog.chunks.len()),
+        ));
+        fog.chunks.push((h, cx0, cz0, nx, nz));
+    }
+    // Minimap overlay: one texel per cell (heights ignored: the minimap is
+    // screen-space, so fog edges sit up to a few pixels off on hills).
+    if let Ok(root) = mm_root.single() {
+        let (w, h) = t.cells;
+        let img = images.add(rgba_image(w, h, vec![0; (w * h * 4) as usize]));
+        fog.mini = Some(img.clone());
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            ImageNode {
+                image: img,
+                image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                ..default()
+            },
+            ZIndex(1),
+            FogMini,
+            ChildOf(root),
+        ));
+    }
+}
+
+/// A fog overlay chunk (its index in `FogRes::chunks`).
+#[derive(Component)]
+struct FogMesh(usize);
+
+/// Recompute the fog from the local player's units after each tick and
+/// repaint the overlay; F9 toggles it.
+fn fog_system(
+    mut sim: NonSendMut<SimRes>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut fog: ResMut<FogRes>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut vis: Query<&mut Visibility, Or<(With<FogMesh>, With<FogMini>)>>,
+    fog_meshes: Query<(Entity, &FogMesh)>,
+) {
+    let mut chunk_entities: Vec<(usize, Entity)> =
+        fog_meshes.iter().map(|(e, m)| (m.0, e)).collect();
+    chunk_entities.sort();
+    let chunk_entities: Vec<Entity> = chunk_entities.into_iter().map(|(_, e)| e).collect();
+    if keys.just_pressed(KeyCode::F9) {
+        fog.enabled = !fog.enabled;
+    }
+    let enabled = fog.enabled;
+    if fog.applied != Some(enabled) {
+        fog.applied = Some(enabled);
+        for mut v in &mut vis {
+            *v = if enabled {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        // Repaint (re-applies per-chunk visibility).
+        sim.fog_changed = true;
+    }
+    if !sim.fog_changed {
+        return;
+    }
+    sim.fog_changed = false;
+    let grid = &sim.fog;
+    let FogRes { chunks, mini, .. } = &mut *fog;
+    for (i, (h, cx0, cz0, nx, nz)) in chunks.iter().enumerate() {
+        let Some(mut mesh) = meshes.get_mut(h) else {
+            continue;
+        };
+        let mut cols = Vec::with_capacity(((nx + 1) * (nz + 1)) as usize);
+        let mut any = false;
+        for z in 0..=*nz {
+            for x in 0..=*nx {
+                let a = grid.corner_alpha(cx0 + x, cz0 + z);
+                any |= a > 0.0;
+                cols.push([0.0, 0.0, 0.0, a]);
+            }
+        }
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols);
+        // Fully clear chunks are skipped (saves a blended pass over them).
+        if let Some(e) = chunk_entities.get(i)
+            && let Ok(mut v) = vis.get_mut(*e)
+        {
+            let want = if any && enabled {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
+        }
+    }
+    if let Some(img) = mini.as_ref()
+        && let Some(mut im) = images.get_mut(img)
+    {
+        let (gw, gh) = grid.size;
+        let mut px = Vec::with_capacity((gw * gh * 4) as usize);
+        for z in 0..i64::from(gh) {
+            for x in 0..i64::from(gw) {
+                let a = match grid.cell(x, z) {
+                    crate::fog::FogCell::Unexplored => 255,
+                    crate::fog::FogCell::Explored => 140,
+                    crate::fog::FogCell::Seen => 0,
+                };
+                px.extend_from_slice(&[0, 0, 0, a]);
+            }
+        }
+        im.data = Some(px);
+    }
+}
+
+/// Whether the local player can see a world point (always, with the fog
+/// off).
+fn fog_visible(fog: &FogRes, sim: &SimRes, x: f32, z: f32) -> bool {
+    !fog.enabled || sim.fog.at(x, z) == crate::fog::FogCell::Seen
+}
+
+/// Sight radius for units whose `sightdistance` is 0 (**Chosen**).
+const FOG_MIN_SIGHT: f32 = 32.0;
+
+/// Sort bias of the fog material: transparent items are drawn back to
+/// front by view depth plus this, so the fog comes after every other
+/// translucent surface (water, shadows, ghosts, effects). A second camera
+/// for the overlay cost about 3 fps on lavapipe.
+const FOG_SORT_BIAS: f32 = 100_000.0;
+
 /// Minimap width on screen, logical pixels (height follows the image).
 const MINIMAP_W: f32 = 230.0;
 /// Gap to the window edge.
@@ -2283,6 +2534,7 @@ fn setup_minimap(
             ..default()
         },
         BorderColor::all(Color::WHITE),
+        ZIndex(2),
         MinimapView,
         ChildOf(root),
     ));
@@ -2294,6 +2546,7 @@ fn minimap_system(
     sim: NonSend<SimRes>,
     cam: Res<CamState>,
     mm: Res<MinimapState>,
+    fog: Res<FogRes>,
     root: Query<Entity, With<MinimapRoot>>,
     mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>)>,
     mut dots: Query<
@@ -2321,7 +2574,10 @@ fn minimap_system(
     let mut have = 0;
     for (d, mut n, mut bg, mut v) in &mut dots {
         have = have.max(d.0 + 1);
-        match units.get(d.0) {
+        let unit = units.get(d.0).filter(|u| {
+            PlayerId(u.owner) == sim.session.local || fog_visible(&fog, &sim, u.x, u.y)
+        });
+        match unit {
             Some(u) => {
                 let p = g.to_mini(u.x, u.y - crate::view::SHEAR * u.ground);
                 let size = if sim
@@ -2359,6 +2615,7 @@ fn minimap_system(
             },
             BackgroundColor(Color::WHITE),
             Visibility::Hidden,
+            ZIndex(2),
             MinimapDot(i),
             ChildOf(root),
         ));
@@ -2542,6 +2799,7 @@ fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color:
 fn gizmo_system(
     mut g: Gizmos,
     tops: Res<UnitTops>,
+    fog: Res<FogRes>,
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
     ground: Res<Ground>,
@@ -2556,6 +2814,9 @@ fn gizmo_system(
         let p = prev.get(&u.id).copied();
         let x = lerp(p.map_or(u.x, |p| p.x), u.x, alpha);
         let y = lerp(p.map_or(u.y, |p| p.y), u.y, alpha);
+        if PlayerId(u.owner) != local && !fog_visible(&fog, &sim, x, y) {
+            continue;
+        }
         let (fx, fz) = sim.session.def(u.def).map_or((1, 1), |d| d.footprint);
         let r = pick_radius(fx, fz);
         let team = if PlayerId(u.owner) == local {

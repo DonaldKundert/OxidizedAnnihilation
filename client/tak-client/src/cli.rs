@@ -61,6 +61,9 @@ pub struct Args {
     /// textures and art by eye.
     #[arg(long, value_delimiter = ',')]
     pub showcase: Vec<String>,
+    /// Start with the visual fog of war off (F9 toggles it in play).
+    #[arg(long)]
+    pub no_fog: bool,
 }
 
 impl Args {

@@ -355,6 +355,31 @@ TA), larger for footprints of 3+ cells. A left click or drag on it moves
 the camera without reaching the mapper (no select/deselect); with a
 gamepad, A while the virtual cursor is over it does the same.
 
+### Fog of war, visual only (WP-R)
+
+`fog.rs`: per attribute cell, unexplored (black), explored (dimmed,
+overlay opacity 0.6 ≈ half brightness in linear-light blending), seen
+(clear). Seen = within `sightdistance` (`CombatDef::sight`, world units;
+**Chosen** minimum 32 for units with none) of any of the local player's
+units, frames and buildings included. Recomputed after every sim tick on
+the client (so screenshot runs that skip frames still explore the path
+walked); it never feeds the sim, and gameplay line of sight stays the
+sim's job.
+
+- Drawn as an overlay mesh per terrain chunk with black vertex colours,
+  moved 400 height units toward the viewer along the view ray (same
+  screen pixels, in front of every model and sprite), with a large
+  transparent-sort bias so it is blended after water, shadows, ghosts and
+  effects. Corner opacity is the mean of the four touching cells (soft
+  edges). Chunks that are fully clear are hidden. A second overlay camera
+  was tried first and cost about 3 fps on lavapipe.
+- Enemy units outside the seen cells are not drawn (models, rings, bars,
+  minimap dots). Features and the player's own units always are (under
+  the overlay).
+- The minimap gets the same fog as a texture, one texel per cell
+  (heights ignored, so edges can sit a few pixels off on hills).
+- `--no-fog` starts with it off; F9 toggles it.
+
 ### HUD and overlays
 
 Top bar: map, tick, pause/speed, every player's mana, storage and income.
@@ -382,7 +407,7 @@ slots next to the cursor from `Mapper::wheel()`.
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No fog of war, no audio, no in-HUD click targets (build menu
+- No audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet
   shown in the HUD.
