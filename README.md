@@ -13,7 +13,11 @@ The core is headless and deterministic. It mounts the original archives, parses 
 | M0 Workspace and CI | done |
 | M1 Install survey (`tak-cli survey`) | done, see [`docs/formats/hapi.md`](docs/formats/hapi.md) |
 | M2 Archive reader and VFS (`tak-cli ls/cat/extract`) | done |
-| M3–M7 formats, math, commands | in parallel, see [`docs/plan.md`](docs/plan.md) |
+| M3–M7 every format: text defs, models, sprites, scripts, maps | done |
+| M6 COB script VM | done |
+| M8–M9 deterministic sim, replay, real-map integration | done |
+| M11 controller input layer | done |
+| M10+ pathfinding, combat, mana and construction, Bevy client | next, see [`docs/plan.md`](docs/plan.md) |
 
 The full plan is in [`docs/plan.md`](docs/plan.md).
 

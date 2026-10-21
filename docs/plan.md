@@ -9,6 +9,13 @@ The full design (mission, determinism rules, command layer, controller mapping) 
 | M0 | Workspace, CI, `TAK_DATA_DIR` gating | `.github/workflows/ci.yml`, `tak_vfs::testing` |
 | M1 | Install survey | `tak-cli survey`, `docs/formats/hapi.md` |
 | M2 | HAPI v2 reader, VFS, mount order | `tak-vfs`, `tak-cli ls/cat/extract/shadowed/census`, `docs/formats/hapi.md` |
+| M3 | TDF parser, key census, GUI tokenizer | `tak_formats::tdf`, `gui`, `docs/formats/*-keys.md` |
+| M3b | Unit, weapon, feature, map definitions | `tak-content`, `docs/content.md` |
+| M4 | 3DO models; GAF/TAF sprites, PCX, palettes | `tak_formats::model3do`, `gaf`, `docs/formats/3do.md`, `gaf.md` |
+| M5–M6 | COB v6 loader, disassembler, script VM | `tak_formats::cob`, `tak-script`, `docs/formats/cob.md`, `cob-vm.md` |
+| M7 | TNT v0x4000 maps, CRT | `tak_formats::tnt`, `docs/formats/tnt.md` |
+| M8–M9 | Sim skeleton, deterministic replay, real-map integration | `tak-sim`, `tak-headless`, `docs/sim.md` |
+| M11 | Controller and mouse/keyboard input layer | `tak-input` |
 
 Shared groundwork for parallel work, already on `main`:
 
@@ -44,7 +51,7 @@ WP-F  tak-math + tak-commands ──► WP-I  sim skeleton + replay ┤
 | [WP-I](work-packages/wp-i-sim-skeleton.md) | M8, M9 | `tak-sim`, `tak-headless` | no | F (merged) |
 | [WP-J](work-packages/wp-j-input.md) | M11 | `tak-input` | no | F (merged) |
 
-Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J). Next: [WP-K integration](work-packages/wp-k-integration.md).
+Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J), and so is [WP-K integration](work-packages/wp-k-integration.md): a real map runs headless with real unit stats and scripts. See `docs/sim.md`.
 
 ## Rules for parallel work
 
