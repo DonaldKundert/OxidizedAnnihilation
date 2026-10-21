@@ -23,12 +23,12 @@ original is unknown), **Unknown**.
 | `canbuild` | `canbuild*/<unit>/` menu of the active ruleset | ids, menu order | |
 | `yardmap` | `yardmap`, expanded per cell | | TA-Known expansion rule, below |
 
-Real matches: `construction::content::load_match_with_builds` (or
-`Scenario::with_build_trees(&rs)`) adds every unit reachable from the
-monarchs' menus (breadth first, menu order; Aramon + Taros on Adamantine
-Gate) and resolves menus to ids. `load_match` itself still loads only the
-monarchs, because existing tests count its definitions; the orchestrator
-can switch it over.
+Real matches: `load_match` (and so `tak-headless` and `tak-cli render`)
+adds every unit reachable from the monarchs' menus (breadth first, menu
+order, via `Scenario::with_build_trees(&rs)`) and resolves menus to ids
+(WP-P). The monarchs keep ids `0..`. `load_match_monarchs` is the old
+monarchs-only loader; `construction::content::load_match_with_builds` is
+kept as an alias of `load_match`.
 
 ## Build time and progress
 
@@ -50,8 +50,11 @@ can switch it over.
 - Several builders on one frame add their work, in slot order; the
   lowest-slot builder that finishes it wins, later ones do nothing that tick.
   TA-Known.
-- Health of frames (TA: `trunc(maxdamage × built fraction)`) belongs to
-  combat; `UnitBuild::built_fraction()` gives `(done, total)`.
+- Health of frames (WP-P, TA-Known): 0 at placement, each work step adds
+  `trunc(max × old remaining) − trunc(max × new remaining)`; damage is
+  health loss, never progress loss. `work` calls `combat::build_progress`
+  after every step; rules in `docs/combat.md` ("Frame health"). A builder
+  whose frame is destroyed drops the order (Believed).
 
 ## Mana
 
@@ -111,14 +114,63 @@ can switch it over.
 - Yard map expansion (TA-Known): characters outside `. c C f G o O w Y y`
   are skipped (spaces between rows), the last usable character repeats for
   unfilled cells, extras are ignored. Kingdoms adds `S` (Known: lodestones).
+- **Sacred sites (WP-P)**: a definition with `yardmap = S` (all ten
+  lodestones and Divine Lodestones; also `NPCTEMP2`) must be centred on a
+  free sacred site: one whose footprint plus the economy's `site_slack`
+  (one cell) contains the snapped centre and that no other sacred-site
+  unit, built or under construction, stands on
+  (`economy::free_site_at`, the same test income uses, so whatever
+  placement allows earns the site's multiplier). Otherwise
+  `SiteError::NotSacredSite`. **Believed**: WP-N found `S` only on
+  lodestones, and guides say lodestones are built on the sacred stones; the
+  exact original tolerance is Unknown.
 - Every cell whose yard character is not `.` must not be `STEEP` or `DEEP`,
   and not `FEATURE` unless it is `S` (the lodestone sits on its sacred-site
-  feature). Whether an `S` cell really holds a sacred site is **not checked**
-  yet (the sim map has no feature identities).
+  feature), and must hold no blocking wreck (`SiteError::Feature`, WP-P).
 - No structure or frame may occupy those cells (both yard cells non-`.`).
   Mobile units do not block (Chosen; TA's ground word also holds mobile
   units). Slope sampling per definition (`maxslope`) is not applied; the
   terrain grid's `STEEP` flag is used instead.
+
+### Rejections
+
+A build order dropped at the site check is logged in
+`ConstructionState.rejections` (the latest 64, hashed): tick, builder,
+player, definition, snapped site and `SiteError`, whose `reason()` gives the
+text ("must be built on a free sacred site", "a wreck is in the way", ...).
+A UI can also call `placement::check_site` before ordering, to colour the
+footprint.
+
+## Assisting through Guard (WP-P)
+
+TA: a builder ordered to guard a unit under construction, a factory, or
+another builder helps build (TA-Known behaviour; Nanolathe's single shared
+work step serves "every build, assist, factory-product and deconstruction
+step"). Here:
+
+- A complete mobile builder whose combat order is `Guard(g)` and that has
+  no build job assists `construction::assist_target(g)`: `g` itself while
+  under construction; else the frame `g` is building (its build job or its
+  own assist, one level); else `g`'s factory product. Same owner only.
+- Out of range (the build range rule above) it walks over
+  (`pathfinding::go_to`); a walk that ends out of range is not repeated
+  unless the target moved. In range it stops, calls `StartBuilding` once,
+  turns toward the frame and adds its own `workertime` every tick through
+  the same `work` step, paid by its owner through `economy::drain` (so a
+  shortage slows it like any builder).
+- When the frame completes (or dies) it calls `StopBuilding`; the guard
+  stays, so it moves on to the next product of a guarded factory, or the
+  next frame of a guarded builder.
+- Any other player order suspends it; while assisting, combat's guard
+  follow and chase are off (Chosen).
+- State: `UnitBuild.assist` (`Assist { target, walk_to, building }`),
+  hashed.
+- Results (`tests/open_items.rs`): a mason guarding the king's wall frame
+  from tick 3 finishes it on tick ~100 instead of 196; guarding the king
+  while it builds does the same; guarding a factory roughly halves a
+  product's build time.
+- Not done: repair of damaged complete units by guarding builders (TA does
+  it), reclaim, and assisting allies.
 
 ## Factories
 
@@ -166,6 +218,31 @@ trip, and in two child processes, and compares hashes.
   scale); partial-mana behaviour.
 - Product release from the factory yard; frame decay; refunds for
   computer players (TA scales by difficulty).
-- Sacred-site check for `S` yard cells; per-definition slope limits;
-  structures blocking movement (pathfinding's lane).
-- Builders assisting through `Guard`, repair, reclaim, resurrection.
+- The original's sacred-site tolerance; per-definition slope limits;
+  structures blocking movement (the `pathfinding::add_obstacle` hook now
+  exists; structures do not use it yet).
+- Repair, reclaim, resurrection; assisting allies.
+
+## Real-map run (WP-P)
+
+`tests/open_items_real_map.rs`, Adamantine Gate, ARA vs TAR with full build
+trees and the original COB scripts. Commands are decided from the state as
+the run goes and recorded; a child process replays the log and must
+produce the same hashes.
+
+- The Aramon monarch builds a keep next to its start (complete on tick
+  2867; 1800 ticks of work slowed by the opening mana shortage: 1955 cost
+  against 1000 stock + 10/s), with health rising from 0 to exactly 17162.
+- The Taros monarch walks about 1100 units and builds three walls on the
+  approach, about 900 units from the keep.
+- The keep trains swordsmen and a catapult; each marches on the walls and
+  they attack. The Taros monarch's fireballs kill three swordsmen (bodies,
+  non-blocking, rot after 30 s) and the catapult, whose 4x4 wreck
+  (`arapult_dead`, blocking) is an obstacle in the swordsmen's movement
+  layer. Run ends at tick 8159; zero script errors.
+- A real Lodestone is refused next to the monarch (`NotSacredSite`) and
+  built on the nearest sacred stone, which it then claims.
+- Render: `TAK_OPEN_ITEMS_LOG_OUT=<file> cargo test -p tak-sim --test
+  open_items_real_map`, then `tak-cli render --map "kmap/Adamantine Gate"
+  --players ARA,TAR --world-seed 7 --log <file> --tick 8159 --out DIR`
+  (now draws every unit, corpses and wrecks).
