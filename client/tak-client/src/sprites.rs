@@ -135,6 +135,51 @@ impl SpriteStore {
             .unwrap_or_else(Palette::grayscale)
     }
 
+    /// An effect sprite by name (explosions, weapon art): with `file`
+    /// (`weapongaf`) the sequence `name` in `anims/<file>.gaf`; else the
+    /// file named after it, preferring the ARGB4444 TAF twin (smooth alpha;
+    /// which twin the engine used is Unknown, `gaf.md`), then a GAF, then
+    /// the ARGB1555 twin. The entry is `name` or, failing that, the file's
+    /// first one. Indexed effect GAFs use their sibling PCX, else
+    /// `palettes/fx.pcx` (**Chosen**).
+    pub fn effect_seq(&self, vfs: &Vfs, name: &str, file: Option<&str>) -> Option<SpriteSeq> {
+        let fx_pal = |path: &str| -> Palette {
+            let sibling = match path.rsplit_once('.') {
+                Some((stem, _)) => format!("{stem}.pcx"),
+                None => format!("{path}.pcx"),
+            };
+            self.palette(vfs, &sibling)
+                .or_else(|| self.palette(vfs, "palettes/fx.pcx"))
+                .or_else(|| self.palette(vfs, "palettes/palette.pal"))
+                .unwrap_or_else(Palette::grayscale)
+        };
+        if let Some(file) = file {
+            let path = format!("anims/{file}.gaf");
+            return self.seq(vfs, &path, name, &fx_pal(&path));
+        }
+        let lower = name.to_ascii_lowercase();
+        for path in [
+            format!("anims/{lower}_4444.taf"),
+            format!("anims/{lower}.gaf"),
+            format!("anims/{lower}_1555.taf"),
+        ] {
+            let Some(gaf) = self.gaf(vfs, &path) else {
+                continue;
+            };
+            let pal = fx_pal(&path);
+            let entry = gaf
+                .entry(name)
+                .map(|e| e.name.clone())
+                .or_else(|| gaf.entries.first().map(|e| e.name.clone()));
+            if let Some(e) = entry
+                && let Some(seq) = self.seq(vfs, &path, &e, &pal)
+            {
+                return Some(seq);
+            }
+        }
+        None
+    }
+
     /// Decode sequence `name` of the file at `path` (case-insensitive).
     pub fn seq(&self, vfs: &Vfs, path: &str, name: &str, pal: &Palette) -> Option<SpriteSeq> {
         let gaf = self.gaf(vfs, path)?;

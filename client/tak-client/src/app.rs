@@ -235,6 +235,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .init_resource::<FeatureEntities>()
         .init_resource::<SpriteCache>()
         .init_resource::<UnitTops>()
+        .init_resource::<FxState>()
         .add_systems(
             Startup,
             (setup_scene, setup_hud, setup_gizmos, spawn_scenery),
@@ -248,6 +249,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 camera_system,
                 units_system,
                 features_system,
+                effects_system,
                 animate_sprites,
                 showcase_system,
                 hud_system,
@@ -542,6 +544,18 @@ fn shot_driver(
                 u.combat.max_health,
                 u.build.percent_left(),
                 u.orders.iter().take(2).collect::<Vec<_>>()
+            );
+        }
+        for imp in sim.session.sim.world().combat.impacts.iter().rev().take(3) {
+            let key = crate::game::weapon_key(imp.weapon);
+            eprintln!(
+                "  impact tick {} weapon {:?} at ({:.0}, {:.0}) by {:?}: {:?}",
+                imp.tick,
+                key,
+                f(imp.point.x),
+                f(imp.point.y),
+                imp.shooter,
+                sim.session.weapon_art.get(&key)
             );
         }
         let fs = &sim.session.sim.world().features;
@@ -1473,10 +1487,29 @@ struct SpriteAssets {
 /// How a sprite is blended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SpriteBlend {
-    /// Cut out at alpha 0.5 (feature and unit art).
+    /// Cut out at alpha 0.5 (feature and unit art, indexed effects).
     Mask,
     /// Shadow: the silhouette at half opacity (`shadtrans=1`).
     Shadow,
+    /// Alpha blend by the frame's own alpha (TAF frames with the `0xFF00`
+    /// subframe word: smoke, dust, blood).
+    Alpha,
+    /// Additive (other TAF frames: fire, sparks, lightning, rings).
+    Add,
+}
+
+impl SpriteBlend {
+    /// The blend an effect sequence gets (**Chosen** reading of the Unknown
+    /// `0xFF00` word: the 37 TAF pairs carrying it are grey smoke, dust and
+    /// blood, which look right alpha-blended and wrong additive; the rest
+    /// are glowing fire and magic, which look right additive).
+    fn for_effect(seq: &SpriteSeq) -> SpriteBlend {
+        match seq.frames.first() {
+            Some(f) if f.direct && f.subframe_word == 0xFF00 => SpriteBlend::Alpha,
+            Some(f) if f.direct => SpriteBlend::Add,
+            _ => SpriteBlend::Mask,
+        }
+    }
 }
 
 /// Sprite assets by (file, sequence, lift in 1/4 units, blend).
@@ -1529,11 +1562,19 @@ fn sprite_assets(
                     cull_mode: None,
                     ..default()
                 },
-                SpriteBlend::Shadow => StandardMaterial {
+                SpriteBlend::Shadow | SpriteBlend::Alpha => StandardMaterial {
                     base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
                     base_color_texture: Some(img),
                     unlit: true,
                     alpha_mode: AlphaMode::Blend,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+                SpriteBlend::Add => StandardMaterial {
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Add,
                     double_sided: true,
                     cull_mode: None,
                     ..default()
@@ -1577,6 +1618,249 @@ fn animate_sprites(
             mesh.0 = m.clone();
             mat.0 = t.clone();
         }
+    }
+}
+
+/// Explosions, hit effects and projectiles in flight.
+#[derive(Resource, Default)]
+struct FxState {
+    /// Impacts with a tick below this were handled.
+    impact_cursor: u32,
+    /// Projectile visuals by key: entity and where it was first seen.
+    projectiles: BTreeMap<ProjKey, (Entity, [f32; 2])>,
+}
+
+type ProjKey = (UnitId, (u32, u8), u32);
+
+/// A one-shot effect sprite playing from sim tick `start`.
+#[derive(Component)]
+struct Effect {
+    assets: Arc<SpriteAssets>,
+    start: u32,
+    shown: usize,
+}
+
+/// Effect sprite assets by name (and weapon GAF file), cached.
+fn effect_assets(
+    content: &Content,
+    art: &mut ArtAssets,
+    name: &str,
+    file: Option<&str>,
+) -> Option<Arc<SpriteAssets>> {
+    let key_name = format!("fx:{}:{}", file.unwrap_or(""), name.to_ascii_lowercase());
+    // Quick path: any lift/blend variant already built for this name.
+    if let Some((_, a)) = art
+        .sprites
+        .0
+        .range((key_name.clone(), String::new(), i32::MIN, SpriteBlend::Mask)..)
+        .next()
+        .filter(|(k, _)| k.0 == key_name)
+    {
+        return a.clone();
+    }
+    let seq = content.sprites.effect_seq(&content.vfs, name, file);
+    let Some(seq) = seq else {
+        art.sprites
+            .0
+            .insert((key_name, String::new(), 0, SpriteBlend::Mask), None);
+        return None;
+    };
+    let lift = lift_for(seq.max_below(), 2.0);
+    let blend = SpriteBlend::for_effect(&seq);
+    sprite_assets(
+        art,
+        &seq,
+        (
+            key_name,
+            name.to_ascii_lowercase(),
+            (lift * 4.0).round() as i32,
+            blend,
+        ),
+    )
+}
+
+/// Total duration of a sequence in ticks.
+fn seq_ticks(seq: &SpriteSeq) -> u32 {
+    seq.frames.iter().map(|f| f.duration.max(1)).sum()
+}
+
+/// Hit explosions (from the sim's impact log: projectile landings and
+/// instant hits alike, death explosions included), played once by sim
+/// tick; projectiles in flight drawn with their model or sprite.
+fn effects_system(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    mut art_assets: ArtAssets,
+    mut fx: ResMut<FxState>,
+    mut effects: Query<(
+        Entity,
+        &mut Effect,
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut tf_q: Query<&mut Transform, Without<Effect>>,
+) {
+    let s = &sim.session;
+    let w = s.sim.world();
+    let now = s.tick().0;
+    // New impacts.
+    let cursor = fx.impact_cursor;
+    for imp in &w.combat.impacts {
+        if imp.tick < cursor || imp.tick >= now {
+            continue;
+        }
+        let key = crate::game::weapon_key(imp.weapon);
+        let Some(class) = s.weapon_art.get(&key).and_then(|a| a.explosion.as_ref()) else {
+            continue;
+        };
+        let Some(names) = s.explosions.get(class) else {
+            continue;
+        };
+        if names.is_empty() {
+            continue;
+        }
+        let (px, pz) = (f(imp.point.x), f(imp.point.y));
+        let pick = (imp.tick as usize + (px as usize) * 7 + (pz as usize) * 13) % names.len();
+        let Some(a) = effect_assets(&content, &mut art_assets, &names[pick], None) else {
+            continue;
+        };
+        if now.saturating_sub(imp.tick) >= seq_ticks(&a.timing) {
+            continue;
+        }
+        let (m, t) = a.frames[0].clone();
+        commands.spawn((
+            Mesh3d(m),
+            MeshMaterial3d(t),
+            Transform::from_xyz(px, ground.0.height_at(px, pz), pz),
+            Visibility::default(),
+            Effect {
+                assets: a,
+                start: imp.tick,
+                shown: 0,
+            },
+        ));
+    }
+    fx.impact_cursor = now;
+    // Age effects.
+    for (e, mut eff, mut mesh, mut mat) in &mut effects {
+        let age = now.saturating_sub(eff.start);
+        if age >= seq_ticks(&eff.assets.timing) {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let i = eff.assets.timing.frame_at(age);
+        if i != eff.shown {
+            eff.shown = i;
+            let (m, t) = &eff.assets.frames[i];
+            mesh.0 = m.clone();
+            mat.0 = t.clone();
+        }
+    }
+    // Projectiles.
+    let alpha = sim.alpha();
+    let prev: BTreeMap<ProjKey, &crate::game::ProjSnap> =
+        sim.prev.projectiles.iter().map(|p| (p.key, p)).collect();
+    let live: std::collections::BTreeSet<ProjKey> =
+        sim.curr.projectiles.iter().map(|p| p.key).collect();
+    let gone: Vec<ProjKey> = fx
+        .projectiles
+        .keys()
+        .filter(|k| !live.contains(k))
+        .copied()
+        .collect();
+    for k in gone {
+        if let Some((e, _)) = fx.projectiles.remove(&k) {
+            commands.entity(e).despawn();
+        }
+    }
+    for p in &sim.curr.projectiles {
+        let Some(art) = s.weapon_art.get(&p.weapon) else {
+            continue;
+        };
+        let q = prev.get(&p.key).copied();
+        let x = lerp(q.map_or(p.x, |q| q.x), p.x, alpha);
+        let z = lerp(q.map_or(p.y, |q| q.y), p.y, alpha);
+        let g = lerp(q.map_or(p.ground, |q| q.ground), p.ground, alpha);
+        let start = fx.projectiles.get(&p.key).map(|v| v.1);
+        let start = start.unwrap_or([x, z]);
+        // Ballistic shots arc (**Chosen** shape: a parabola peaking at a
+        // quarter of the range; the sim moves them on the ground only).
+        let total = ((p.dest[0] - start[0]).powi(2) + (p.dest[1] - start[1]).powi(2)).sqrt();
+        let done = ((x - start[0]).powi(2) + (z - start[1]).powi(2)).sqrt();
+        let arc = if art.kind == "ballistic" && total > 1.0 {
+            let t = (done / total).clamp(0.0, 1.0);
+            total * 0.25 * 4.0 * t * (1.0 - t)
+        } else {
+            0.0
+        };
+        let pos = Vec3::new(x, g + 18.0 + arc, z);
+        let heading = (p.dest[1] - z).atan2(p.dest[0] - x);
+        let rot = heading_rotation(heading);
+        if let Some((e, _)) = fx.projectiles.get(&p.key) {
+            if let Ok(mut tf) = tf_q.get_mut(*e) {
+                tf.translation = pos;
+                if art.model.is_some() {
+                    tf.rotation = rot;
+                }
+            }
+            continue;
+        }
+        let root = commands
+            .spawn((
+                Transform::from_translation(pos).with_rotation(rot),
+                Visibility::default(),
+            ))
+            .id();
+        let mut drawn = false;
+        if let Some(o) = &art.model {
+            let ArtAssets {
+                models,
+                meshes,
+                images,
+                materials,
+                ..
+            } = &mut art_assets;
+            let assets = models
+                .models
+                .entry((o.clone(), 0))
+                .or_insert_with(|| {
+                    load_model(&content.vfs, &content.tex, o, 0)
+                        .ok()
+                        .map(|b| Arc::new(upload_model(&b, meshes, images, materials)))
+                })
+                .clone();
+            if let Some(a) = assets {
+                spawn_static_pieces(&mut commands, &a, root);
+                drawn = true;
+            }
+        }
+        if !drawn
+            && let Some(name) = &art.art
+            && let Some(a) = effect_assets(&content, &mut art_assets, name, art.art_file.as_deref())
+        {
+            commands
+                .entity(root)
+                .insert(Transform::from_translation(pos));
+            let (m, t) = a.frames[0].clone();
+            let child = commands
+                .spawn((
+                    Mesh3d(m),
+                    MeshMaterial3d(t),
+                    Transform::default(),
+                    ChildOf(root),
+                ))
+                .id();
+            if a.frames.len() > 1 {
+                commands.entity(child).insert(Animated {
+                    assets: a.clone(),
+                    phase: 0,
+                    shown: 0,
+                });
+            }
+        }
+        fx.projectiles.insert(p.key, (root, start));
     }
 }
 
@@ -2111,12 +2395,60 @@ fn gizmo_system(
             }
         }
     }
+    // Projectiles with neither a model nor a sprite: a small orange ball.
     for pr in &sim.curr.projectiles {
+        let art = sim.session.weapon_art.get(&pr.weapon);
+        if art.is_some_and(|a| a.model.is_some() || a.art.is_some()) {
+            continue;
+        }
         g.sphere(
-            Isometry3d::from_translation(Vec3::new(pr[0], pr[2] + 20.0, pr[1])),
-            5.0,
+            Isometry3d::from_translation(Vec3::new(pr.x, pr.ground + 18.0, pr.y)),
+            4.0,
             Color::srgb(1.0, 0.6, 0.1),
         );
+    }
+    // Lightning (`hweffect=lightning`): jagged bolts from the shooter to the
+    // impact for `emittime` ticks (**Chosen** look; TA:K draws it with its
+    // own effect code, Unknown).
+    let now = sim.session.tick().0;
+    for imp in &w.combat.impacts {
+        let key = crate::game::weapon_key(imp.weapon);
+        let Some((emit, rgb)) = sim.session.weapon_art.get(&key).and_then(|a| a.lightning) else {
+            continue;
+        };
+        if now.saturating_sub(imp.tick) > emit {
+            continue;
+        }
+        let Some(sh) = imp
+            .shooter
+            .and_then(|id| sim.curr.units.iter().find(|u| u.id == id))
+        else {
+            continue;
+        };
+        let top = tops.0.get(&sh.id).copied().unwrap_or(40.0);
+        let a = Vec3::new(sh.x, sh.ground + top * 0.7, sh.y);
+        let (px, pz) = (f(imp.point.x), f(imp.point.y));
+        let b = Vec3::new(px, t.height_at(px, pz) + 10.0, pz);
+        let color = Color::srgb_u8(rgb[0], rgb[1], rgb[2]);
+        for bolt in 0..2u32 {
+            let n = 8;
+            let mut prev = a;
+            for i in 1..=n {
+                let k = i as f32 / n as f32;
+                let mut q = a.lerp(b, k);
+                if i < n {
+                    let h = (now / 2)
+                        .wrapping_mul(2654435761)
+                        .wrapping_add(i * 97 + bolt * 31)
+                        .wrapping_mul(40503);
+                    let jx = ((h & 0xff) as f32 / 255.0 - 0.5) * 18.0;
+                    let jy = (((h >> 8) & 0xff) as f32 / 255.0 - 0.5) * 18.0;
+                    q += Vec3::new(jx, jy, 0.0);
+                }
+                g.line(prev, q, if bolt == 0 { Color::WHITE } else { color });
+                prev = q;
+            }
+        }
     }
     // Cursor, brush and build placement (no cursor in screenshots: the
     // mouse is not there).

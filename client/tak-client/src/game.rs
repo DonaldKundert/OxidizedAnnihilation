@@ -67,6 +67,107 @@ pub struct Session {
     pub features: Vec<FeatureBox>,
     /// Art of every feature definition in the ruleset, by lowercase name.
     pub feature_art: BTreeMap<String, FeatureArt>,
+    /// How each weapon is drawn, by `(unit def, slot)`; slot
+    /// [`EXPLODE_AS_SLOT`] is the death explosion.
+    pub weapon_art: BTreeMap<(u32, u8), WeaponArt>,
+    /// `gamedata/explosions`: class (lowercase) to its sprite names (one
+    /// is picked per explosion).
+    pub explosions: BTreeMap<String, Vec<String>>,
+}
+
+/// `weapon_art` slot of a unit's `[EXPLODEAS]`.
+pub const EXPLODE_AS_SLOT: u8 = u8::MAX;
+
+/// How a weapon is drawn (from its FBI section).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WeaponArt {
+    /// `weapontype`, lowercase (`ballistic`, `line of sight`, ...).
+    pub kind: String,
+    /// `model`: projectile 3DO.
+    pub model: Option<String>,
+    /// `weapongaf` (file) when set, else the art names its own file.
+    pub art_file: Option<String>,
+    /// `weaponart`: projectile sprite sequence.
+    pub art: Option<String>,
+    /// `explosionclass`, lowercase: hit explosion.
+    pub explosion: Option<String>,
+    /// `hweffect=lightning`: a bolt from shooter to target lasting
+    /// `emittime` ticks, in `outercolor`.
+    pub lightning: Option<(u32, [u8; 3])>,
+}
+
+impl WeaponArt {
+    fn from_fbi(w: &tak_content::unit::WeaponDef) -> WeaponArt {
+        let nonempty = |v: &Option<String>| v.clone().filter(|s| !s.trim().is_empty());
+        let color = w
+            .extra
+            .get("outercolor")
+            .and_then(|c| {
+                let v: Vec<u8> = c
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .collect();
+                (v.len() == 3).then(|| [v[0], v[1], v[2]])
+            })
+            .unwrap_or([180, 200, 255]);
+        let lightning = w
+            .extra
+            .get("hweffect")
+            .filter(|e| e.eq_ignore_ascii_case("lightning"))
+            .map(|_| {
+                let t = w
+                    .extra
+                    .get("emittime")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .unwrap_or(10);
+                (t.clamp(1, 60), color)
+            });
+        WeaponArt {
+            kind: w.kind.clone().unwrap_or_default().to_ascii_lowercase(),
+            model: nonempty(&w.model).map(|m| m.trim_end_matches(".3do").to_ascii_lowercase()),
+            art_file: w
+                .extra
+                .get("weapongaf")
+                .cloned()
+                .filter(|s| !s.trim().is_empty()),
+            art: nonempty(&w.weapon_art),
+            explosion: nonempty(&w.explosion_class).map(|c| c.trim().to_ascii_lowercase()),
+            lightning,
+        }
+    }
+}
+
+/// Parse `gamedata/explosions/*.tdf`: `[class] { [0] { gaf = x; } ... }`.
+pub fn load_explosions(vfs: &Vfs) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    for f in vfs.list("gamedata/explosions/") {
+        if !f.path.to_ascii_lowercase().ends_with(".tdf") {
+            continue;
+        }
+        let Ok(bytes) = vfs.read(&f.path) else {
+            continue;
+        };
+        let Ok(doc) = tak_formats::tdf::parse(&bytes) else {
+            continue;
+        };
+        for sec in &doc.sections {
+            let names: Vec<String> = sec
+                .sections
+                .iter()
+                .filter_map(|v| {
+                    v.entries
+                        .iter()
+                        .find(|e| e.key.eq_ignore_ascii_case("gaf"))
+                        .map(|e| e.value.trim().to_string())
+                })
+                .filter(|n| !n.is_empty())
+                .collect();
+            if !names.is_empty() {
+                out.insert(sec.name.trim().to_ascii_lowercase(), names);
+            }
+        }
+    }
+    out
 }
 
 /// How a feature is drawn (from its TDF).
@@ -183,6 +284,22 @@ impl Session {
                 )
             })
             .collect();
+        let mut weapon_art = BTreeMap::new();
+        for (i, d) in m.scenario.unit_defs.iter().enumerate() {
+            let Some(u) = rs.unit(&d.name) else { continue };
+            for (slot, w) in u
+                .weapons
+                .iter()
+                .enumerate()
+                .take(usize::from(EXPLODE_AS_SLOT))
+            {
+                weapon_art.insert((i as u32, slot as u8), WeaponArt::from_fbi(w));
+            }
+            if let Some(w) = &u.explode_as {
+                weapon_art.insert((i as u32, EXPLODE_AS_SLOT), WeaponArt::from_fbi(w));
+            }
+        }
+        let explosions = load_explosions(vfs);
         let sim = Sim::with_scripts(&m.scenario, Box::new(m.scripts)).map_err(err)?;
         Ok(Session {
             sim,
@@ -195,6 +312,8 @@ impl Session {
             map_name: map.to_string(),
             features,
             feature_art,
+            weapon_art,
+            explosions,
         })
     }
 
@@ -264,17 +383,19 @@ impl Session {
                 dying: u.combat.is_dying(),
             })
             .collect();
+        let tick = w.tick().0;
+        let f = |v: tak_math::Fx| v.raw() as f32 / 65536.0;
         let projectiles = w
             .combat
             .projectiles
             .iter()
-            .map(|p| {
-                let (x, y) = (
-                    p.pos.x.raw() as f32 / 65536.0,
-                    p.pos.y.raw() as f32 / 65536.0,
-                );
-                let h = w.map().height_at(p.pos).raw() as f32 / 65536.0;
-                [x, y, h]
+            .map(|p| ProjSnap {
+                key: (p.shooter, weapon_key(p.weapon), tick.wrapping_sub(p.age)),
+                weapon: weapon_key(p.weapon),
+                x: f(p.pos.x),
+                y: f(p.pos.y),
+                ground: f(w.map().height_at(p.pos)),
+                dest: [f(p.dest.x), f(p.dest.y)],
             })
             .collect();
         Snapshot {
@@ -399,8 +520,33 @@ pub struct Snapshot {
     pub tick: u32,
     /// Live units in slot order.
     pub units: Vec<UnitSnap>,
-    /// Projectiles: `[x, y, ground height]`.
-    pub projectiles: Vec<[f32; 3]>,
+    /// Projectiles in flight.
+    pub projectiles: Vec<ProjSnap>,
+}
+
+/// `(unit def, slot)` of a weapon, as in [`Session::weapon_art`].
+pub fn weapon_key(w: tak_sim::combat::WeaponRef) -> (u32, u8) {
+    match w {
+        tak_sim::combat::WeaponRef::Slot(d, s) => (d.0, s),
+        tak_sim::combat::WeaponRef::Explosion(d) => (d.0, EXPLODE_AS_SLOT),
+    }
+}
+
+/// One projectile at one tick.
+#[derive(Clone, Debug)]
+pub struct ProjSnap {
+    /// Identity across ticks: shooter, weapon, launch tick.
+    pub key: (UnitId, (u32, u8), u32),
+    /// Weapon (`Session::weapon_art` key).
+    pub weapon: (u32, u8),
+    /// World x.
+    pub x: f32,
+    /// World y (south).
+    pub y: f32,
+    /// Terrain height under it.
+    pub ground: f32,
+    /// Where it lands.
+    pub dest: [f32; 2],
 }
 
 /// Linear interpolation.

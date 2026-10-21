@@ -309,6 +309,38 @@ Findings and choices:
   the monarchs appear to hold their swords in the right hand, which
   suggests none is needed (moderate confidence).
 
+### Effects and projectiles (WP-R)
+
+- **Explosions**: every weapon impact (projectile landings, instant hits,
+  death explosions: the sim's `CombatState::impacts` log, a render-only
+  core addition) spawns its weapon's `explosionclass` from
+  `gamedata/explosions/explosions.tdf` (`[class] { [n] { gaf = name; } }`,
+  one variant picked by tick and position). Sprites are found by name as
+  `anims/<name>_4444.taf`, else `<name>.gaf`, else `<name>_1555.taf`
+  (**Chosen**: the 4444 twin has smooth alpha; which twin the engine used
+  is Unknown). They play once by sim tick (frame duration word = ticks,
+  Believed), anchored on the impact point at ground height, so screenshot
+  runs show them at the right frame.
+- **Blend (Chosen reading of the Unknown `0xFF00` word)**: TAF frames
+  carrying `0xFF00` (smoke, dust, blood, 37 pairs) are alpha-blended; the
+  other TAFs (fire, flamestrike, lightning splashes, magic rings) are
+  additive, which makes them glow over the terrain as expected; indexed
+  GAF effects are cut out. The opposite reading makes dust glow and fire
+  look muddy.
+- **Projectiles**: the weapon's `model` 3DO when set (oriented along its
+  flight), else its `weaponart` sprite (in `weapongaf`'s file when set,
+  else by name as above; animated), else a small orange ball. Ballistic
+  shots follow a parabola peaking at a quarter of their range above the
+  ground track the sim moves them on (**Chosen**; the sim is 2D).
+- **Lightning** (`hweffect=lightning`, the Aramon and Zhon monarchs'
+  first weapon): two jagged bolts (white and `outercolor`) from the
+  shooter to the impact for `emittime` ticks (**Chosen** look).
+- Checked: the demo duel (Elsin's lightning on Thirsha: bolt plus the
+  blue `lightning*` splash) and `--players ARA,TAR` (the Necromancer's
+  `FireballA` in flight, `flamestrike` flames on Elsin, Elsin's meteor).
+- Not done: build sparkles (`sidedata` `buildsparklygaf`), dust when
+  walking, Remote Effect rings (`radiusart*`), weapon `shadowart`, sound.
+
 ### HUD and overlays
 
 Top bar: map, tick, pause/speed, every player's mana, storage and income.
@@ -326,11 +358,16 @@ slots next to the cursor from `Mapper::wheel()`.
   `Sim::scripts()` and `Sim::cob()`: read-only access so the renderer can
   read COB piece poses. Additive; the sim never calls them; hashes
   unchanged.
+- WP-R: `CombatState::impacts` (`combat::Impact`: tick, weapon, point,
+  shooter; last 256), pushed by `impact()` and never read by the sim, not
+  hashed. Instant weapons leave no projectile, so without it the renderer
+  could not place their hit explosions. Hashes and the replay test are
+  unchanged.
 
 ## Known gaps / follow-up
 
-- Effects: no TAF/GAF sprites for weapon hits, deaths, build sparkles or
-  dust yet; projectiles are spheres.
+- Effects: no build sparkles, walking dust, Remote Effect rings or
+  weapon shadows yet (see Effects).
 - No minimap, no fog of war, no audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet
