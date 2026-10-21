@@ -40,11 +40,11 @@ WP-F  tak-math + tak-commands ──► WP-I  sim skeleton + replay ┤
 | [WP-E](work-packages/wp-e-maps.md) | M7 | `tak-formats/src/tnt.rs` (+ submodules), `docs/formats/tnt.md`, `crt.md`, `tak-cli dump-map` | yes | OTA part reads TDF via WP-A |
 | [WP-F](work-packages/wp-f-math-commands.md) | M8 prep | `tak-math`, `tak-commands` | no | — |
 | [WP-G](work-packages/wp-g-script-vm.md) | M6 | `tak-script`, `tak-cli anim` | yes | B, D (merged) |
-| WP-H | M3b | `tak-content` | yes | A |
+| [WP-H](work-packages/wp-h-content.md) | M3b | `tak-content`, `tak-cli content` | yes | A, E (merged) |
 | [WP-I](work-packages/wp-i-sim-skeleton.md) | M8, M9 | `tak-sim`, `tak-headless` | no | F (merged) |
 | [WP-J](work-packages/wp-j-input.md) | M11 | `tak-input` | no | F (merged) |
 
-Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Merged so far: WP-B, WP-C, WP-D, WP-F.
+Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Wave 1 is fully merged (WP-A..F).
 
 ## Rules for parallel work
 
