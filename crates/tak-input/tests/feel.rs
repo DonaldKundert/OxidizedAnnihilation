@@ -422,6 +422,99 @@ fn command_wheel_is_built_from_the_selection() {
     assert!(slots.contains(&Action::Stop));
 }
 
+fn key(t: u32, k: &str, down: bool) -> InputEvent {
+    let key = Key::new(k);
+    ev(
+        t,
+        if down {
+            EventKind::KeyDown { key }
+        } else {
+            EventKind::KeyUp { key }
+        },
+    )
+}
+
+/// Modifier `m` + key `k`, then release both, from `t`.
+fn chord(t: u32, m: &str, k: &str) -> Vec<InputEvent> {
+    vec![
+        key(t, m, true),
+        key(t + 10, k, true),
+        key(t + 20, k, false),
+        key(t + 30, m, false),
+    ]
+}
+
+#[test]
+fn every_spell_has_a_wheel_slot_and_key_and_mana_gates_cast_mode() {
+    let spec: WorldSpec = serde_json::from_str(
+        r#"{"local_player": 0, "enemies": [1], "units": [
+            {"index": 1, "owner": 0, "def": 10, "x": 640, "y": 480,
+             "spells": [1, 2, 3], "no_mana": [3]}
+        ]}"#,
+    )
+    .unwrap();
+    let w = TestWorld::new(spec);
+    let mut m = Mapper::new(Profile::default_combined());
+    m.warp_cursor(pos(640, 480));
+    run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
+    assert_eq!(m.selection().len(), 1);
+    run(&mut m, &w, &[bdown(600, Button::Lt)]);
+    let slots = m.wheel().unwrap().slots.clone();
+    let casts: Vec<Action> = slots
+        .iter()
+        .copied()
+        .filter(|a| matches!(a, Action::CastSpell { .. }))
+        .collect();
+    assert_eq!(
+        casts,
+        (0..3)
+            .map(|index| Action::CastSpell { index })
+            .collect::<Vec<_>>()
+    );
+    assert!(!slots.contains(&Action::CastSpellMode));
+    run(&mut m, &w, &[bdown(700, Button::B), bup(720, Button::B)]);
+    assert!(m.wheel().is_none());
+    // Ctrl+F2: the second spell. Ctrl+F3: refused, no mana.
+    run(&mut m, &w, &chord(1000, "ctrl", "f2"));
+    assert_eq!(m.mode(), Mode::CastSpell(tak_commands::SpellId(2)));
+    run(
+        &mut m,
+        &w,
+        &[key(1100, "escape", true), key(1110, "escape", false)],
+    );
+    assert_eq!(m.mode(), Mode::None);
+    run(&mut m, &w, &chord(1200, "ctrl", "f3"));
+    assert_eq!(m.mode(), Mode::None);
+    // C: the first spell.
+    run(&mut m, &w, &[key(1300, "c", true), key(1310, "c", false)]);
+    assert_eq!(m.mode(), Mode::CastSpell(tak_commands::SpellId(1)));
+}
+
+#[test]
+fn shift_f_keys_reach_build_options_past_f8() {
+    let spec: WorldSpec = serde_json::from_str(
+        r#"{"local_player": 0, "enemies": [1], "units": [
+            {"index": 1, "owner": 0, "def": 10, "x": 640, "y": 480, "builder": "mobile",
+             "build_options": [20, 21, 22, 23, 24, 25, 26, 27, 28]}
+        ]}"#,
+    )
+    .unwrap();
+    let w = TestWorld::new(spec);
+    let mut m = Mapper::new(Profile::default_combined());
+    m.warp_cursor(pos(640, 480));
+    run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
+    run(&mut m, &w, &[key(500, "f8", true), key(510, "f8", false)]);
+    assert_eq!(m.mode(), Mode::Build(tak_commands::UnitDefId(27)));
+    run(&mut m, &w, &chord(600, "shift", "f1"));
+    assert_eq!(m.mode(), Mode::Build(tak_commands::UnitDefId(28)));
+    // Shift+F2: no tenth option on this builder, so nothing changes.
+    run(&mut m, &w, &chord(700, "shift", "f2"));
+    assert_eq!(m.mode(), Mode::Build(tak_commands::UnitDefId(28)));
+    // The build wheel lists all nine.
+    run(&mut m, &w, &[bdown(800, Button::Lb)]);
+    assert_eq!(m.wheel().unwrap().slots.len(), 9);
+}
+
 #[test]
 fn wheel_hysteresis_holds_near_the_edge() {
     let mut wh = Wheel::open(WheelKind::Command, vec![Action::Stop; 8]);

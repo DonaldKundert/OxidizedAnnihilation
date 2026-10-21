@@ -77,6 +77,12 @@ pub trait WorldView {
         Vec::new()
     }
 
+    /// `true` if `unit` can cast `spell` now (enough mana). Default: always.
+    fn can_cast(&self, unit: UnitId, spell: SpellId) -> bool {
+        let _ = (unit, spell);
+        true
+    }
+
     /// `true` if a building of type `def` could be placed with its centre at
     /// `pos` (for the build cursor). Default: always.
     fn can_place(&self, def: UnitDefId, pos: WorldPos) -> bool {

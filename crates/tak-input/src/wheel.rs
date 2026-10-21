@@ -114,9 +114,31 @@ pub fn context_slots(
         .iter()
         .copied()
         .filter(|a| match a {
-            Action::CastSpellMode => has_casters,
+            Action::CastSpellMode | Action::CastSpell { .. } => has_casters,
             Action::BuildOption { .. } => has_builders,
             _ => true,
         })
         .collect()
+}
+
+/// `slots` with `CastSpellMode` replaced by one `CastSpell` slot per spell
+/// of the selection's first caster (`spells` of them), so the wheel lists
+/// every spell. Unchanged when `spells` is 0 or there is no such slot.
+pub fn expand_spells(slots: Vec<Action>, spells: usize) -> Vec<Action> {
+    if spells == 0 {
+        return slots;
+    }
+    let mut out = Vec::with_capacity(slots.len() + spells);
+    for a in slots {
+        if a == Action::CastSpellMode {
+            out.extend(
+                (0..spells.min(usize::from(u8::MAX))).map(|i| Action::CastSpell {
+                    index: u8::try_from(i).unwrap_or(u8::MAX),
+                }),
+            );
+        } else {
+            out.push(a);
+        }
+    }
+    out
 }

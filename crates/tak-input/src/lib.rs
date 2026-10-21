@@ -50,5 +50,5 @@ pub use record::{
     FrameIo, Ghost, RECORDING_VERSION, RecFrame, Recorder, Recording, RecordingError, Summary,
 };
 pub use tuning::{PRESETS, TUNING_FIELDS, Tuning, TuningField, field as tuning_field};
-pub use wheel::{Wheel, WheelKind, context_slots, slot_direction, slot_for};
+pub use wheel::{Wheel, WheelKind, context_slots, expand_spells, slot_direction, slot_for};
 pub use world::{BuilderKind, Camera, UnitInfo, WorldView, units_sorted};
