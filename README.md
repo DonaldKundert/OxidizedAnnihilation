@@ -17,7 +17,8 @@ The core is headless and deterministic. It mounts the original archives, parses 
 | M6 COB script VM | done |
 | M8–M9 deterministic sim, replay, real-map integration | done |
 | M11 controller input layer | done |
-| M10+ pathfinding, combat, mana and construction, Bevy client | next, see [`docs/plan.md`](docs/plan.md) |
+| M10 pathfinding, combat, mana economy, construction | done |
+| Bevy client | next, see [`docs/plan.md`](docs/plan.md) |
 
 The full plan is in [`docs/plan.md`](docs/plan.md).
 

@@ -56,7 +56,7 @@ WP-F  tak-math + tak-commands ──► WP-I  sim skeleton + replay ┤
 | [WP-N](work-packages/wp-n-economy.md) | M10 | `tak-sim/src/economy.rs` | yes | K |
 | [WP-O](work-packages/wp-o-construction.md) | M10 | `tak-sim/src/construction.rs` | yes | K |
 
-Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J), and so is [WP-K integration](work-packages/wp-k-integration.md): a real map runs headless with real unit stats and scripts. See `docs/sim.md`. Wave 3 (WP-L..O) runs in parallel inside `tak-sim`, each in its own module wired into the tick by the prep commit; see the tick order in `crates/tak-sim/src/systems.rs`.
+Wave 2 briefs are written when their inputs merge, so they start from what Wave 1 actually found. Waves 1 and 2 are fully merged (WP-A..J), and so is [WP-K integration](work-packages/wp-k-integration.md): a real map runs headless with real unit stats and scripts. See `docs/sim.md`. Wave 3 (WP-L..O: pathfinding, combat, economy, construction) is merged; each lives in its own `tak-sim` module (see the tick order in `crates/tak-sim/src/systems.rs`) and has its own doc: `docs/pathfinding.md`, `combat.md`, `economy.md`, `construction.md`. Next: the Bevy client.
 
 ## Rules for parallel work
 

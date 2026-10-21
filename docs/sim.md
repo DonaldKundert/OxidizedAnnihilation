@@ -127,7 +127,9 @@ baseline (still used by `systems::move_unit` for a lone unit outside the sim).
   `setSFXoccupy` value. Diagnostics (`ScriptStats`) are not hashed; the
   headless runner prints them.
 - Combat callbacks (`AimWeapon`, `FireWeapon`, `TargetCleared`, `Killed`,
-  ...) and build callbacks are not called yet.
+  ...) are called by the combat lane (`docs/combat.md`); build callbacks
+  (`StartBuilding`, `StopBuilding`, `QueryBuildInfo`, `Activate`,
+  `Deactivate`) by the construction lane (`docs/construction.md`).
 
 ### Script ports
 
@@ -140,7 +142,7 @@ self. Packed points are `x << 16 | (y & 0xffff)` in whole world units
 |---:|---|---|---|
 | 1, 2, 5, 6, 18, 19, 20 | ACTIVATION, STANDINGMOVEORDERS, INBUILDSTANCE, BUSY, YARD_OPEN, BUGGER_OFF, ARMORED | last value the script `set` (0 initially) | Believed (TA names) |
 | 3 | STANDINGFIREORDERS | fire state: 0 hold, 1 return, 2 at will | Believed |
-| 4 | HEALTH | 100 (no damage model yet) | Believed (percent) |
+| 4 | HEALTH | `UnitCombat::health_percent()` (`docs/combat.md`) | Believed (percent) |
 | 7, 9 | PIECE_XZ, UNIT_XZ | packed unit position (piece offsets ignored) | Chosen |
 | 8, 10 | PIECE_Y, UNIT_Y | ground height, 16.16 | Chosen |
 | 11 | UNIT_HEIGHT | 0 | Chosen |
@@ -148,7 +150,7 @@ self. Packed points are `x << 16 | (y & 0xffff)` in whole world units
 | 13 | XZ_HYPOT | distance to the packed point, 16.16 | Believed |
 | 14, 15 | ATAN, HYPOT | `atan2(a, b)` in angle units; `hypot(a, b)` on raw 16.16 | Believed, operand order Chosen |
 | 16 | GROUND_HEIGHT | height at the packed point, 16.16 | Believed |
-| 17 | BUILD_PERCENT_LEFT | 0 (every unit is fully built) | Believed |
+| 17 | BUILD_PERCENT_LEFT | `UnitBuild::percent_left()`, rounds up, 0 when complete (`docs/construction.md`) | Believed |
 | 21, 22, 23 | aim aborted / ready / launch now | last value set | Believed (Spring adopted these numbers from Kingdoms) |
 | 28 | IN_WATER | 1 if the cell has `WATER` | Believed |
 | 29 | CURRENT_SPEED | speed, raw 16.16 world units per tick; `MoveWatcher` treats `> 5` as moving, i.e. any motion | Believed |
@@ -174,10 +176,10 @@ Writes to any port are stored per unit (hashed); writes to ports other than
 - Corpus walk (every one of the 152 mobile base units as a lone monarch,
   walking 160 units then idling, 600 ticks): all walk, zero runaway loops,
   zero VM errors. Unknown ports read: 30 ×173, 33 ×560, 46 ×380.
-- The 11 `walk`/`swim` runaway loops from the WP-G sweep need `FireWeapon` /
-  `TargetCleared` mid-attack; no combat callbacks are called yet, so real
-  movement inputs do not reach that state. Whether the real engine prevents
-  it is still **Unknown**; the instruction cap stays.
+- The 11 `walk`/`swim` runaway loops from the WP-G sweep needed `FireWeapon`
+  / `TargetCleared` mid-attack. Under real combat (WP-M) 10 of 11 are gone;
+  only `MONPIRAN:swim` still hits the cap, when a water unit is run on land.
+  The instruction cap stays.
 - Performance: about 58,800 ticks/s with 2 scripted monarchs (release build,
   stepping only; loading the ruleset and map takes well under a second).
 
