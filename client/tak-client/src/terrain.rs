@@ -68,6 +68,9 @@ pub struct TerrainData {
     pub chunks: Vec<ChunkImage>,
     /// Tile cells with no usable JPEG piece.
     pub missing: usize,
+    /// The TNT's large minimap as RGBA8 `(w, h, pixels)`, in the kingdom
+    /// palette (see [`load_minimap`]).
+    pub minimap: Option<(u32, u32, Vec<u8>)>,
 }
 
 impl TerrainData {
@@ -165,21 +168,40 @@ pub fn corner_heights(w: u32, h: u32, heights: &[u8]) -> Vec<f32> {
     out
 }
 
-/// Load heights and textures for `map` (VFS path without extension).
-pub fn load(vfs: &Vfs, map: &str) -> Result<TerrainData, String> {
+/// Load heights and textures for `map` (VFS path without extension);
+/// `palette` is the minimap palette (`palettes/<kingdom>.pcx`).
+pub fn load(vfs: &Vfs, map: &str, palette: Option<&str>) -> Result<TerrainData, String> {
     let path = format!("{map}.tnt");
     let bytes = vfs.read(&path).map_err(|e| format!("{path}: {e}"))?;
     let t = tnt::parse(&bytes).map_err(|e| format!("{path}: {e}"))?;
     let (w, h) = (t.width(), t.height());
     let corners = corner_heights(w, h, &t.heights);
     let (chunks, missing) = chunk_images(vfs, &t.tiles);
+    let minimap = load_minimap(vfs, &t, palette);
     Ok(TerrainData {
         cells: (w, h),
         corners,
         sea_level: t.header.sea_level as f32,
         chunks,
         missing,
+        minimap,
     })
+}
+
+/// The large minimap in the map's kingdom palette (**Believed**,
+/// `tnt.md`), as `tak-cli dump-map` draws it. Like the terrain mosaic it
+/// is screen-space art: it covers the mosaic, so minimap `(u, v)` is mosaic
+/// pixel `(u / w · map width, v / h · map height)`.
+pub fn load_minimap(vfs: &Vfs, t: &tnt::Tnt, palette: Option<&str>) -> Option<(u32, u32, Vec<u8>)> {
+    let m = t.minimap.as_ref()?;
+    let pal = palette.and_then(|p| crate::models::load_palette(vfs, p))?;
+    let mut rgba = Vec::with_capacity(m.pixels.len() * 4);
+    for &p in &m.pixels {
+        let [r, g, b] = pal.rgb(p);
+        rgba.extend_from_slice(&[r, g, b, 255]);
+    }
+    (m.width > 0 && m.height > 0 && rgba.len() == (m.width * m.height * 4) as usize)
+        .then_some((m.width, m.height, rgba))
 }
 
 fn chunk_images(vfs: &Vfs, tiles: &TileGrid) -> (Vec<ChunkImage>, usize) {
@@ -302,6 +324,7 @@ mod tests {
             sea_level: 0.0,
             chunks: Vec::new(),
             missing: 0,
+            minimap: None,
         }
     }
 

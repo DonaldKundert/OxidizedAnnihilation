@@ -34,7 +34,7 @@ use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp
 use crate::models::{BuiltModel, TextureIndex, load_model};
 use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
-use crate::view::{SimView, ViewGeom, f, pick_radius};
+use crate::view::{MinimapGeom, SimView, ViewGeom, f, pick_radius};
 
 /// Seconds per sim tick.
 const TICK_DT: f32 = 1.0 / 30.0;
@@ -160,7 +160,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if args.demo {
         session.log = crate::game::demo_log(&session);
     }
-    let ground = terrain::load(&vfs, &args.map)?;
+    let ground = terrain::load(&vfs, &args.map, session.map.palette.as_deref())?;
     let tex = TextureIndex::load(&vfs);
     eprintln!(
         "loaded {} ({}x{} cells, {} defs, {} textures + {} in anims/, {} missing tile pieces) in {:.2}s",
@@ -236,9 +236,16 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .init_resource::<SpriteCache>()
         .init_resource::<UnitTops>()
         .init_resource::<FxState>()
+        .init_resource::<MinimapState>()
         .add_systems(
             Startup,
-            (setup_scene, setup_hud, setup_gizmos, spawn_scenery),
+            (
+                setup_scene,
+                setup_hud,
+                setup_gizmos,
+                spawn_scenery,
+                setup_minimap,
+            ),
         )
         .add_systems(
             Update,
@@ -253,6 +260,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 animate_sprites,
                 showcase_system,
                 hud_system,
+                minimap_system,
                 gizmo_system,
                 fps_report,
             )
@@ -744,6 +752,7 @@ fn input_system(
     mut sim: NonSendMut<SimRes>,
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
+    mut minimap: ResMut<MinimapState>,
 ) {
     if let Ok(win) = windows.single() {
         cam.geom.size = [win.width(), win.height()];
@@ -766,11 +775,35 @@ fn input_system(
             }
         }
     }
+    // Minimap: a left click or drag on it moves the camera and is not
+    // passed to the mapper (so it neither selects nor deselects).
+    let mouse_pos = windows.single().ok().and_then(|w| w.cursor_position());
+    let mm_geom = minimap.geom(geom.size);
+    if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
+        && mouse.just_pressed(MouseButton::Left)
+        && mg.contains(pos.x, pos.y)
+    {
+        minimap.mouse_drag = true;
+    }
+    if minimap.mouse_drag {
+        if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
+            cam.geom.target = mg.target_at(pos.x, pos.y);
+        }
+        if !mouse.pressed(MouseButton::Left) {
+            minimap.mouse_drag = false;
+        }
+    }
+    let swallow_left =
+        minimap.mouse_drag || mouse.just_released(MouseButton::Left) && minimap.swallow_release;
+    minimap.swallow_release = minimap.mouse_drag;
     for (mb, b) in [
         (MouseButton::Left, InButton::MouseLeft),
         (MouseButton::Right, InButton::MouseRight),
         (MouseButton::Middle, InButton::MouseMiddle),
     ] {
+        if mb == MouseButton::Left && swallow_left {
+            continue;
+        }
         if mouse.just_pressed(mb) {
             events.push(EventKind::ButtonDown { button: b });
         }
@@ -790,7 +823,28 @@ fn input_system(
     }
     // One pad drives the mapper.
     if let Some(pad) = pads.iter().next() {
+        // A with the virtual cursor over the minimap jumps the camera there.
+        let c = input.mapper.cursor_world();
+        let (cx, cz) = (f(c.x), f(c.y));
+        let csp = geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
+        let mut swallow_a = false;
+        if let Some(mg) = mm_geom
+            && mg.contains(csp[0], csp[1])
+            && pad.just_pressed(GamepadButton::South)
+        {
+            cam.geom.target = mg.target_at(csp[0], csp[1]);
+            minimap.pad_swallow = true;
+        }
+        if minimap.pad_swallow {
+            swallow_a = true;
+            if pad.just_released(GamepadButton::South) || !pad.pressed(GamepadButton::South) {
+                minimap.pad_swallow = false;
+            }
+        }
         for (gb, b) in PAD_BUTTONS {
+            if gb == GamepadButton::South && swallow_a {
+                continue;
+            }
             if pad.just_pressed(gb) {
                 events.push(EventKind::ButtonDown { button: b });
             }
@@ -2128,6 +2182,186 @@ fn showcase_system(
             .with_rotation(heading_rotation(FRAC_PI_2));
         let root = commands.spawn((tf, Visibility::default())).id();
         spawn_static_pieces(&mut commands, &a, root);
+    }
+}
+
+/// Minimap width on screen, logical pixels (height follows the image).
+const MINIMAP_W: f32 = 230.0;
+/// Gap to the window edge.
+const MINIMAP_MARGIN: f32 = 8.0;
+
+/// Minimap layout and pointer state.
+#[derive(Resource, Default)]
+struct MinimapState {
+    /// Image size, if the map has a minimap.
+    image: Option<(u32, u32)>,
+    /// Map size in world units.
+    map: [f32; 2],
+    mouse_drag: bool,
+    swallow_release: bool,
+    pad_swallow: bool,
+}
+
+impl MinimapState {
+    /// Where the minimap is for a viewport (bottom-right corner).
+    fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
+        let (iw, ih) = self.image?;
+        let w = MINIMAP_W;
+        let h = w * ih as f32 / iw.max(1) as f32;
+        Some(MinimapGeom {
+            rect: [
+                view[0] - w - MINIMAP_MARGIN,
+                view[1] - h - MINIMAP_MARGIN,
+                w,
+                h,
+            ],
+            map: self.map,
+        })
+    }
+}
+
+#[derive(Component)]
+struct MinimapRoot;
+#[derive(Component)]
+struct MinimapView;
+#[derive(Component)]
+struct MinimapDot(usize);
+
+/// Team colours for minimap dots (**Chosen**: TA's player order blue, red,
+/// white, green, yellow, purple, cyan, orange).
+fn team_color(player: u8) -> Color {
+    const C: [(u8, u8, u8); 8] = [
+        (60, 120, 255),
+        (230, 40, 30),
+        (235, 235, 235),
+        (40, 200, 60),
+        (240, 220, 40),
+        (170, 60, 220),
+        (40, 220, 220),
+        (250, 140, 30),
+    ];
+    let (r, g, b) = C[usize::from(player) % C.len()];
+    Color::srgb_u8(r, g, b)
+}
+
+fn setup_minimap(
+    mut commands: Commands,
+    ground: Res<Ground>,
+    mut images: ResMut<Assets<Image>>,
+    mut mm: ResMut<MinimapState>,
+) {
+    let t = &ground.0;
+    mm.map = [
+        t.cells.0 as f32 * terrain::CELL,
+        t.cells.1 as f32 * terrain::CELL,
+    ];
+    let Some((w, h, rgba)) = &t.minimap else {
+        return;
+    };
+    mm.image = Some((*w, *h));
+    let img = images.add(rgba_image(*w, *h, rgba.clone()));
+    let mh = MINIMAP_W * *h as f32 / (*w).max(1) as f32;
+    let root = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(MINIMAP_MARGIN),
+                bottom: Val::Px(MINIMAP_MARGIN),
+                width: Val::Px(MINIMAP_W),
+                height: Val::Px(mh),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            ImageNode::new(img),
+            MinimapRoot,
+        ))
+        .id();
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BorderColor::all(Color::WHITE),
+        MinimapView,
+        ChildOf(root),
+    ));
+}
+
+/// Unit dots in team colours and the camera rectangle.
+fn minimap_system(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    cam: Res<CamState>,
+    mm: Res<MinimapState>,
+    root: Query<Entity, With<MinimapRoot>>,
+    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>)>,
+    mut dots: Query<
+        (
+            &MinimapDot,
+            &mut Node,
+            &mut BackgroundColor,
+            &mut Visibility,
+        ),
+        Without<MinimapView>,
+    >,
+) {
+    let Ok(root) = root.single() else { return };
+    let Some(g) = mm.geom(cam.geom.size) else {
+        return;
+    };
+    if let Ok(mut n) = view.single_mut() {
+        let r = g.view_rect(&cam.geom);
+        n.left = Val::Px(r[0]);
+        n.top = Val::Px(r[1]);
+        n.width = Val::Px(r[2].max(2.0));
+        n.height = Val::Px(r[3].max(2.0));
+    }
+    let units = &sim.curr.units;
+    let mut have = 0;
+    for (d, mut n, mut bg, mut v) in &mut dots {
+        have = have.max(d.0 + 1);
+        match units.get(d.0) {
+            Some(u) => {
+                let p = g.to_mini(u.x, u.y - crate::view::SHEAR * u.ground);
+                let size = if sim
+                    .session
+                    .def(u.def)
+                    .is_some_and(|d| d.footprint.0.max(d.footprint.1) >= 3)
+                {
+                    6.0
+                } else {
+                    4.0
+                };
+                n.left = Val::Px(p[0] - size / 2.0);
+                n.top = Val::Px(p[1] - size / 2.0);
+                n.width = Val::Px(size);
+                n.height = Val::Px(size);
+                bg.0 = team_color(u.owner);
+                if *v != Visibility::Inherited {
+                    *v = Visibility::Inherited;
+                }
+            }
+            None => {
+                if *v != Visibility::Hidden {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
+    }
+    for i in have..units.len() {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(3.0),
+                height: Val::Px(3.0),
+                ..default()
+            },
+            BackgroundColor(Color::WHITE),
+            Visibility::Hidden,
+            MinimapDot(i),
+            ChildOf(root),
+        ));
     }
 }
 

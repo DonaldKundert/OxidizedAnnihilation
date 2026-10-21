@@ -341,6 +341,20 @@ Findings and choices:
 - Not done: build sparkles (`sidedata` `buildsparklygaf`), dust when
   walking, Remote Effect rings (`radiusart*`), weapon `shadowart`, sound.
 
+### Minimap (WP-R)
+
+Bottom right, 230 px wide: the TNT's large minimap in the OTA kingdom's
+palette (`palettes/<kingdom>.pcx`, as `tak-cli dump-map` draws it). Like
+the terrain mosaic it is screen-space art covering the whole map, so it
+maps linearly to projected coordinates `(x, z − height/2)`; a camera
+target is exactly such a point, so the white camera rectangle is the
+view's extent and a click puts the clicked point at the screen centre
+(`view::MinimapGeom`, tested). Unit dots in team colours (players 0–7:
+blue, red, white, green, yellow, purple, cyan, orange; **Chosen** after
+TA), larger for footprints of 3+ cells. A left click or drag on it moves
+the camera without reaching the mapper (no select/deselect); with a
+gamepad, A while the virtual cursor is over it does the same.
+
 ### HUD and overlays
 
 Top bar: map, tick, pause/speed, every player's mana, storage and income.
@@ -368,7 +382,7 @@ slots next to the cursor from `Mapper::wheel()`.
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No minimap, no fog of war, no audio, no in-HUD click targets (build menu
+- No fog of war, no audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet
   shown in the HUD.

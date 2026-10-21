@@ -170,6 +170,52 @@ impl ViewGeom {
     }
 }
 
+/// The minimap's place on screen and the map it shows. The minimap is
+/// screen-space art like the terrain mosaic, so it maps linearly to
+/// *projected* world coordinates `(x, z - SHEAR * height)`, which are also
+/// what a camera target means ([`ViewGeom::target`] is on the height-0
+/// plane).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MinimapGeom {
+    /// `(left, top, width, height)` in logical pixels.
+    pub rect: [f32; 4],
+    /// Map size in world units (cells × 16).
+    pub map: [f32; 2],
+}
+
+impl MinimapGeom {
+    /// Whether a screen pixel is on the minimap.
+    pub fn contains(&self, sx: f32, sy: f32) -> bool {
+        let [l, t, w, h] = self.rect;
+        sx >= l && sy >= t && sx < l + w && sy < t + h
+    }
+
+    /// Minimap pixel (relative to its top-left) of a projected world point.
+    pub fn to_mini(&self, x: f32, projected_z: f32) -> [f32; 2] {
+        [
+            x / self.map[0] * self.rect[2],
+            projected_z / self.map[1] * self.rect[3],
+        ]
+    }
+
+    /// Projected world point (a camera target) under a screen pixel on the
+    /// minimap, clamped to the map.
+    pub fn target_at(&self, sx: f32, sy: f32) -> [f32; 2] {
+        let u = ((sx - self.rect[0]) / self.rect[2]).clamp(0.0, 1.0);
+        let v = ((sy - self.rect[1]) / self.rect[3]).clamp(0.0, 1.0);
+        [u * self.map[0], v * self.map[1]]
+    }
+
+    /// The camera's view as a minimap rectangle `(left, top, w, h)`,
+    /// relative to the minimap's top-left.
+    pub fn view_rect(&self, g: &ViewGeom) -> [f32; 4] {
+        let (hw, hh) = (g.size[0] * g.zoom / 2.0, g.size[1] * g.zoom / 2.0);
+        let a = self.to_mini(g.target[0] - hw, g.target[1] - hh);
+        let b = self.to_mini(g.target[0] + hw, g.target[1] + hh);
+        [a[0], a[1], b[0] - a[0], b[1] - a[1]]
+    }
+}
+
 /// `Fx` to f32.
 pub fn f(v: Fx) -> f32 {
     v.raw() as f32 / 65536.0
@@ -238,6 +284,30 @@ mod tests {
         assert!((clip(3) - 1.0).abs() < 1e-6);
         // Nearer (higher) points get larger depth, inside 0..1.
         assert!(m[1][2] > 0.0 && clip(2) > 0.0 && clip(2) < 1.0);
+    }
+
+    #[test]
+    fn minimap_round_trip_and_view_rect() {
+        let m = MinimapGeom {
+            rect: [1000.0, 500.0, 200.0, 100.0],
+            map: [3000.0, 1500.0],
+        };
+        assert!(m.contains(1100.0, 550.0) && !m.contains(990.0, 550.0));
+        let t = m.target_at(1050.0, 525.0);
+        assert!((t[0] - 750.0).abs() < 1e-3 && (t[1] - 375.0).abs() < 1e-3);
+        let p = m.to_mini(t[0], t[1]);
+        assert!((p[0] - 50.0).abs() < 1e-3 && (p[1] - 25.0).abs() < 1e-3);
+        // Clicking puts that point at the screen centre: the view rectangle
+        // is centred on it.
+        let g = ViewGeom {
+            target: t,
+            zoom: 1.0,
+            size: [300.0, 150.0],
+        };
+        let r = m.view_rect(&g);
+        assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
+        assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
+        assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
     }
 
     #[test]
