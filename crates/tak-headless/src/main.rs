@@ -123,6 +123,20 @@ enum Cmd {
         #[arg(long)]
         hashes: PathBuf,
     },
+    /// Run a match and print every player's mana over time.
+    EconomyReport {
+        #[command(flatten)]
+        source: Source,
+        /// Command log JSON (omit for no commands).
+        #[arg(long)]
+        log: Option<PathBuf>,
+        /// Number of ticks to run.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=MAX_TICKS as i64))]
+        ticks: u32,
+        /// Report every this many ticks.
+        #[arg(long, default_value_t = 30)]
+        every: u32,
+    },
     /// Print a synthetic example scenario (flat map, monarchs in corners).
     ExampleScenario {
         /// World RNG seed.
@@ -209,6 +223,24 @@ fn real_main() -> Result<ExitCode, Error> {
                     Ok(ExitCode::from(1))
                 }
             }
+        }
+        Cmd::EconomyReport {
+            source,
+            log,
+            ticks,
+            every,
+        } => {
+            let log = load_log(log.as_deref())?;
+            let mut sim = match source.load()? {
+                Loaded::Synthetic(s) => tak_sim::Sim::new(&s)?,
+                Loaded::Map(m, true) => {
+                    tak_sim::Sim::with_scripts(&m.scenario, Box::new(m.scripts))?
+                }
+                Loaded::Map(m, false) => tak_sim::Sim::new(&m.scenario)?,
+            };
+            let report = tak_headless::economy_report::run(&mut sim, &log, ticks, every);
+            print!("{report}");
+            Ok(ExitCode::SUCCESS)
         }
         Cmd::ExampleScenario { seed, players } => {
             println!("{}", example_scenario(seed, players).to_json_pretty());

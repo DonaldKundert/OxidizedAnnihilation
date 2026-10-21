@@ -18,6 +18,8 @@
 
 use std::path::Path;
 
+pub mod economy_report;
+
 use tak_commands::{CommandLog, LogError};
 use tak_sim::content::ContentError;
 use tak_sim::{
