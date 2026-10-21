@@ -234,7 +234,7 @@ impl World {
             static_digest,
             pathing: Default::default(),
             combat: Default::default(),
-            economy: Default::default(),
+            economy: crate::economy::EconomyState::new(&scenario.economy, scenario.players.len()),
             construction: Default::default(),
         })
     }
@@ -439,11 +439,13 @@ mod tests {
                 turnrate: 1000,
                 footprintx: 1,
                 footprintz: 1,
+                economy: Default::default(),
             }],
             players: vec![PlayerSpec {
                 start: 0,
                 monarch: UnitDefId(0),
             }],
+            economy: Default::default(),
         })
         .unwrap()
     }

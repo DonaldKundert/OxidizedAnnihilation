@@ -22,6 +22,7 @@ pub fn monarch_def(name: &str) -> UnitDef {
         turnrate: 728,
         footprintx: 2,
         footprintz: 2,
+        economy: Default::default(),
     }
 }
 
@@ -48,6 +49,7 @@ pub fn example_scenario(seed: u64, players: usize) -> Scenario {
                 monarch: UnitDefId((i % 2) as u32),
             })
             .collect(),
+        economy: Default::default(),
     }
 }
 

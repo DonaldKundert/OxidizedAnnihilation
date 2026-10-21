@@ -34,6 +34,9 @@ pub struct UnitDef {
     pub footprintx: u8,
     /// FBI `FootprintZ`, in footprint squares.
     pub footprintz: u8,
+    /// Economy keys (WP-N).
+    #[serde(default)]
+    pub economy: crate::economy::EconomyDef,
 }
 
 impl UnitDef {
@@ -59,6 +62,7 @@ impl UnitDef {
         if self.name.len() > 256 {
             return bad("name too long");
         }
+        self.economy.validate(&self.name)?;
         Ok(())
     }
 
@@ -70,6 +74,7 @@ impl UnitDef {
         h.u16(self.turnrate);
         h.u8(self.footprintx);
         h.u8(self.footprintz);
+        self.economy.hash(h);
     }
 }
 
