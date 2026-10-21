@@ -65,6 +65,7 @@ fn scenario() -> Scenario {
             .collect(),
         economy: Box::new(setup),
         features: Default::default(),
+        victory: Default::default(),
     }
 }
 

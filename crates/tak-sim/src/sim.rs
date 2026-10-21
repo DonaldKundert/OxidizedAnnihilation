@@ -74,6 +74,7 @@ impl Sim {
         crate::pathfinding::tick(&mut self.world, self.scripts.as_mut());
         systems::movement(&mut self.world);
         crate::combat::tick(&mut self.world, self.scripts.as_mut());
+        crate::victory::tick(&mut self.world, self.scripts.as_mut());
         for id in self.world.unit_ids() {
             if let Some(ctx) = self.ctx(tick, id) {
                 self.scripts.tick_unit(&ctx, &mut self.world.rng);

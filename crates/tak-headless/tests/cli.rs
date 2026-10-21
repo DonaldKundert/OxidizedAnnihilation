@@ -61,6 +61,8 @@ fn two_processes_agree_over_ten_thousand_ticks() {
             s(&out),
         ]);
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        // The outcome line (WP-U): unarmed monarchs never end the match.
+        assert!(String::from_utf8_lossy(&r.stderr).contains("match: running"));
         outputs.push(std::fs::read_to_string(&out).unwrap());
     }
     assert_eq!(outputs[0], outputs[1], "two processes disagree");

@@ -202,6 +202,8 @@ pub struct World {
     pub construction: crate::construction::ConstructionState,
     /// Placed features and corpses (WP-P).
     pub features: crate::features::FeatureState,
+    /// Defeat and match result (WP-U).
+    pub(crate) victory: crate::victory::VictoryState,
 }
 
 impl World {
@@ -239,6 +241,7 @@ impl World {
             economy: crate::economy::EconomyState::new(&scenario.economy, scenario.players.len()),
             construction: Default::default(),
             features: crate::features::FeatureState::new(&scenario.features),
+            victory: crate::victory::VictoryState::new(&scenario.victory, scenario.players.len()),
         })
     }
 
@@ -420,6 +423,7 @@ impl World {
         self.economy.hash(h);
         self.construction.hash(h);
         self.features.hash(h);
+        self.victory.hash(h);
     }
 }
 
@@ -454,6 +458,7 @@ mod tests {
             }],
             economy: Default::default(),
             features: Default::default(),
+            victory: Default::default(),
         })
         .unwrap()
     }

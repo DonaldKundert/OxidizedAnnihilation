@@ -28,7 +28,7 @@ ticks.
 30 ticks per second. System order per tick: spawn monarchs (tick 0 only, then
 `ScriptHost::create_unit` per spawn) → commands → construction → economy →
 orders (pop reached waypoints) → pathfinding → movement → combat (ending
-with feature decay, WP-P) → `ScriptHost::tick_unit` per live unit in slot
+with feature decay, WP-P) → victory (WP-U) → `ScriptHost::tick_unit` per live unit in slot
 order → advance tick → hash (world, then script host). Commands are the only
 input. The authoritative list is the module doc of `systems.rs`.
 
@@ -189,6 +189,112 @@ Writes to any port are stored per unit (hashed); writes to ports other than
   The instruction cap stays.
 - Performance: about 58,800 ticks/s with 2 scripted monarchs (release build,
   stepping only; loading the ruleset and map takes well under a second).
+
+## Victory and defeat (WP-U)
+
+`crates/tak-sim/src/victory.rs`; tests `crates/tak-sim/tests/victory*.rs`.
+API for the client: `Sim::match_state() -> &MatchState` (`Running` or
+`Over { winners }`), `World::is_defeated(PlayerId)`, and `World::victory()`
+(decision tick, per-player defeat tick, `summary()`). Rules are
+`Scenario::victory` (`VictorySetup`, optional in JSON). The system runs every
+tick right after combat; its state (setup digest, result, defeat ticks,
+mission counters) is hashed. `tak-headless run` prints `match: running` or
+`match: over at tick T: winners [..]` on stderr.
+
+Sources: the install's lobby GUIs (`guis/battlemenumulti.gui`,
+`BattleMenuSingle.gui`: a **Monarch Expendable** checkbox, "Game continues
+if monarch is killed", control `MonarchDeath`; team buttons Team 1-4); the
+OTA condition census (`tak-cli keys --ext ota`, per-map dump); Nanolathe's MIT
+research on the TA executable (`research/retail-executable-spec/08`,
+"Victory and defeat triggers", "Commander death: the whole chain"
+[R-SKIR-01 §3], [R-TRIG-01 §1-§6]). The install's `readme.htm` says nothing
+about end conditions. Kingdoms descends from TA's engine, so TA rules are
+**Believed** for Kingdoms unless the data says otherwise.
+
+### Skirmish (default)
+
+TA's skirmish and multiplayer sessions never read the OTA condition keys
+(they are polled only in campaign sessions), and none of the 236 non-mission
+maps author any. **Known** (no keys in `kmap/`), **Believed** (TA).
+
+| Rule | Ours | Tag |
+|---|---|---|
+| Default defeat | the monarch dies (`DefeatRule::MonarchKilled`, "Monarch Expendable" unticked) | Believed (TA rule word 1 "Game Ends"; Kingdoms lobby box) |
+| Alternative | `DefeatRule::AllUnitsKilled`: only losing every unit defeats ("Monarch Expendable") | Known option, Believed semantics (TA rule 0) |
+| Either rule | a player that has had units and has none left (dying units still count until removed) is defeated | Believed (TA: `live unit count == 0`) |
+| When | monarch: the tick its death starts; wipe-out: the tick the last unit is removed | Chosen (TA files the death when the dying unit is processed) |
+| Defeated player's units | `DefeatedUnits::SelfDestruct` (default): each living unit takes 30000 damage (explosion kind) through the normal damage path, in slot order, and plays its death; `Remain`: they stay, keep defending, take no orders | Believed (TA's owner sweep, 30000 self-damage); Remain is Chosen |
+| Units that survive the sweep | units outside combat or with more than 30000 health stay, inert | Believed (TA uses the same damage path) |
+| Commands | dropped for defeated players (`apply_commands`) | Chosen |
+| Teams | `VictorySetup::teams` (per player, `None` = alone); only victory reads them, combat still treats every other player as an enemy | Known (lobby teams), Chosen representation |
+| Over | when the undefeated players all share one team; `winners` = those players; a simultaneous wipe-out is a draw (`winners: []`) | Believed (TA kind-2 sweep: no non-allied slot with units) |
+| One team from the start | never ends by elimination (sandboxes, tests) | Chosen |
+| After Over | nothing in victory changes again; the sim keeps ticking | Chosen |
+
+**Difference from TA, documented:** TA polls defeat once per second and
+latches the end ~150 ticks (five polls) after the first true poll, which is
+when its end screen appears. We decide on the tick itself; a client that
+wants TA's pause can delay its display by 150 ticks. TA's rule 2
+("Deathmatch", monarch respawn) is not implemented; the Kingdoms lobby shows
+only the checkbox.
+
+### Missions (`VictorySetup::mission`)
+
+`MissionRules::from_conditions(&OtaDef::conditions, &unit_defs)` parses the
+`[GLOBALHEADER]` keys; `Scenario::from_content` leaves it `None` (a skirmish
+on any map), so missions are opt-in for a campaign loader. Player 0 is
+"local" (OTA `Player=1`), player 1 the "enemy" (TA's literal slots, no
+alliance lookup). Victory needs **all** victory conditions (none authored:
+`DestroyAllUnits`), defeat **any** defeat condition (none: `AllUnitsKilled`);
+victory wins a tie. On victory the enemy is marked defeated, on defeat the
+local player; no sweep. Conditions are evaluated every tick (TA: once per
+second). Unit types resolve by case-insensitive name; a name-only key whose
+value carries extra arguments stays verbatim and matches nothing (TA).
+"Commander" is the owner's monarch definition.
+
+| Key (files in corpus) | Meaning | Status |
+|---|---|---|
+| `destroyallunits` (22) | enemy has no units (dying count) | implemented, re-evaluated |
+| `killenemycommander` (2) | enemy monarch removed | implemented |
+| `killallmobileunits` (2) | enemy's last mobile unit removed; mobile = `maxvelocity > 0` | implemented (Believed proxy for TA's `BMcode`) |
+| `killalloftype` (6) | enemy's last unit of the type removed | implemented |
+| `killunittype` (2, `TYPE, n`) | n enemy units of the type removed | implemented |
+| `moveunittoradius` (8, `TYPE\|ANYTYPE, x, z, r`) | a complete, living local unit within r of (x, z) | implemented |
+| `unittypepassesx/z` (3/4, `TYPE\|ANYTYPE, c`) | a local unit's cell within 2 cells of column/row c | implemented |
+| `victorytimerrunsout` (4, seconds) | tick >= seconds × 30 | implemented |
+| `commanderkilled` (15) | local monarch removed | implemented |
+| `allunitskilled` (29) | no complete, living local unit | implemented |
+| `allunitskilledoftype` (21) | last unit of the type (local or enemy) removed | implemented |
+| `unittypekilled` (2, `TYPE, n`) | n units of the type (any owner) removed | implemented |
+| `deathtimerrunsout` (1, seconds) | tick >= seconds × 30 | implemented |
+| `buildunittype`, `anyunitpassesx/z` | TA vocabulary, not in the Kingdoms corpus | implemented |
+| `captureunittype` | needs capture | unsupported (listed in `MissionRules::unsupported`) |
+| `useonlyunits` (6) | a build restriction, not a condition | unsupported |
+
+Coordinates: **Believed whole 16-unit cells** in Kingdoms, not TA's pixels.
+Evidence: `takmission42_dh` (200 × 350 cells) has the wagon at row 38 and
+`UnitTypePassesZ=NPCWAGON, 321`; `takmission40_dh` (400 × 320) has
+`UnitTypePassesX=ZONHURT, 384`; `takmission28_dh` has the unit at row 262 and
+the line at row 11. Each line lies near the far map edge only if read as
+cells. A cell is centred at `16c + 8` (as start positions, Chosen); the
+radius is `16r`; `UnitTypePasses` tests the unit's centre cell (TA: its
+footprint anchor cell), tolerance `|cell - c| < 3` (TA). TA's projected-view
+de-projection of `MoveUnitToRadius` is not applied (Unknown for Kingdoms).
+Removal-notified conditions are found by diffing the unit set each tick
+(TA notifies on removal; same result, removals are seen at the end of the
+tick). Mission scenarios still spawn one monarch per player; placing the
+OTA `[UNITS]` is the campaign loader's job (not built).
+
+### Results
+
+- Synthetic (`tests/victory.rs`): each rule above, teams, draws, dropped
+  commands, every implemented mission family, timers on the exact tick, and
+  a cross-process hash comparison of a monarch duel (decided at tick 361)
+  and a mission kill (tick 32).
+- Real map (`tests/victory_real_map.rs`, `TAK_DATA_DIR`): `ARAKING` and
+  `ZONHUNT` placed face to face on Adamantine Gate with their scripts,
+  ordered to attack each other: the Zhon monarch dies, the match is over at
+  tick 939 with `winners [0]`, player 1 defeated, zero VM errors.
 
 ## Unknown / open
 

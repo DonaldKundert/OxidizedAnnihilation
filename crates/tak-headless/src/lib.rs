@@ -98,6 +98,22 @@ pub fn run(scenario: &Scenario, log: &CommandLog, ticks: u32) -> Result<Vec<u64>
     Ok(run_scenario(scenario, log, ticks)?)
 }
 
+/// [`run`], also returning the match outcome line ([`outcome`]).
+pub fn run_with_outcome(
+    scenario: &Scenario,
+    log: &CommandLog,
+    ticks: u32,
+) -> Result<(Vec<u64>, String), Error> {
+    let mut sim = Sim::new(scenario)?;
+    let hashes = sim.run(log, ticks);
+    Ok((hashes, outcome(&sim)))
+}
+
+/// `match: running` or `match: over at tick T: winners [..]` (WP-U).
+pub fn outcome(sim: &Sim) -> String {
+    format!("match: {}", sim.world().victory().summary())
+}
+
 /// Load a real-map match from an install: `map` is a VFS path without
 /// extension (`kmap/Adamantine Gate`), `players` a comma-separated side
 /// list (`ARA,ZON`).
@@ -120,6 +136,8 @@ pub struct MatchRun {
     pub millis: u128,
     /// Final position of each player's monarch, whole world units.
     pub monarchs: Vec<Option<(i32, i32)>>,
+    /// The match outcome line ([`outcome`]).
+    pub outcome: String,
 }
 
 impl MatchRun {
@@ -142,6 +160,8 @@ impl MatchRun {
                 None => s.push_str(&format!("player {i} has no monarch\n")),
             }
         }
+        s.push_str(&self.outcome);
+        s.push('\n');
         s.push_str(&self.stats.report());
         s
     }
@@ -171,6 +191,7 @@ pub fn run_match(m: Match, log: &CommandLog, ticks: u32, scripts: bool) -> Resul
         stats: sim.script_stats(),
         millis,
         monarchs,
+        outcome: outcome(&sim),
     })
 }
 

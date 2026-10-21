@@ -114,6 +114,7 @@ pub fn scenario() -> Scenario {
         seed: 3,
         economy: Default::default(),
         features: Default::default(),
+        victory: Default::default(),
         map: MapInfo::flat(
             1024,
             1024,

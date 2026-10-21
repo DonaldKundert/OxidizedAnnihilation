@@ -81,6 +81,7 @@ fn real_map_two_processes_agree_over_ten_thousand_ticks() {
         assert!(stderr.contains("ran 10000 ticks"), "{stderr}");
         assert!(stderr.contains("script units: 2"), "{stderr}");
         assert!(stderr.contains("other thread errors: 0"), "{stderr}");
+        assert!(stderr.contains("match: running"), "{stderr}");
         outputs.push(std::fs::read_to_string(&out).unwrap());
     }
     assert_eq!(outputs[0], outputs[1], "two processes disagree");
