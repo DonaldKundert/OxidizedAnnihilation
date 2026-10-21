@@ -1,0 +1,16 @@
+[package]
+name = "tak-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tak-content.workspace = true
+tak-script.workspace = true
+tak-math.workspace = true
+tak-commands.workspace = true

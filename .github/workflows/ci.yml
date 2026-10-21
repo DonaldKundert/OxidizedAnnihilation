@@ -1,0 +1,20 @@
+name: CI
+on:
+  push:
+  pull_request:
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # TAK_DATA_DIR is deliberately unset: corpus tests must skip cleanly.
+      - run: cargo test --workspace

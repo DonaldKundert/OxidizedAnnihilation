@@ -1,0 +1,12 @@
+/target
+# Never commit game data or dumps of it.
+*.hpi
+*.HPI
+*.kmp
+*.ccx
+*.cob
+*.3do
+*.gaf
+*.tnt
+/out/
+/survey*/
