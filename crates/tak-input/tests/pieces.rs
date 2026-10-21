@@ -10,7 +10,7 @@ use tak_input::*;
 use tak_math::{Angle, Fx, Vec2};
 
 fn t() -> Tuning {
-    Tuning::default()
+    Tuning::wp_j()
 }
 
 fn ev(t: u32, kind: EventKind) -> InputEvent {
@@ -356,7 +356,7 @@ fn sims(out: &[Output]) -> Vec<SimCommand> {
 #[test]
 fn right_stick_pans_camera() {
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_controller());
+    let mut m = Mapper::new(Profile::wp_j_controller());
     run(
         &mut m,
         &w,
@@ -389,7 +389,7 @@ fn pending_single_tap_resolves_before_another_input() {
     // Y (single tap pending) then X quickly: the same-type selection must
     // happen before the order, not after it.
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_controller());
+    let mut m = Mapper::new(Profile::wp_j_controller());
     let out = run(
         &mut m,
         &w,
@@ -421,7 +421,7 @@ fn chord_modifier_suppresses_its_own_tap() {
     // Mouse/keyboard: ctrl + 3 assigns; releasing ctrl does nothing else, and
     // a bare 3 later recalls.
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_mouse_keyboard());
+    let mut m = Mapper::new(common::wp_j_mk());
     let k = |t, down: bool, key: &str| {
         ev(
             t,
@@ -466,7 +466,7 @@ fn chord_modifier_suppresses_its_own_tap() {
 #[test]
 fn mouse_drag_selects_a_circle_and_click_selects_one() {
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_mouse_keyboard());
+    let mut m = Mapper::new(common::wp_j_mk());
     let out = run(
         &mut m,
         &w,
@@ -522,7 +522,7 @@ fn mouse_drag_selects_a_circle_and_click_selects_one() {
 #[test]
 fn moving_brush_paints_additively() {
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_controller());
+    let mut m = Mapper::new(Profile::wp_j_controller());
     // Hold A on u1 (brush radius 16 at activation), then sweep right 90 px
     // over u2 at 700.
     let out = run(
@@ -578,7 +578,7 @@ fn moving_brush_paints_additively() {
 #[test]
 fn cursor_is_clamped_to_viewport() {
     let w = small_world();
-    let mut m = Mapper::new(Profile::default_controller());
+    let mut m = Mapper::new(Profile::wp_j_controller());
     run(
         &mut m,
         &w,
@@ -616,7 +616,7 @@ fn cursor_is_clamped_to_viewport() {
 fn orders_skip_dead_units() {
     let mut spec: WorldSpec = small_world().spec;
     let w = TestWorld::new(spec.clone());
-    let mut m = Mapper::new(Profile::default_mouse_keyboard());
+    let mut m = Mapper::new(common::wp_j_mk());
     run(
         &mut m,
         &w,

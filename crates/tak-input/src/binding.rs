@@ -39,6 +39,13 @@ pub enum Gesture {
     Hold,
     /// Second down within `double_tap_ms` of a release.
     DoubleTap,
+    /// Second down within `double_tap_ms` of a tap's release, *without*
+    /// delaying that first tap: the tap fires at once, and the second press
+    /// fires this instead of its own tap or hold. For actions that refine
+    /// the tap's (Halo Wars: tap A selects one unit, a second tap selects
+    /// that type on screen). A `double_tap` binding on the same trigger
+    /// takes precedence.
+    SecondTap,
 }
 
 /// What a binding does. Actions marked *held* last from their gesture until
@@ -68,6 +75,18 @@ pub enum Action {
         /// On screen or whole map.
         scope: Scope,
     },
+    /// Select every own unit on screen (Halo Wars "local") or on the map
+    /// ("global").
+    SelectAll {
+        /// On screen or whole map.
+        scope: Scope,
+    },
+    /// Toggle the camera following the selection (cancelled by panning).
+    FollowSelection,
+    /// *Held.* Right stick zooms instead of panning.
+    ZoomModifier,
+    /// Open or close the live tuning overlay (client).
+    ToggleOverlay,
     /// Store the selection as a control group.
     AssignGroup {
         /// Group.
@@ -124,6 +143,7 @@ impl Action {
                 | Action::QueueModifier
                 | Action::CommandWheel
                 | Action::BuildWheel
+                | Action::ZoomModifier
         )
     }
 }
@@ -191,9 +211,26 @@ pub struct Profile {
     /// Command wheel slots, clockwise from the top.
     #[serde(default)]
     pub command_wheel: Vec<Action>,
+    /// Command wheel with nothing selected, when `tuning.wheel_context` is
+    /// on.
+    #[serde(default = "default_idle_wheel")]
+    pub idle_wheel: Vec<Action>,
+}
+
+fn default_idle_wheel() -> Vec<Action> {
+    vec![
+        Action::CycleIdleBuilder,
+        Action::JumpToAlert,
+        Action::CenterOnMonarch,
+        Action::SelectAll {
+            scope: Scope::OnScreen,
+        },
+        Action::SelectAll { scope: Scope::Map },
+    ]
 }
 
 const CONTROLLER_JSON: &str = include_str!("profiles/controller.json");
+const WP_J_CONTROLLER_JSON: &str = include_str!("profiles/wp_j_controller.json");
 const MOUSE_KEYBOARD_JSON: &str = include_str!("profiles/mouse_keyboard.json");
 
 impl Profile {
@@ -236,9 +273,16 @@ impl Profile {
                 self.tuning.wheel_max_slots,
             ));
         }
+        if self.idle_wheel.len() > usize::from(self.tuning.wheel_max_slots) {
+            return Err(ProfileError::WheelTooLarge(
+                self.idle_wheel.len(),
+                self.tuning.wheel_max_slots,
+            ));
+        }
         if let Some((i, a)) = self
             .command_wheel
             .iter()
+            .chain(&self.idle_wheel)
             .enumerate()
             .find(|(_, a)| a.is_held())
         {
@@ -250,6 +294,26 @@ impl Profile {
     /// The default gamepad profile (`src/profiles/controller.json`).
     pub fn default_controller() -> Profile {
         Profile::from_json(CONTROLLER_JSON).expect("embedded controller profile is valid")
+    }
+
+    /// The WP-J controller profile and tuning, unchanged (Y / double Y for
+    /// same-type select, [`Tuning::wp_j`]). Kept for the WP-J tests and the
+    /// feel lab's baseline.
+    pub fn wp_j_controller() -> Profile {
+        let mut p =
+            Profile::from_json(WP_J_CONTROLLER_JSON).expect("embedded WP-J profile is valid");
+        p.tuning = Tuning::wp_j();
+        p
+    }
+
+    /// The default controller and mouse/keyboard profiles merged into one
+    /// (what the client uses: both devices drive one mapper).
+    pub fn default_combined() -> Profile {
+        let mut p = Profile::default_controller();
+        p.name = "controller+mouse_keyboard".into();
+        p.bindings
+            .extend(Profile::default_mouse_keyboard().bindings);
+        p
     }
 
     /// The default mouse and keyboard profile

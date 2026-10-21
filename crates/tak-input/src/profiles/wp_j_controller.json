@@ -1,0 +1,249 @@
+{
+  "name": "WP-J controller",
+  "bindings": [
+    {
+      "input": {
+        "button": "a"
+      },
+      "gesture": "tap",
+      "action": {
+        "type": "select"
+      }
+    },
+    {
+      "input": {
+        "button": "a"
+      },
+      "gesture": "hold",
+      "action": {
+        "type": "brush"
+      }
+    },
+    {
+      "input": {
+        "button": "x"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "context"
+      }
+    },
+    {
+      "input": {
+        "button": "x"
+      },
+      "with": {
+        "button": "rb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "context",
+        "append": true
+      }
+    },
+    {
+      "input": {
+        "button": "y"
+      },
+      "gesture": "tap",
+      "action": {
+        "type": "select_same_type",
+        "scope": "on_screen"
+      }
+    },
+    {
+      "input": {
+        "button": "y"
+      },
+      "gesture": "double_tap",
+      "action": {
+        "type": "select_same_type",
+        "scope": "map"
+      }
+    },
+    {
+      "input": {
+        "button": "b"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "cancel"
+      }
+    },
+    {
+      "input": {
+        "button": "lt"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "command_wheel"
+      }
+    },
+    {
+      "input": {
+        "button": "lb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "build_wheel"
+      }
+    },
+    {
+      "input": {
+        "button": "rt"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "precision"
+      }
+    },
+    {
+      "input": {
+        "button": "r3"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "center_on_monarch"
+      }
+    },
+    {
+      "input": {
+        "button": "view"
+      },
+      "gesture": "tap",
+      "action": {
+        "type": "jump_to_alert"
+      }
+    },
+    {
+      "input": {
+        "button": "view"
+      },
+      "gesture": "hold",
+      "action": {
+        "type": "cycle_idle_builder"
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_up"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 1
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_up"
+      },
+      "with": {
+        "button": "rb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 1
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_right"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 2
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_right"
+      },
+      "with": {
+        "button": "rb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 2
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_down"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 3
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_down"
+      },
+      "with": {
+        "button": "rb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 3
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_left"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "recall_group",
+        "group": 4
+      }
+    },
+    {
+      "input": {
+        "button": "dpad_left"
+      },
+      "with": {
+        "button": "rb"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "assign_group",
+        "group": 4
+      }
+    }
+  ],
+  "command_wheel": [
+    {
+      "type": "stop"
+    },
+    {
+      "type": "patrol_mode"
+    },
+    {
+      "type": "guard_mode"
+    },
+    {
+      "type": "set_fire_state",
+      "state": "hold_fire"
+    },
+    {
+      "type": "set_fire_state",
+      "state": "return_fire"
+    },
+    {
+      "type": "set_fire_state",
+      "state": "fire_at_will"
+    },
+    {
+      "type": "cast_spell_mode"
+    },
+    {
+      "type": "cycle_idle_builder"
+    }
+  ]
+}

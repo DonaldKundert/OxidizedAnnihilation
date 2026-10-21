@@ -33,6 +33,10 @@ pub struct UnitInfo {
     pub selectable: bool,
     /// Builder kind, if it builds.
     pub builder: Option<BuilderKind>,
+    /// A frame still under construction (an aim-assist target in build
+    /// mode).
+    #[serde(default)]
+    pub under_construction: bool,
 }
 
 /// Read-only access to the world for the local player. Implemented by the
@@ -71,6 +75,13 @@ pub trait WorldView {
     fn spells(&self, unit: UnitId) -> Vec<SpellId> {
         let _ = unit;
         Vec::new()
+    }
+
+    /// `true` if a building of type `def` could be placed with its centre at
+    /// `pos` (for the build cursor). Default: always.
+    fn can_place(&self, def: UnitDefId, pos: WorldPos) -> bool {
+        let _ = (def, pos);
+        true
     }
 
     /// `true` if `unit` has no orders (for idle-builder cycling).

@@ -14,6 +14,16 @@
       "input": {
         "button": "a"
       },
+      "gesture": "second_tap",
+      "action": {
+        "type": "select_same_type",
+        "scope": "on_screen"
+      }
+    },
+    {
+      "input": {
+        "button": "a"
+      },
       "gesture": "hold",
       "action": {
         "type": "brush"
@@ -47,7 +57,7 @@
       },
       "gesture": "tap",
       "action": {
-        "type": "select_same_type",
+        "type": "select_all",
         "scope": "on_screen"
       }
     },
@@ -55,7 +65,17 @@
       "input": {
         "button": "y"
       },
-      "gesture": "double_tap",
+      "gesture": "second_tap",
+      "action": {
+        "type": "select_all",
+        "scope": "map"
+      }
+    },
+    {
+      "input": {
+        "button": "l3"
+      },
+      "gesture": "tap",
       "action": {
         "type": "select_same_type",
         "scope": "map"
@@ -99,11 +119,29 @@
     },
     {
       "input": {
-        "button": "r3"
+        "button": "rb"
       },
       "gesture": "press",
       "action": {
+        "type": "zoom_modifier"
+      }
+    },
+    {
+      "input": {
+        "button": "r3"
+      },
+      "gesture": "tap",
+      "action": {
         "type": "center_on_monarch"
+      }
+    },
+    {
+      "input": {
+        "button": "r3"
+      },
+      "gesture": "hold",
+      "action": {
+        "type": "follow_selection"
       }
     },
     {
@@ -122,6 +160,15 @@
       "gesture": "hold",
       "action": {
         "type": "cycle_idle_builder"
+      }
+    },
+    {
+      "input": {
+        "button": "menu"
+      },
+      "gesture": "press",
+      "action": {
+        "type": "toggle_overlay"
       }
     },
     {
