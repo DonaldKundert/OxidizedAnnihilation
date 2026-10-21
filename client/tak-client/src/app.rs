@@ -107,6 +107,8 @@ struct ShotPlan {
 struct ModelAssets {
     pieces: Vec<PieceAsset>,
     material: Handle<StandardMaterial>,
+    /// Lowest and highest model-space height at rest pose.
+    y_range: (f32, f32),
 }
 
 struct PieceAsset {
@@ -127,6 +129,8 @@ struct UnitVis {
     id: UnitId,
     /// Per model piece: (piece entity, mesh entity, COB piece, rest offset).
     pieces: Vec<(Entity, Option<Entity>, Option<usize>, Vec3)>,
+    /// Set while the unit is under construction.
+    build: Option<BuildVis>,
 }
 
 #[derive(Resource, Default)]
@@ -190,60 +194,68 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             ..default()
         }),
         ..default()
-    }))
-    .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.07)))
-    .insert_non_send(Content {
-        vfs,
-        tex,
-        sprites: SpriteStore::default(),
-        kingdom,
-    })
-    .insert_non_send(SimRes {
-        session,
-        prev: snap.clone(),
-        curr: snap,
-        acc: 0.0,
-        speed: 1.0,
-        paused: false,
-    })
-    .insert_resource(Ground(Arc::new(ground)))
-    .insert_resource(CamState {
-        geom: ViewGeom {
-            target: [0.0, 0.0],
-            zoom: args.zoom,
-            size: [w as f32, h as f32],
-        },
-    })
-    .insert_resource(InputRes {
-        mapper,
-        last_axes: BTreeMap::new(),
-        last_pointer: None,
-    })
-    .init_resource::<ModelCache>()
-    .init_resource::<UnitEntities>()
-    .init_resource::<FeatureEntities>()
-    .init_resource::<SpriteCache>()
-    .add_systems(
-        Startup,
-        (setup_scene, setup_hud, setup_gizmos, spawn_scenery),
-    )
-    .add_systems(
-        Update,
-        (
-            shot_driver,
-            input_system,
-            sim_driver,
-            camera_system,
-            units_system,
-            features_system,
-            animate_sprites,
-            showcase_system,
-            hud_system,
-            gizmo_system,
-            fps_report,
+    }));
+    // The construction shader must be registered before its material
+    // plugin asks for it.
+    bevy::asset::embedded_asset!(app, "build_clip.wesl");
+    let shader: Handle<bevy::shader::Shader> =
+        bevy::asset::load_embedded_asset!(&app, "build_clip.wesl");
+    let _ = BUILD_CLIP_SHADER.set(shader);
+    app.add_plugins(MaterialPlugin::<BuildMat>::default())
+        .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.07)))
+        .insert_non_send(Content {
+            vfs,
+            tex,
+            sprites: SpriteStore::default(),
+            kingdom,
+        })
+        .insert_non_send(SimRes {
+            session,
+            prev: snap.clone(),
+            curr: snap,
+            acc: 0.0,
+            speed: 1.0,
+            paused: false,
+        })
+        .insert_resource(Ground(Arc::new(ground)))
+        .insert_resource(CamState {
+            geom: ViewGeom {
+                target: [0.0, 0.0],
+                zoom: args.zoom,
+                size: [w as f32, h as f32],
+            },
+        })
+        .insert_resource(InputRes {
+            mapper,
+            last_axes: BTreeMap::new(),
+            last_pointer: None,
+        })
+        .init_resource::<ModelCache>()
+        .init_resource::<UnitEntities>()
+        .init_resource::<FeatureEntities>()
+        .init_resource::<SpriteCache>()
+        .init_resource::<UnitTops>()
+        .add_systems(
+            Startup,
+            (setup_scene, setup_hud, setup_gizmos, spawn_scenery),
         )
-            .chain(),
-    );
+        .add_systems(
+            Update,
+            (
+                shot_driver,
+                input_system,
+                sim_driver,
+                camera_system,
+                units_system,
+                features_system,
+                animate_sprites,
+                showcase_system,
+                hud_system,
+                gizmo_system,
+                fps_report,
+            )
+                .chain(),
+        );
     if let Some(path) = &args.screenshot {
         let shots = args
             .at_tick
@@ -1007,7 +1019,86 @@ fn upload_model(
             }),
         })
         .collect();
-    ModelAssets { pieces, material }
+    ModelAssets {
+        pieces,
+        material,
+        y_range: model_y_range(built),
+    }
+}
+
+/// Lowest and highest vertex height of a model at rest pose (piece offsets
+/// accumulated down the tree).
+fn model_y_range(built: &BuiltModel) -> (f32, f32) {
+    let mut origin_y = vec![0.0f32; built.pieces.len()];
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for (i, p) in built.pieces.iter().enumerate() {
+        let base = p.parent.map_or(0.0, |q| origin_y[q]);
+        origin_y[i] = base + p.offset[1];
+        if let Some(m) = &p.mesh {
+            for v in &m.positions {
+                lo = lo.min(origin_y[i] + v[1]);
+                hi = hi.max(origin_y[i] + v[1]);
+            }
+        }
+    }
+    if lo > hi {
+        (0.0, 1.0)
+    } else {
+        (lo, hi.max(lo + 1.0))
+    }
+}
+
+/// Material for units under construction: the standard material cut at a
+/// world height by `build_clip.wesl`.
+type BuildMat = bevy::pbr::ExtendedMaterial<StandardMaterial, BuildClip>;
+
+/// Uniform of `build_clip.wesl`.
+#[derive(Asset, bevy::render::render_resource::AsBindGroup, Reflect, Debug, Clone, Default)]
+struct BuildClip {
+    /// World height of the cut.
+    #[uniform(100)]
+    clip_y: f32,
+    /// 0: keep below the cut (built part); 1: keep above (ghost).
+    #[uniform(100)]
+    keep_above: f32,
+    #[uniform(100)]
+    _pad1: f32,
+    #[uniform(100)]
+    _pad2: f32,
+}
+
+static BUILD_CLIP_SHADER: std::sync::OnceLock<Handle<bevy::shader::Shader>> =
+    std::sync::OnceLock::new();
+
+impl bevy::pbr::MaterialExtension for BuildClip {
+    fn fragment_shader() -> bevy::shader::ShaderRef {
+        match BUILD_CLIP_SHADER.get() {
+            Some(h) => bevy::shader::ShaderRef::Handle(h.clone()),
+            None => bevy::shader::ShaderRef::Default,
+        }
+    }
+}
+
+/// Ghost of the unbuilt part (**Chosen**: TA:K's own build-up look is not
+/// documented; a pale translucent copy above the rising cut reads as "being
+/// built" and keeps the finished shape visible).
+const GHOST_RGBA: [f32; 4] = [0.7, 0.9, 1.0, 0.6];
+
+/// Height of each unit's model top at rest pose (for bars above it).
+#[derive(Resource, Default)]
+struct UnitTops(BTreeMap<UnitId, f32>);
+
+/// A unit's construction look while it is a frame.
+struct BuildVis {
+    solid: Handle<BuildMat>,
+    ghost: Handle<BuildMat>,
+    /// Mesh entities with the solid build material.
+    meshes: Vec<Entity>,
+    /// Ghost mesh entities (children of `meshes`).
+    ghosts: Vec<Entity>,
+    /// The finished material to swap back to.
+    material: Handle<StandardMaterial>,
+    y_range: (f32, f32),
 }
 
 /// Heading (0 = east, quarter = south) to a rotation of the model, whose
@@ -1032,7 +1123,9 @@ fn units_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    vis_q: Query<&UnitVis>,
+    mut build_mats: ResMut<Assets<BuildMat>>,
+    mut tops: ResMut<UnitTops>,
+    mut vis_q: Query<&mut UnitVis>,
     mut tf_q: Query<&mut Transform>,
     mut v_q: Query<&mut Visibility>,
 ) {
@@ -1050,6 +1143,7 @@ fn units_system(
         if let Some(e) = ents.0.remove(&id) {
             commands.entity(e).despawn();
         }
+        tops.0.remove(&id);
     }
     for u in &sim.curr.units {
         let p = prev.get(&u.id).copied();
@@ -1100,7 +1194,42 @@ fn units_system(
                 .clone();
             let root = commands.spawn((root_tf, Visibility::default())).id();
             let mut pieces = Vec::new();
+            let mut build = None;
             if let Some(a) = assets {
+                tops.0.insert(u.id, a.y_range.1);
+                let building = u.build_percent_left > 0;
+                if building {
+                    let mk = |keep_above: f32, mats: &Assets<StandardMaterial>| {
+                        let mut base = mats.get(&a.material).cloned().unwrap_or_default();
+                        if keep_above > 0.5 {
+                            base.base_color = Color::srgba(
+                                GHOST_RGBA[0],
+                                GHOST_RGBA[1],
+                                GHOST_RGBA[2],
+                                GHOST_RGBA[3],
+                            );
+                            base.alpha_mode = AlphaMode::Blend;
+                        }
+                        BuildMat {
+                            base,
+                            extension: BuildClip {
+                                clip_y: g + a.y_range.0,
+                                keep_above,
+                                ..default()
+                            },
+                        }
+                    };
+                    let solid = build_mats.add(mk(0.0, &materials));
+                    let ghost = build_mats.add(mk(1.0, &materials));
+                    build = Some(BuildVis {
+                        solid,
+                        ghost,
+                        meshes: Vec::new(),
+                        ghosts: Vec::new(),
+                        material: a.material.clone(),
+                        y_range: a.y_range,
+                    });
+                }
                 // COB piece index for each model piece, by the script type's
                 // name map.
                 let mut cob_of = vec![None; a.pieces.len()];
@@ -1125,8 +1254,8 @@ fn units_system(
                             Name::new(pa.name.clone()),
                         ))
                         .id();
-                    let me = pa.mesh.as_ref().map(|m| {
-                        commands
+                    let me = pa.mesh.as_ref().map(|m| match &mut build {
+                        None => commands
                             .spawn((
                                 Mesh3d(m.clone()),
                                 MeshMaterial3d(a.material.clone()),
@@ -1134,21 +1263,83 @@ fn units_system(
                                 Visibility::default(),
                                 ChildOf(pe),
                             ))
-                            .id()
+                            .id(),
+                        Some(b) => {
+                            let e = commands
+                                .spawn((
+                                    Mesh3d(m.clone()),
+                                    MeshMaterial3d(b.solid.clone()),
+                                    Transform::default(),
+                                    Visibility::default(),
+                                    ChildOf(pe),
+                                ))
+                                .id();
+                            let gh = commands
+                                .spawn((
+                                    Mesh3d(m.clone()),
+                                    MeshMaterial3d(b.ghost.clone()),
+                                    Transform::default(),
+                                    Visibility::default(),
+                                    ChildOf(e),
+                                ))
+                                .id();
+                            b.meshes.push(e);
+                            b.ghosts.push(gh);
+                            e
+                        }
                     });
                     ids.push(pe);
                     pieces.push((pe, me, cob_of[i], pa.offset));
                 }
             }
-            commands.entity(root).insert(UnitVis { id: u.id, pieces });
+            commands.entity(root).insert(UnitVis {
+                id: u.id,
+                pieces,
+                build,
+            });
             ents.0.insert(u.id, root);
             continue;
         };
         if let Ok(mut tf) = tf_q.get_mut(e) {
             *tf = root_tf;
         }
-        let Ok(vis) = vis_q.get(e) else { continue };
+        let Ok(mut vis) = vis_q.get_mut(e) else {
+            continue;
+        };
         debug_assert_eq!(vis.id, u.id);
+        // Construction: move the cut with the build progress; swap to the
+        // finished material once complete.
+        if let Some(b) = &vis.build {
+            if u.build_percent_left > 0 {
+                let done = lerp(
+                    p.map_or(u.build_done, |p| p.build_done),
+                    u.build_done,
+                    alpha,
+                );
+                let clip = g + b.y_range.0 + (b.y_range.1 - b.y_range.0) * done.clamp(0.0, 1.0);
+                debug!(
+                    "build cut {:?}: y {:?} ground {g} done {done} clip {clip}",
+                    u.id, b.y_range
+                );
+                for h in [&b.solid, &b.ghost] {
+                    if let Some(mut m) = build_mats.get_mut(h) {
+                        m.extension.clip_y = clip;
+                    }
+                }
+            } else if let Some(b) = vis.build.take() {
+                for me in b.meshes {
+                    commands
+                        .entity(me)
+                        .remove::<MeshMaterial3d<BuildMat>>()
+                        .insert(MeshMaterial3d(b.material.clone()));
+                }
+                for gh in b.ghosts {
+                    commands.entity(gh).despawn();
+                }
+                build_mats.remove(&b.solid);
+                build_mats.remove(&b.ghost);
+            }
+        }
         for &(pe, me, cob, base) in &vis.pieces {
             let Some(ci) = cob else { continue };
             let Some(now) = u.pieces.get(ci) else {
@@ -1832,6 +2023,7 @@ fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color:
 
 fn gizmo_system(
     mut g: Gizmos,
+    tops: Res<UnitTops>,
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
     ground: Res<Ground>,
@@ -1860,12 +2052,24 @@ fn gizmo_system(
             ground_circle(&mut g, t, x, y, r + 3.0, Color::srgb(0.3, 1.0, 0.3));
         }
         if selected || u.health_percent < 100 || u.build_percent_left > 0 {
-            let h = u.ground + 70.0;
+            let top = tops.0.get(&u.id).copied().unwrap_or(60.0);
+            let h = u.ground + top + 12.0;
             let left = Vec3::new(x - 16.0, h, y);
-            let frac = u.health_percent.clamp(0, 100) as f32 / 100.0;
+            let max = u.max_health.max(1) as f32;
+            let frac = (u.health as f32 / max).clamp(0.0, 1.0);
             g.line(left, left + Vec3::X * 32.0, Color::srgb(0.25, 0.0, 0.0));
             // Foreground nudged toward the camera so it wins the depth test.
             let nudge = Vec3::new(0.0, 1.0, 1.0);
+            // A frame's earned health (`max - frame_health`): the part of
+            // it the frame lacks through damage shows dim.
+            if u.build_percent_left > 0 {
+                let earned = (u.earned_health as f32 / max).clamp(0.0, 1.0);
+                g.line(
+                    left + nudge * 0.5,
+                    left + nudge * 0.5 + Vec3::X * 32.0 * earned,
+                    Color::srgb(0.15, 0.4, 0.15),
+                );
+            }
             g.line(
                 left + nudge,
                 left + nudge + Vec3::X * 32.0 * frac,

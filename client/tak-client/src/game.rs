@@ -250,6 +250,17 @@ impl Session {
                     .unwrap_or_default(),
                 health_percent: u.combat.health_percent(),
                 build_percent_left: u.build.percent_left(),
+                build_done: {
+                    let (d, t) = u.build.built_fraction();
+                    if t > 0 { d as f32 / t as f32 } else { 1.0 }
+                },
+                health: u.combat.health,
+                max_health: u.combat.max_health,
+                earned_health: {
+                    let (d, t) = u.build.built_fraction();
+                    let max = u.combat.max_health;
+                    max - tak_sim::combat::frame_health(max, t - d, t)
+                },
                 dying: u.combat.is_dying(),
             })
             .collect();
@@ -367,6 +378,16 @@ pub struct UnitSnap {
     pub health_percent: i32,
     /// Build percent left (0 = complete).
     pub build_percent_left: i32,
+    /// Built fraction 0..=1 (1 = complete), render-side float.
+    pub build_done: f32,
+    /// Hit points.
+    pub health: i32,
+    /// Maximum hit points.
+    pub max_health: i32,
+    /// Health the frame has earned by its build progress
+    /// (`max - frame_health`); equals `max_health` once complete. Damage
+    /// shows as `earned_health - health`.
+    pub earned_health: i32,
     /// Playing its death animation.
     pub dying: bool,
 }

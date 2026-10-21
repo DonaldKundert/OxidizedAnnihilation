@@ -270,6 +270,27 @@ Findings and choices:
   grey. Both are logged per model. `--showcase zondrake_dead,zonbat_dead`
   shows them.
 
+### Units under construction (WP-R)
+
+- **Look (Chosen)**: the frame's model is cut at a world height that rises
+  with the build fraction (`UnitBuild::built_fraction`, interpolated
+  between ticks) from the model's lowest to its highest rest-pose vertex:
+  below the cut it is drawn solid, above it as a pale translucent ghost
+  (`GHOST_RGBA`), so the finished shape stays readable while the frame
+  "rises". TA:K's own build-up effect is not documented in the data we
+  read (the `*build*.taf` sparkle sprites exist; drawing them along the
+  cut is a follow-up). Implemented as `ExtendedMaterial<StandardMaterial,
+  BuildClip>` with `src/build_clip.wesl` (Bevy 0.20 ships WESL shaders;
+  the file is embedded with `embedded_asset!`): one solid and one ghost
+  material per frame, swapped back to the shared model material on
+  completion.
+- **Bars**: above the model's top. Health is drawn as `health / max`;
+  for a frame, a dim segment underneath shows the health its progress has
+  earned (`max − combat::frame_health`), so damage taken while building
+  shows as the gap. The blue bar is build progress.
+- Checked on a Watch Tower (`ARAAT`) at 16 % and 55 % and the demo's wall
+  at 61 %.
+
 ### Units: placement and animation
 
 - Unit root: interpolated sim position at the terrain height the sim
@@ -309,8 +330,7 @@ slots next to the cursor from `Mapper::wheel()`.
 ## Known gaps / follow-up
 
 - Effects: no TAF/GAF sprites for weapon hits, deaths, build sparkles or
-  dust yet; projectiles are spheres. Units under construction draw fully
-  built (no TA:K build-up effect), with a progress bar.
+  dust yet; projectiles are spheres.
 - No minimap, no fog of war, no audio, no in-HUD click targets (build menu
   is keyboard/wheel), no spell UI beyond the cast mode.
 - Rejected build placements (`ConstructionState.rejections`) are not yet
