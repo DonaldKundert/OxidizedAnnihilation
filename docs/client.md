@@ -1,4 +1,4 @@
-# Bevy client (`client/`, WP-Q)
+# Bevy client (`client/`, WP-Q, WP-R)
 
 The first playable view of the core: a real Kingdoms map, animated 3DO
 units driven by their own COB scripts, selection and orders through
@@ -57,12 +57,18 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
 - `--focus monarch:N | unit:SLOT | X,Y` centres the camera (at the point's
   terrain height); `--zoom` is world units per pixel (1 = TA's native
   640-px view scale); `--select 0,2` selects unit slots through the mapper,
-  so rings and the HUD panel show; `--window WxH`.
+  so rings and the HUD panel show; `--window WxH`; `--showcase a,b,c`
+  draws those 3DO models (rest pose, render only) in a row next to the
+  focus, for checking art by eye.
 - Each capture prints every unit (slot, def, owner, position, health,
   build progress, first orders), the feature count and the hash.
-- **Known** to work on this machine: Mesa lavapipe (Vulkan, llvmpipe),
-  1280×720, about 8 fps rendering with the sim at exactly 30 ticks/s.
-  `WGPU_BACKEND=gl` was not needed.
+- **Known** to work on this machine: Mesa lavapipe (Vulkan, llvmpipe,
+  software rendering on 2 CPU cores), 1280×720. WP-Q: about 8 fps. WP-R
+  (all map features, effects, minimap, HUD widgets, fog on), zoom 0.5:
+  6.0 fps on Adamantine Gate (7.7 with `--no-fog`), 5.4–6.0 fps on Grimm
+  Farms (1,160 features); zoom 1.0 on Gaerion Wood 5.7–6.0 fps; zoom 2.5
+  on Grimm Farms with hundreds of sprites on screen about 4.5 fps. The sim
+  runs at exactly 30 ticks/s regardless. `WGPU_BACKEND=gl` was not needed.
 
 ### Logs, hashes, replay
 
@@ -104,6 +110,9 @@ keyboard and a gamepad work together and share one selection.
 | Cursor | mouse | left stick (virtual cursor, magnetism, RT precision) |
 | Zoom | mouse wheel | |
 | Pause, game speed | Pause (or Ctrl+P), `=` / `-` | |
+| Jump the camera | LMB click / drag on the minimap | A with the cursor on the minimap |
+| HUD buttons (orders, build) | LMB on the button (same as its key) | A with the cursor on the button |
+| Fog of war on/off | F9 (`--no-fog` starts off) | |
 
 Game speed changes ticks per wall second only, never tick length.
 
@@ -127,28 +136,95 @@ projectiles); rendering lerps between the last two with
 - Render space: `x` = world x (east), `y` = height, `z` = world y (south).
   World units are map pixels. Height is the raw TNT byte (**Believed**,
   as the sim uses it).
-- Camera: orthographic, looking north, pitched down `atan(2)` = 63.4°
-  (**Chosen**): a unit of height rises half as far on screen as a unit of
-  ground recedes, as in TA's oblique view; the whole ground is
-  foreshortened by `sin(63.4°)` = 0.894 vertically.
-- `tak-input`'s `Camera` is an orthographic ground mapping with one scale.
-  The client gives it "virtual pixels" (`y / sin(pitch)`) and feeds pointer
-  positions as the virtual pixel of the terrain point under the mouse
-  (ray-marched against the heightfield), so picking and orders land on
-  what is under the cursor even on plateaus (`view.rs`, tested).
+- **Camera: TA's oblique projection (WP-R).** `screen_x = (x − cam_x) /
+  zoom`, `screen_y = (z − 0.5·height − cam_z) / zoom`: one pixel per world
+  unit on both ground axes at zoom 1 (no foreshortening), and height
+  shifts the image straight up by half its value (`view::SHEAR` = 0.5).
+  **Believed**: Nanolathe's TA research (`docs/DESIGN_PRESENTATION_CLIENT.md`
+  C1, `screenY = worldZ − (worldY >> 1)`), and Kingdoms agrees: drawing the
+  height map's contours over the terrain mosaic at `z − h/2` puts them
+  exactly on the painted cliff edges, crater rims and pond shores, while at
+  `z` they miss by tens of pixels (Adamantine Gate, checked by eye). So the
+  terrain art is screen-space: mosaic pixel `(x, y)` shows world `(x, y +
+  h/2)`.
+- Bevy has no oblique camera, so `app::ObliqueProjection` is a custom
+  `CameraProjection`: the camera sits at `(cam_x, 0, cam_z)` with no
+  rotation and the matrix does the shear (`ViewGeom::clip_from_view`).
+  Rays run along `(0, −1, −0.5)` (down and north); depth is `y + 0.5·z`
+  (reverse-Z over ±8000), so higher and more southern points are nearer.
+  Frustum culling uses the full matrix.
+- Terrain: vertices keep their real heights (for occlusion and picking)
+  but sample the mosaic at `(x, z − h/2)`, so on screen the art shows
+  exactly as the flat mosaic (chunk images carry a 128-px margin from the
+  chunk to the north). With this the sea-level plane now tints exactly the
+  painted water, island in the pond included.
+- Models are projected with the same shear (verticals shrink to half,
+  ground plan unforeshortened), as TA draws them.
+- `tak-input`'s `Camera` is an orthographic ground mapping with one scale;
+  with no foreshortening its pixels are screen pixels of the height-0
+  plane. The client feeds pointer positions as the pixel of the terrain
+  point under the mouse (ray-marched against the heightfield), so picking
+  and orders land on what is under the cursor even on plateaus (`view.rs`,
+  tested).
 
 ### Terrain
 
 `terrain.rs`: the TNT's tile grid assembled into 1024-px chunk textures
 exactly as `tak-cli dump-map` builds its mosaic (tile `(x, y)` shows the
 32×32 piece `(col, row)` of `terrain/<id>.jpg`), on a heightfield mesh with
-vertices on cell corners (mean of the touching cells). Unlit, no
-tonemapping, so the JPEG colours are shown as is. Sea level is a
-translucent plane; on Adamantine Gate it tints exactly the ponds and the
-sea seen in the terrain art. Map features (from the `MapDef`) are
-translucent footprint boxes (green = blocking). Corpses and wrecks from the
-sim's feature layer are drawn with their 3DO when the feature def names one
-(none spawned in the demo: the Zhon monarch leaves no corpse feature).
+vertices on cell corners (mean of the touching cells), sampled with the
+oblique shift (see Camera). Unlit, no tonemapping, so the JPEG colours are
+shown as is. Sea level is a translucent plane; it tints exactly the ponds,
+canals and sea painted in the terrain art. Rows north of the map edge
+(visible because heights lift the top rows) are black.
+
+### Map features, corpses and wrecks (WP-R)
+
+`sprites.rs` + `app::spawn_feature_art`. A feature TDF names either
+`object` (a 3DO: drawn like a unit at rest pose, static; corpses keep the
+unit's heading, map features use the file's orientation) or `filename` +
+`seqname` (a GAF sequence in `anims/<filename>.gaf`) with `seqnameshad`
+as its shadow. Every placed feature is drawn, in two groups:
+
+- Gameplay-relevant ones (the sim keeps them: blocking, reclaimable,
+  damageable, sacred sites) and corpses/wrecks come from `World.features`
+  and disappear when the sim removes them.
+- Pure scenery (`FeatureDef::matters()` false) is drawn once from the
+  `MapDef` (on the maps checked every placed feature matters, so this group
+  is usually empty).
+
+Findings and choices:
+
+- **Palette (Believed)**: feature GAFs have no sibling PCX; they decode
+  correctly with `palettes/<kingdom>_features.pcx` (the OTA `kingdom`):
+  trees, rocks, henges, crops and huts show natural colours, while
+  `<kingdom>.pcx` gives noise.
+- **Placement (Believed, TA rule)**: the frame's `(x_offset, y_offset)`
+  pixel sits on the footprint centre at its terrain height. Sprites are
+  1:1 (one pixel per world unit at zoom 1). The quad lies in the screen
+  plane (`ViewGeom::screen_up`), lifted toward the viewer along the view
+  ray by `0.4·(pixels below the anchor) + 6` height units so its lower
+  edge does not sink into the ground (`sprites::lift_for`); this moves
+  nothing on screen, and things north of the base are hidden behind it
+  while things south of it draw in front, like TA's painter order. Trees,
+  henges and rocks sit on their painted spots and cast their shadows to
+  the right, as drawn.
+- **Shadows (Chosen level)**: `seqnameshad` frames are black silhouettes;
+  they are alpha-blended at 0.85 opacity, which in Bevy's linear-light
+  blending darkens the ground to roughly half brightness. TA's exact
+  `shadtrans` level is Unknown. (A material alpha below about 0.6 is
+  barely visible on lavapipe for that reason.)
+- **Animation (Believed)**: `animating=1` sequences (lodestone glows) play
+  by sim tick with each frame's duration word as ticks per frame (TA), so
+  they pause with the game and are deterministic in screenshots; each
+  instance gets a phase from its cell so neighbours do not pulse in step
+  (**Chosen**).
+- **Batching**: every instance of a sequence frame shares one quad mesh
+  and one material, so Bevy batches them; Grimm Farms (1,160 features)
+  draws at 7.6 fps at zoom 1 and 4.5 fps at zoom 2.5 with hundreds of crops,
+  trees and huts on screen (lavapipe, 1280×720).
+- 1×1-pixel sequences (`TarNoise01`, sound emitters) draw as nothing
+  visible.
 
 ### Units: models and textures
 
@@ -177,9 +253,50 @@ sim's feature layer are drawn with their 3DO when the feature def names one
   the colours on the same models. A team ring under each unit (blue = you,
   red = enemy) is drawn too.
 - Untextured faces use their colour index in the model side's texture
-  palette. About 144 texture names resolve nowhere in `textures/` (85 of
-  them are in `anims/`, not searched yet, `3do.md`); they draw flat grey
-  and are logged. None are missing on the monarchs or the wall.
+  palette.
+- **Texture search (Chosen order)**: `textures/*.gaf` first, then
+  `anims/*.gaf`. The `anims/` files are only header-scanned for entry
+  names at startup (about 0.6 s for 434 files) and parsed on first use.
+  Their palette: a sibling `anims/<file>.pcx` if present (none of the 19
+  files that matter has one), else `<side>_textures.pcx` by the first three
+  letters, `*monst*` files (`nyrmonst`, `talmonst`) on `mon_textures`, else
+  `palette.pal` (**Chosen**; the `aid*` files land there). This resolves
+  85 more names (3,411 of 3,470): live units `aradrag`, `tartroop`,
+  `tardung`, `tarnecro`, `npcpeas`, `monpiran`, `npcbotl` and many
+  `_dead` corpses.
+- **Still unresolved (Known)**: 59 names, all on corpses except
+  `liegeshoul2` (`vercrus`): `zonbat_dead` (`bat*`), `zondrake_dead`
+  (`drake*`), `aradrag_dead`/`tardrag_dead`/`tarknigh_dead`/`npcthesh_dead`/
+  `npcjor2_dead` (`deaddragwing*`), `verpar_dead` (`deadwing3/4`),
+  `zongryp_dead` (`gryphwing*1`), `zonorc_dead`, `zontroll_dead`
+  (`trolllimb*`). They are not untextured by design (live models have
+  same-stem textures), so: a name whose stem (trailing digits dropped,
+  then shortened down to six letters) prefixes a known texture uses that
+  texture (`gryphwingl1` → `gryphwingL2`, `drakehead1` → `drakeheadA1`;
+  **Chosen**), and the rest draw in a neutral brown (`MISSING_RGB`), not
+  grey. Both are logged per model. `--showcase zondrake_dead,zonbat_dead`
+  shows them.
+
+### Units under construction (WP-R)
+
+- **Look (Chosen)**: the frame's model is cut at a world height that rises
+  with the build fraction (`UnitBuild::built_fraction`, interpolated
+  between ticks) from the model's lowest to its highest rest-pose vertex:
+  below the cut it is drawn solid, above it as a pale translucent ghost
+  (`GHOST_RGBA`), so the finished shape stays readable while the frame
+  "rises". TA:K's own build-up effect is not documented in the data we
+  read (the `*build*.taf` sparkle sprites exist; drawing them along the
+  cut is a follow-up). Implemented as `ExtendedMaterial<StandardMaterial,
+  BuildClip>` with `src/build_clip.wesl` (Bevy 0.20 ships WESL shaders;
+  the file is embedded with `embedded_asset!`): one solid and one ghost
+  material per frame, swapped back to the shared model material on
+  completion.
+- **Bars**: above the model's top. Health is drawn as `health / max`;
+  for a frame, a dim segment underneath shows the health its progress has
+  earned (`max − combat::frame_health`), so damage taken while building
+  shows as the gap. The blue bar is build progress.
+- Checked on a Watch Tower (`ARAAT`) at 16 % and 55 % and the demo's wall
+  at 61 %.
 
 ### Units: placement and animation
 
@@ -199,12 +316,102 @@ sim's feature layer are drawn with their 3DO when the feature def names one
   the monarchs appear to hold their swords in the right hand, which
   suggests none is needed (moderate confidence).
 
+### Effects and projectiles (WP-R)
+
+- **Explosions**: every weapon impact (projectile landings, instant hits,
+  death explosions: the sim's `CombatState::impacts` log, a render-only
+  core addition) spawns its weapon's `explosionclass` from
+  `gamedata/explosions/explosions.tdf` (`[class] { [n] { gaf = name; } }`,
+  one variant picked by tick and position). Sprites are found by name as
+  `anims/<name>_4444.taf`, else `<name>.gaf`, else `<name>_1555.taf`
+  (**Chosen**: the 4444 twin has smooth alpha; which twin the engine used
+  is Unknown). They play once by sim tick (frame duration word = ticks,
+  Believed), anchored on the impact point at ground height, so screenshot
+  runs show them at the right frame.
+- **Blend (Chosen reading of the Unknown `0xFF00` word)**: TAF frames
+  carrying `0xFF00` (smoke, dust, blood, 37 pairs) are alpha-blended; the
+  other TAFs (fire, flamestrike, lightning splashes, magic rings) are
+  additive, which makes them glow over the terrain as expected; indexed
+  GAF effects are cut out. The opposite reading makes dust glow and fire
+  look muddy.
+- **Projectiles**: the weapon's `model` 3DO when set (oriented along its
+  flight), else its `weaponart` sprite (in `weapongaf`'s file when set,
+  else by name as above; animated), else a small orange ball. Ballistic
+  shots follow a parabola peaking at a quarter of their range above the
+  ground track the sim moves them on (**Chosen**; the sim is 2D).
+- **Lightning** (`hweffect=lightning`, the Aramon and Zhon monarchs'
+  first weapon): two jagged bolts (white and `outercolor`) from the
+  shooter to the impact for `emittime` ticks (**Chosen** look).
+- Checked: the demo duel (Elsin's lightning on Thirsha: bolt plus the
+  blue `lightning*` splash) and `--players ARA,TAR` (the Necromancer's
+  `FireballA` in flight, `flamestrike` flames on Elsin, Elsin's meteor).
+- Not done: build sparkles (`sidedata` `buildsparklygaf`), dust when
+  walking, Remote Effect rings (`radiusart*`), weapon `shadowart`, sound.
+
+### Minimap (WP-R)
+
+Bottom right, 230 px wide: the TNT's large minimap in the OTA kingdom's
+palette (`palettes/<kingdom>.pcx`, as `tak-cli dump-map` draws it). Like
+the terrain mosaic it is screen-space art covering the whole map, so it
+maps linearly to projected coordinates `(x, z − height/2)`; a camera
+target is exactly such a point, so the white camera rectangle is the
+view's extent and a click puts the clicked point at the screen centre
+(`view::MinimapGeom`, tested). Unit dots in team colours (players 0–7:
+blue, red, white, green, yellow, purple, cyan, orange; **Chosen** after
+TA), larger for footprints of 3+ cells. A left click or drag on it moves
+the camera without reaching the mapper (no select/deselect); with a
+gamepad, A while the virtual cursor is over it does the same.
+
+### Fog of war, visual only (WP-R)
+
+`fog.rs`: per attribute cell, unexplored (black), explored (dimmed,
+overlay opacity 0.6 ≈ half brightness in linear-light blending), seen
+(clear). Seen = within `sightdistance` (`CombatDef::sight`, world units;
+**Chosen** minimum 32 for units with none) of any of the local player's
+units, frames and buildings included. Recomputed after every sim tick on
+the client (so screenshot runs that skip frames still explore the path
+walked); it never feeds the sim, and gameplay line of sight stays the
+sim's job.
+
+- Drawn as an overlay mesh per terrain chunk with black vertex colours,
+  moved 400 height units toward the viewer along the view ray (same
+  screen pixels, in front of every model and sprite), with a large
+  transparent-sort bias so it is blended after water, shadows, ghosts and
+  effects. Corner opacity is the mean of the four touching cells (soft
+  edges). Chunks that are fully clear are hidden. A second overlay camera
+  was tried first and cost about 3 fps on lavapipe.
+- Enemy units outside the seen cells are not drawn (models, rings, bars,
+  minimap dots). Features and the player's own units always are (under
+  the overlay).
+- The minimap gets the same fog as a texture, one texel per cell
+  (heights ignored, so edges can sit a few pixels off on hills).
+- `--no-fog` starts with it off; F9 toggles it.
+
 ### HUD and overlays
 
-Top bar: map, tick, pause/speed, every player's mana, storage and income.
-Bottom-left panel: the first selected unit's name, def, health, order
-count, construction progress, and its build menu with costs (the option
-in placement mode is marked). Gizmos: team rings, selection rings, health
+Top bar: map, tick, pause/speed, every player's mana, storage and income;
+a player whose monarch is dead or who has no units left shows as
+`DEFEATED` (**Believed**: TA:K's default game end is the monarch's death;
+display only, the sim has no defeat rule). The side is taken from the
+player's monarch definition, so it survives the monarch.
+
+Bottom-left panel (WP-R): the first selected unit's name, def and order
+count; bars for health (for a frame, a dim segment under it shows the
+health its progress has earned), the unit's own mana pool
+(`economy::unit_mana`, spellcasters) and build progress (frames); then
+clickable buttons: orders (Stop, Patrol, Guard, Spell, Hold / Return /
+Fire, the active fire state and order mode highlighted) for own units,
+and the build menu (F1–F8 with costs, the option in placement mode
+highlighted) for own builders. A button presses the key the
+mouse/keyboard profile binds to that action, so it does exactly what the
+key and the wheel slot do. Clicks on the panel never select or order
+behind it; with a gamepad, A with the virtual cursor over a button does
+the same. Below: the placement hint while placing. A red line under the
+top bar shows the local player's latest refused build for 5 s
+(`ConstructionState::rejections`, `SiteError::reason()`), e.g. "Cannot
+build Barracks: terrain is too steep, too deep or blocked".
+`--click X,Y` (screenshot mode) clicks the HUD through the same hit test
+and key path, for checking it headless. Gizmos: team rings, selection rings, health
 and build-progress bars, queued-order lines for selected units, the
 cursor, the gamepad brush circle, the footprint of the building being
 placed, projectiles (orange spheres). Radial wheels are drawn as labelled
@@ -216,19 +423,17 @@ slots next to the cursor from `Mapper::wheel()`.
   `Sim::scripts()` and `Sim::cob()`: read-only access so the renderer can
   read COB piece poses. Additive; the sim never calls them; hashes
   unchanged.
+- WP-R: `CombatState::impacts` (`combat::Impact`: tick, weapon, point,
+  shooter; last 256), pushed by `impact()` and never read by the sim, not
+  hashed. Instant weapons leave no projectile, so without it the renderer
+  could not place their hit explosions. Hashes and the replay test are
+  unchanged.
 
 ## Known gaps / follow-up
 
-- Effects: no TAF/GAF sprites for weapon hits, deaths, build sparkles or
-  dust yet; projectiles are spheres. Units under construction draw fully
-  built (no TA:K build-up effect), with a progress bar.
-- Map features are boxes, not their GAF sprites or 3DOs; no shadows.
-- Texture search does not include `anims/*.gaf`; missing names draw grey.
-- No minimap, no fog of war, no audio, no in-HUD click targets (build menu
-  is keyboard/wheel), no spell UI beyond the cast mode.
-- Rejected build placements (`ConstructionState.rejections`) are not yet
-  shown in the HUD.
-- The orthographic tilt is an approximation of TA's oblique projection
-  (ground slightly foreshortened).
+- Effects: no build sparkles, walking dust, Remote Effect rings or
+  weapon shadows yet (see Effects).
+- No audio, no spell UI beyond the cast mode; build buttons stop at F8
+  (the profile's bindings).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies around tick 1,700. Behaviour is the sim's.

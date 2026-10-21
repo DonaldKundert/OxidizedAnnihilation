@@ -75,6 +75,8 @@ pub const PROJECTILE_MAX_TICKS: u32 = 900;
 pub const MAX_PROJECTILES: usize = 4096;
 /// Corpses remembered for the feature system (oldest dropped first).
 pub const MAX_CORPSES: usize = 1024;
+/// Recent impacts kept for renderers (oldest dropped first).
+pub const MAX_IMPACTS: usize = 256;
 /// `HitByWeapon` direction vector length (**Chosen**).
 pub const HIT_DIRECTION_SCALE: i32 = 500;
 
@@ -318,6 +320,20 @@ pub struct Corpse {
     pub kind: i32,
 }
 
+/// A weapon going off at a point (a projectile landing or an instant hit),
+/// recorded for renderers to draw its explosion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Impact {
+    /// Tick it happened.
+    pub tick: u32,
+    /// The weapon.
+    pub weapon: WeaponRef,
+    /// Where.
+    pub point: WorldPos,
+    /// Who fired, if anyone.
+    pub shooter: Option<UnitId>,
+}
+
 /// World-level combat state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CombatState {
@@ -327,6 +343,9 @@ pub struct CombatState {
     pub deaths: u64,
     /// Recent corpses (capped at [`MAX_CORPSES`]).
     pub corpses: Vec<Corpse>,
+    /// Recent impacts, oldest first (capped at [`MAX_IMPACTS`]). Output
+    /// only, for renderers: the sim never reads it, so it is not hashed.
+    pub impacts: Vec<Impact>,
 }
 
 impl CombatState {
@@ -1255,6 +1274,15 @@ fn impact(
     aimed: Option<UnitId>,
     now: u32,
 ) {
+    if world.combat.impacts.len() >= MAX_IMPACTS {
+        world.combat.impacts.remove(0);
+    }
+    world.combat.impacts.push(Impact {
+        tick: now,
+        weapon,
+        point,
+        shooter,
+    });
     let (def_id, ws) = match weapon {
         WeaponRef::Slot(d, s) => (
             d,

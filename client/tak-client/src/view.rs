@@ -7,13 +7,13 @@ use tak_input::{BuilderKind, Camera, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 use tak_sim::World;
 
-/// Camera pitch below the horizon: `atan(2)`, so a unit of height rises
-/// half as far on screen as a unit of ground recedes, as in TA's oblique
-/// view (**Chosen**: the camera is a tilted orthographic one; the ground
-/// is foreshortened by `sin(pitch)` = 0.894 on screen).
-pub fn pitch() -> f32 {
-    2.0f32.atan()
-}
+/// TA's oblique projection: one screen pixel per world unit on both ground
+/// axes (at zoom 1), and height shifts the image up the screen by half its
+/// value: `screen_y = z - SHEAR * height` (**Believed**: Nanolathe's TA
+/// research gives `screenY = worldZ - (worldY >> 1)`, and Kingdoms' terrain
+/// art lines up with its height map under exactly this shift, see
+/// `docs/client.md`).
+pub const SHEAR: f32 = 0.5;
 
 /// Read-only adapter from the sim world to `tak_input::WorldView`.
 pub struct SimView<'a> {
@@ -75,6 +75,11 @@ impl WorldView for SimView<'_> {
 
 /// The camera, in world terms: the ground point at the screen centre, the
 /// zoom and the viewport.
+///
+/// Projection (render space `x` east, `y` up, `z` south): screen x =
+/// `(x - target.x) / zoom`, screen y (down) = `(z - SHEAR * y - target.z) /
+/// zoom`, both from the screen centre. Rays run along `(0, -1, -SHEAR)`:
+/// down and north. A point is nearer the viewer the larger `y + SHEAR * z`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewGeom {
     /// World x/y (east/south) the screen centre looks at, on the height-0
@@ -87,51 +92,48 @@ pub struct ViewGeom {
 }
 
 impl ViewGeom {
-    /// Unit vector from the target toward the camera (south and up), in
-    /// render space (`x` east, `y` up, `z` south).
-    pub fn back(&self) -> [f32; 3] {
-        let p = pitch();
-        [0.0, p.sin(), p.cos()]
+    /// Unit vector toward the viewer (up and south), in render space. Moving
+    /// along it does not move a point on screen.
+    pub fn back() -> [f32; 3] {
+        let l = (1.0 + SHEAR * SHEAR).sqrt();
+        [0.0, 1.0 / l, SHEAR / l]
     }
 
-    /// Ray through a screen pixel: origin on the view plane through the
-    /// target, and the shared forward direction.
+    /// The world direction that moves a point straight up the screen by one
+    /// pixel at zoom 1 without changing its depth: `(0, k, -1) / (1 + k²)`.
+    pub fn screen_up() -> [f32; 3] {
+        let d = 1.0 + SHEAR * SHEAR;
+        [0.0, SHEAR / d, -1.0 / d]
+    }
+
+    /// Ray through a screen pixel: a point on it (at height 0) and the
+    /// shared unit direction.
     pub fn ray(&self, sx: f32, sy: f32) -> ([f32; 3], [f32; 3]) {
-        let p = pitch();
-        let (s, c) = (p.sin(), p.cos());
-        let fwd = [0.0, -s, -c];
-        let up = [0.0, c, -s];
-        let a = (sx - self.size[0] / 2.0) * self.zoom;
-        let b = (self.size[1] / 2.0 - sy) * self.zoom;
-        let o = [self.target[0] + a, up[1] * b, self.target[1] + up[2] * b];
-        (o, fwd)
+        let g = self.ground_at(sx, sy, 0.0);
+        let b = Self::back();
+        ([g[0], 0.0, g[1]], [-b[0], -b[1], -b[2]])
     }
 
-    /// Where a screen pixel's ray meets the plane `y = h`.
+    /// The world point at height `h` that projects to a screen pixel.
     pub fn ground_at(&self, sx: f32, sy: f32, h: f32) -> [f32; 2] {
-        let (o, d) = self.ray(sx, sy);
-        let t = (h - o[1]) / d[1];
-        [o[0] + d[0] * t, o[2] + d[2] * t]
+        [
+            self.target[0] + (sx - self.size[0] / 2.0) * self.zoom,
+            self.target[1] + (sy - self.size[1] / 2.0) * self.zoom + SHEAR * h,
+        ]
     }
 
     /// Screen pixel of a render-space point.
     pub fn to_screen(&self, p: [f32; 3]) -> [f32; 2] {
-        let pt = pitch();
-        let (s, c) = (pt.sin(), pt.cos());
-        let rel = [p[0] - self.target[0], p[1], p[2] - self.target[1]];
-        let a = rel[0];
-        let b = rel[1] * c - rel[2] * s;
         [
-            self.size[0] / 2.0 + a / self.zoom,
-            self.size[1] / 2.0 - b / self.zoom,
+            self.size[0] / 2.0 + (p[0] - self.target[0]) / self.zoom,
+            self.size[1] / 2.0 + (p[2] - SHEAR * p[1] - self.target[1]) / self.zoom,
         ]
     }
 
-    /// `tak-input`'s orthographic ground mapping. The input layer works in
-    /// "virtual" pixels where both axes have the same world scale: the
-    /// height-0 ground point of screen pixel `(sx, sy)` is virtual pixel
-    /// `(sx, sy / sin(pitch))`. The client feeds pointer positions as the
-    /// virtual pixel of the terrain point under the mouse.
+    /// `tak-input`'s orthographic ground mapping. The ground is not
+    /// foreshortened, so input pixels are screen pixels of the height-0
+    /// plane; the client feeds pointer positions as the pixel of the
+    /// terrain point under the mouse ([`ViewGeom::virtual_px`]).
     pub fn input_camera(&self) -> Camera {
         let o = self.ground_at(0.0, 0.0, 0.0);
         let fx = |v: f32| Fx::from_raw((v * 65536.0) as i32);
@@ -139,18 +141,78 @@ impl ViewGeom {
             origin: Vec2::new(fx(o[0]), fx(o[1])),
             world_per_px: fx(self.zoom),
             width_px: self.size[0] as i32,
-            height_px: (self.size[1] / pitch().sin()) as i32,
+            height_px: self.size[1] as i32,
         }
     }
 
-    /// Virtual input pixel of a world ground point (see
-    /// [`ViewGeom::input_camera`]).
+    /// Input pixel of a world ground point (see [`ViewGeom::input_camera`]).
     pub fn virtual_px(&self, x: f32, z: f32) -> (i32, i32) {
         let o = self.ground_at(0.0, 0.0, 0.0);
         (
             ((x - o[0]) / self.zoom).round() as i32,
             ((z - o[1]) / self.zoom).round() as i32,
         )
+    }
+
+    /// The camera's clip-from-view matrix (column-major, glam layout) for a
+    /// camera placed at `(target.x, 0, target.z)` with no rotation: the
+    /// oblique projection above, with reverse depth (`1` near, `0` far)
+    /// spanning `±depth` of `y + SHEAR * z` around the camera.
+    pub fn clip_from_view(&self, depth: f32) -> [[f32; 4]; 4] {
+        let (w, h) = (self.size[0] * self.zoom, self.size[1] * self.zoom);
+        let dz = 1.0 / (2.0 * depth);
+        [
+            [2.0 / w, 0.0, 0.0, 0.0],
+            [0.0, 2.0 * SHEAR / h, dz, 0.0],
+            [0.0, -2.0 / h, SHEAR * dz, 0.0],
+            [0.0, 0.0, 0.5, 1.0],
+        ]
+    }
+}
+
+/// The minimap's place on screen and the map it shows. The minimap is
+/// screen-space art like the terrain mosaic, so it maps linearly to
+/// *projected* world coordinates `(x, z - SHEAR * height)`, which are also
+/// what a camera target means ([`ViewGeom::target`] is on the height-0
+/// plane).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MinimapGeom {
+    /// `(left, top, width, height)` in logical pixels.
+    pub rect: [f32; 4],
+    /// Map size in world units (cells × 16).
+    pub map: [f32; 2],
+}
+
+impl MinimapGeom {
+    /// Whether a screen pixel is on the minimap.
+    pub fn contains(&self, sx: f32, sy: f32) -> bool {
+        let [l, t, w, h] = self.rect;
+        sx >= l && sy >= t && sx < l + w && sy < t + h
+    }
+
+    /// Minimap pixel (relative to its top-left) of a projected world point.
+    pub fn to_mini(&self, x: f32, projected_z: f32) -> [f32; 2] {
+        [
+            x / self.map[0] * self.rect[2],
+            projected_z / self.map[1] * self.rect[3],
+        ]
+    }
+
+    /// Projected world point (a camera target) under a screen pixel on the
+    /// minimap, clamped to the map.
+    pub fn target_at(&self, sx: f32, sy: f32) -> [f32; 2] {
+        let u = ((sx - self.rect[0]) / self.rect[2]).clamp(0.0, 1.0);
+        let v = ((sy - self.rect[1]) / self.rect[3]).clamp(0.0, 1.0);
+        [u * self.map[0], v * self.map[1]]
+    }
+
+    /// The camera's view as a minimap rectangle `(left, top, w, h)`,
+    /// relative to the minimap's top-left.
+    pub fn view_rect(&self, g: &ViewGeom) -> [f32; 4] {
+        let (hw, hh) = (g.size[0] * g.zoom / 2.0, g.size[1] * g.zoom / 2.0);
+        let a = self.to_mini(g.target[0] - hw, g.target[1] - hh);
+        let b = self.to_mini(g.target[0] + hw, g.target[1] + hh);
+        [a[0], a[1], b[0] - a[0], b[1] - a[1]]
     }
 }
 
@@ -195,6 +257,60 @@ mod tests {
     }
 
     #[test]
+    fn height_shifts_up_by_half() {
+        let g = geom();
+        let a = g.to_screen([1000.0, 0.0, 800.0]);
+        let b = g.to_screen([1000.0, 40.0, 800.0]);
+        assert!((a[1] - b[1] - 20.0 / g.zoom).abs() < 1e-3);
+        // Moving along the view ray keeps the pixel; screen_up moves it up.
+        let d = ViewGeom::back();
+        let c = g.to_screen([1000.0 + d[0] * 50.0, d[1] * 50.0, 800.0 + d[2] * 50.0]);
+        assert!((c[0] - a[0]).abs() < 1e-3 && (c[1] - a[1]).abs() < 1e-3);
+        let u = ViewGeom::screen_up();
+        let e = g.to_screen([1000.0, u[1] * 10.0, 800.0 + u[2] * 10.0]);
+        assert!((a[1] - e[1] - 10.0 / g.zoom).abs() < 1e-3, "{a:?} {e:?}");
+    }
+
+    #[test]
+    fn clip_matrix_matches_to_screen() {
+        let g = geom();
+        let m = g.clip_from_view(4000.0);
+        let p = [1100.0f32, 30.0, 700.0];
+        let v = [p[0] - g.target[0], p[1], p[2] - g.target[1]];
+        let clip = |r: usize| m[0][r] * v[0] + m[1][r] * v[1] + m[2][r] * v[2] + m[3][r];
+        let s = g.to_screen(p);
+        let ndc = [s[0] / g.size[0] * 2.0 - 1.0, 1.0 - s[1] / g.size[1] * 2.0];
+        assert!((clip(0) - ndc[0]).abs() < 1e-4 && (clip(1) - ndc[1]).abs() < 1e-4);
+        assert!((clip(3) - 1.0).abs() < 1e-6);
+        // Nearer (higher) points get larger depth, inside 0..1.
+        assert!(m[1][2] > 0.0 && clip(2) > 0.0 && clip(2) < 1.0);
+    }
+
+    #[test]
+    fn minimap_round_trip_and_view_rect() {
+        let m = MinimapGeom {
+            rect: [1000.0, 500.0, 200.0, 100.0],
+            map: [3000.0, 1500.0],
+        };
+        assert!(m.contains(1100.0, 550.0) && !m.contains(990.0, 550.0));
+        let t = m.target_at(1050.0, 525.0);
+        assert!((t[0] - 750.0).abs() < 1e-3 && (t[1] - 375.0).abs() < 1e-3);
+        let p = m.to_mini(t[0], t[1]);
+        assert!((p[0] - 50.0).abs() < 1e-3 && (p[1] - 25.0).abs() < 1e-3);
+        // Clicking puts that point at the screen centre: the view rectangle
+        // is centred on it.
+        let g = ViewGeom {
+            target: t,
+            zoom: 1.0,
+            size: [300.0, 150.0],
+        };
+        let r = m.view_rect(&g);
+        assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
+        assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
+        assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
     fn virtual_pixels_match_input_camera() {
         let g = geom();
         let cam = g.input_camera();
@@ -203,7 +319,7 @@ mod tests {
         let w = cam.screen_to_world(Vec2::from_ints(vx, vy));
         assert!((f(w.x) - p[0]).abs() < 1.0 && (f(w.y) - p[1]).abs() < 1.0);
         assert_eq!(vx, 300);
-        // Ground recedes 1/sin(pitch) per screen pixel.
-        assert!((vy as f32 - 200.0 / pitch().sin()).abs() <= 1.0);
+        // The ground is not foreshortened: input pixels are screen pixels.
+        assert_eq!(vy, 200);
     }
 }

@@ -19,6 +19,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::Tonemapping;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
+use bevy::ui::UiGlobalTransform;
 use bevy::window::{PrimaryWindow, WindowResolution};
 
 use tak_commands::{ClientCommand, PlayerId, UnitId};
@@ -29,10 +30,12 @@ use tak_input::{
 use tak_vfs::Vfs;
 
 use crate::cli::{Args, Focus, parse_focus};
+use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
+use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
-use crate::view::{SimView, ViewGeom, f, pick_radius};
+use crate::view::{MinimapGeom, SimView, ViewGeom, f, pick_radius};
 
 /// Seconds per sim tick.
 const TICK_DT: f32 = 1.0 / 30.0;
@@ -42,6 +45,9 @@ const TICK_DT: f32 = 1.0 / 30.0;
 pub struct Content {
     vfs: Vfs,
     tex: TextureIndex,
+    sprites: SpriteStore,
+    /// The map's OTA `kingdom` (picks the feature palette).
+    kingdom: Option<String>,
 }
 
 /// The match, its two most recent snapshots and the tick accumulator.
@@ -54,12 +60,28 @@ pub struct SimRes {
     /// Ticks per wall second multiplier (game speed).
     speed: f32,
     paused: bool,
+    /// The local player's visual fog, updated after every tick (so runs
+    /// that skip frames, like screenshot mode, still explore the path).
+    fog: crate::fog::FogGrid,
+    /// Fog changed since the overlay was last painted.
+    fog_changed: bool,
 }
 
 impl SimRes {
     fn step(&mut self) {
         self.session.step();
         self.prev = std::mem::replace(&mut self.curr, self.session.snapshot());
+        let w = self.session.sim.world();
+        let local = self.session.local;
+        let eyes: Vec<(f32, f32, f32)> = w
+            .units()
+            .filter(|(_, u)| u.owner == local)
+            .map(|(_, u)| {
+                let sight = w.defs().get(u.def).map_or(0, |d| d.combat.sight);
+                (f(u.pos.x), f(u.pos.y), (sight as f32).max(FOG_MIN_SIGHT))
+            })
+            .collect();
+        self.fog_changed |= self.fog.update(&eyes);
     }
 
     fn alpha(&self) -> f32 {
@@ -96,12 +118,16 @@ struct ShotPlan {
     focus: Focus,
     select: Vec<u32>,
     exit_wait: u32,
+    /// Screen points to click on the HUD before each capture.
+    clicks: Vec<(f32, f32)>,
 }
 
 /// Per-model render assets.
 struct ModelAssets {
     pieces: Vec<PieceAsset>,
     material: Handle<StandardMaterial>,
+    /// Lowest and highest model-space height at rest pose.
+    y_range: (f32, f32),
 }
 
 struct PieceAsset {
@@ -122,14 +148,16 @@ struct UnitVis {
     id: UnitId,
     /// Per model piece: (piece entity, mesh entity, COB piece, rest offset).
     pieces: Vec<(Entity, Option<Entity>, Option<usize>, Vec3)>,
+    /// Set while the unit is under construction.
+    build: Option<BuildVis>,
 }
 
 #[derive(Resource, Default)]
 struct UnitEntities(BTreeMap<UnitId, Entity>);
 
-/// Rendered corpses and wrecks (sim features with a corpse origin).
+/// Rendered live sim features (gameplay map features, corpses, wrecks).
 #[derive(Resource, Default)]
-struct CorpseEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
+struct FeatureEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
 
 #[derive(Component)]
 struct HudTop;
@@ -137,6 +165,106 @@ struct HudTop;
 struct HudPanel;
 #[derive(Component)]
 struct HudWheel;
+#[derive(Component)]
+struct HudInfo;
+#[derive(Component)]
+struct HudStatus;
+#[derive(Component)]
+struct HudAlert;
+
+/// Width of the bottom-left panel.
+const HUD_PANEL_W: f32 = 400.0;
+
+/// A bar in the selection panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BarKind {
+    Health,
+    Mana,
+    Build,
+}
+
+impl BarKind {
+    fn label(self) -> &'static str {
+        match self {
+            BarKind::Health => "Health",
+            BarKind::Mana => "Mana",
+            BarKind::Build => "Built",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            BarKind::Health => Color::srgb(0.2, 0.85, 0.2),
+            BarKind::Mana => Color::srgb(0.3, 0.5, 1.0),
+            BarKind::Build => Color::srgb(0.95, 0.75, 0.25),
+        }
+    }
+}
+
+#[derive(Component)]
+struct HudBar(BarKind);
+#[derive(Component)]
+struct HudBarFill(BarKind);
+/// Under the health fill: what a frame's progress has earned.
+#[derive(Component)]
+struct HudBarEarned;
+#[derive(Component)]
+struct HudBarText(BarKind);
+
+/// A clickable HUD button: it presses the same key as the keyboard
+/// binding, so it does exactly what the key (or wheel slot) does.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonKind {
+    /// `ORDER_BUTTONS[i]`.
+    Order(usize),
+    /// Build option `i` (key `f<i+1>`).
+    Build(usize),
+}
+
+#[derive(Component)]
+struct HudButtonLabel;
+
+/// Order buttons: label and the mouse/keyboard profile's key.
+const ORDER_BUTTONS: [(&str, &str); 7] = [
+    ("Stop", "s"),
+    ("Patrol", "p"),
+    ("Guard", "g"),
+    ("Spell", "c"),
+    ("Hold", "h"),
+    ("Return", "r"),
+    ("Fire", "f"),
+];
+
+/// Build buttons (the profile binds F1-F8).
+const BUILD_BUTTONS: usize = 8;
+
+impl ButtonKind {
+    fn key(self) -> String {
+        match self {
+            ButtonKind::Order(i) => ORDER_BUTTONS[i].1.to_string(),
+            ButtonKind::Build(i) => format!("f{}", i + 1),
+        }
+    }
+}
+
+fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
+    let b = commands
+        .spawn((
+            Node {
+                width: Val::Px(width),
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.16, 0.14, 0.11)),
+            BorderColor::all(Color::srgb(0.55, 0.48, 0.3)),
+            Visibility::Hidden,
+            kind,
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((Text::new(""), hud_text(13.0), HudButtonLabel, ChildOf(b)));
+}
 
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -151,18 +279,21 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if args.demo {
         session.log = crate::game::demo_log(&session);
     }
-    let ground = terrain::load(&vfs, &args.map)?;
+    let ground = terrain::load(&vfs, &args.map, session.map.palette.as_deref())?;
     let tex = TextureIndex::load(&vfs);
     eprintln!(
-        "loaded {} ({}x{} cells, {} defs, {} textures, {} missing tile pieces) in {:.2}s",
+        "loaded {} ({}x{} cells, {} defs, {} textures + {} in anims/, {} missing tile pieces) in {:.2}s",
         args.map,
         ground.cells.0,
         ground.cells.1,
         session.defs.len(),
         tex.len(),
+        tex.anim_len(),
         ground.missing,
         t0.elapsed().as_secs_f32()
     );
+    let kingdom = session.map.kingdom.clone();
+    let fog_cells = ground.cells;
     let (w, h) = args.window_size();
     let focus = parse_focus(&args.focus).ok_or("bad --focus")?;
     let snap = session.snapshot();
@@ -183,49 +314,88 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             ..default()
         }),
         ..default()
-    }))
-    .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.07)))
-    .insert_non_send(Content { vfs, tex })
-    .insert_non_send(SimRes {
-        session,
-        prev: snap.clone(),
-        curr: snap,
-        acc: 0.0,
-        speed: 1.0,
-        paused: false,
-    })
-    .insert_resource(Ground(Arc::new(ground)))
-    .insert_resource(CamState {
-        geom: ViewGeom {
-            target: [0.0, 0.0],
-            zoom: args.zoom,
-            size: [w as f32, h as f32],
-        },
-    })
-    .insert_resource(InputRes {
-        mapper,
-        last_axes: BTreeMap::new(),
-        last_pointer: None,
-    })
-    .init_resource::<ModelCache>()
-    .init_resource::<UnitEntities>()
-    .init_resource::<CorpseEntities>()
-    .add_systems(Startup, (setup_scene, setup_hud, setup_gizmos))
-    .add_systems(
-        Update,
-        (
-            shot_driver,
-            input_system,
-            sim_driver,
-            camera_system,
-            units_system,
-            corpses_system,
-            hud_system,
-            gizmo_system,
-            fps_report,
+    }));
+    // The construction shader must be registered before its material
+    // plugin asks for it.
+    bevy::asset::embedded_asset!(app, "build_clip.wesl");
+    let shader: Handle<bevy::shader::Shader> =
+        bevy::asset::load_embedded_asset!(&app, "build_clip.wesl");
+    let _ = BUILD_CLIP_SHADER.set(shader);
+    app.add_plugins(MaterialPlugin::<BuildMat>::default())
+        .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.07)))
+        .insert_non_send(Content {
+            vfs,
+            tex,
+            sprites: SpriteStore::default(),
+            kingdom,
+        })
+        .insert_non_send(SimRes {
+            session,
+            prev: snap.clone(),
+            curr: snap,
+            acc: 0.0,
+            speed: 1.0,
+            paused: false,
+            fog: crate::fog::FogGrid::new(fog_cells.0, fog_cells.1),
+            fog_changed: true,
+        })
+        .insert_resource(Ground(Arc::new(ground)))
+        .insert_resource(CamState {
+            geom: ViewGeom {
+                target: [0.0, 0.0],
+                zoom: args.zoom,
+                size: [w as f32, h as f32],
+            },
+        })
+        .insert_resource(InputRes {
+            mapper,
+            last_axes: BTreeMap::new(),
+            last_pointer: None,
+        })
+        .init_resource::<ModelCache>()
+        .init_resource::<UnitEntities>()
+        .init_resource::<FeatureEntities>()
+        .init_resource::<SpriteCache>()
+        .init_resource::<UnitTops>()
+        .init_resource::<FxState>()
+        .init_resource::<MinimapState>()
+        .insert_resource(FogRes {
+            enabled: !args.no_fog,
+            ..default()
+        })
+        .add_systems(
+            Startup,
+            (
+                setup_scene,
+                setup_hud,
+                setup_gizmos,
+                spawn_scenery,
+                setup_minimap,
+                setup_fog,
+            )
+                .chain(),
         )
-            .chain(),
-    );
+        .add_systems(
+            Update,
+            (
+                shot_driver,
+                input_system,
+                sim_driver,
+                camera_system,
+                units_system,
+                features_system,
+                effects_system,
+                animate_sprites,
+                showcase_system,
+                fog_system,
+                hud_system,
+                hud_widgets_system,
+                minimap_system,
+                gizmo_system,
+                fps_report,
+            )
+                .chain(),
+        );
     if let Some(path) = &args.screenshot {
         let shots = args
             .at_tick
@@ -241,10 +411,19 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             focus,
             select: args.select.clone(),
             exit_wait: 0,
+            clicks: args
+                .click
+                .chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| (c[0], c[1]))
+                .collect(),
         });
     } else {
         app.insert_resource(StartFocus(focus));
         app.add_systems(Startup, initial_focus.after(setup_scene));
+    }
+    if !args.showcase.is_empty() {
+        app.insert_resource(Showcase(args.showcase.clone()));
     }
     app.insert_resource(Outputs {
         record: args.record.clone(),
@@ -328,7 +507,7 @@ fn focus_point(s: &Session, focus: Focus) -> Option<[f32; 2]> {
             .map(|(_, u)| u.pos)?,
     };
     let h = f(w.map().height_at(pos));
-    Some([f(pos.x), f(pos.y) - h / crate::view::pitch().tan()])
+    Some([f(pos.x), f(pos.y) - crate::view::SHEAR * h])
 }
 
 fn rgba_image(w: u32, h: u32, data: Vec<u8>) -> Image {
@@ -348,7 +527,6 @@ fn rgba_image(w: u32, h: u32, data: Vec<u8>) -> Image {
 fn setup_scene(
     mut commands: Commands,
     ground: Res<Ground>,
-    sim: NonSend<SimRes>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -356,10 +534,13 @@ fn setup_scene(
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
-        Projection::Orthographic(OrthographicProjection {
-            near: 1.0,
-            far: 16000.0,
-            ..OrthographicProjection::default_3d()
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
+        Projection::custom(ObliqueProjection {
+            geom: ViewGeom {
+                target: [0.0, 0.0],
+                zoom: 1.0,
+                size: [1280.0, 720.0],
+            },
         }),
         Transform::default(),
     ));
@@ -374,7 +555,8 @@ fn setup_scene(
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, cm.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, cm.uvs);
         mesh.insert_indices(Indices::U32(cm.indices));
-        let img = rgba_image(chunk.tiles.0 * 32, chunk.tiles.1 * 32, chunk.rgba.clone());
+        let (iw, ih) = chunk.image_size();
+        let img = rgba_image(iw, ih, chunk.rgba.clone());
         let mat = materials.add(StandardMaterial {
             base_color_texture: Some(images.add(img)),
             unlit: true,
@@ -395,42 +577,6 @@ fn setup_scene(
         MeshMaterial3d(water),
         Transform::from_xyz(mw / 2.0, t.sea_level, mh / 2.0),
     ));
-    // Feature markers.
-    let blocking = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.15, 0.35, 0.12, 0.4),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-    let open = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.5, 0.45, 0.3, 0.3),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-    let mut cubes: BTreeMap<(u8, u8, u32), Handle<Mesh>> = BTreeMap::new();
-    for fb in &sim.session.features {
-        let (w, d) = (
-            f32::from(fb.footprint.0) * 16.0,
-            f32::from(fb.footprint.1) * 16.0,
-        );
-        let mesh = cubes
-            .entry((fb.footprint.0, fb.footprint.1, fb.height as u32))
-            .or_insert_with(|| meshes.add(Cuboid::new(w * 0.8, fb.height, d * 0.8)))
-            .clone();
-        let x = fb.cell.0 as f32 * 16.0 + w / 2.0;
-        let z = fb.cell.1 as f32 * 16.0 + d / 2.0;
-        let y = t.height_at(x, z) + fb.height / 2.0;
-        commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(if fb.blocking {
-                blocking.clone()
-            } else {
-                open.clone()
-            }),
-            Transform::from_xyz(x, y, z),
-        ));
-    }
 }
 
 fn setup_gizmos(mut store: ResMut<GizmoConfigStore>) {
@@ -464,18 +610,122 @@ fn setup_hud(mut commands: Commands) {
         },
         HudTop,
     ));
+    let panel = commands
+        .spawn((
+            bg,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(8.0),
+                bottom: Val::Px(8.0),
+                width: Val::Px(HUD_PANEL_W),
+                padding: UiRect::all(Val::Px(6.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            HudPanel,
+        ))
+        .id();
+    commands.spawn((Text::new(""), hud_text(15.0), HudInfo, ChildOf(panel)));
+    for kind in [BarKind::Health, BarKind::Mana, BarKind::Build] {
+        let row = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                HudBar(kind),
+                ChildOf(panel),
+            ))
+            .id();
+        commands.spawn((
+            Text::new(kind.label()),
+            hud_text(13.0),
+            Node {
+                width: Val::Px(44.0),
+                ..default()
+            },
+            ChildOf(row),
+        ));
+        let track = commands
+            .spawn((
+                Node {
+                    width: Val::Px(180.0),
+                    height: Val::Px(9.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.18, 0.05, 0.05)),
+                ChildOf(row),
+            ))
+            .id();
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(kind.color().with_alpha(0.45)),
+            HudBarEarned,
+            ChildOf(track),
+        ));
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(kind.color()),
+            HudBarFill(kind),
+            ChildOf(track),
+        ));
+        commands.spawn((
+            Text::new(""),
+            hud_text(13.0),
+            HudBarText(kind),
+            ChildOf(row),
+        ));
+    }
+    let grid = |commands: &mut Commands, panel: Entity| {
+        commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(4.0),
+                    ..default()
+                },
+                ChildOf(panel),
+            ))
+            .id()
+    };
+    let orders = grid(&mut commands, panel);
+    for i in 0..ORDER_BUTTONS.len() {
+        spawn_button(&mut commands, orders, ButtonKind::Order(i), 92.0);
+    }
+    let builds = grid(&mut commands, panel);
+    for i in 0..BUILD_BUTTONS {
+        spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
+    }
+    commands.spawn((Text::new(""), hud_text(13.0), HudStatus, ChildOf(panel)));
     commands.spawn((
         Text::new(""),
-        hud_text(15.0),
-        bg,
+        hud_text(16.0).0,
+        TextColor(Color::srgb(1.0, 0.45, 0.35)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
         Node {
             position_type: PositionType::Absolute,
+            top: Val::Px(40.0),
             left: Val::Px(8.0),
-            bottom: Val::Px(8.0),
             padding: UiRect::all(Val::Px(4.0)),
             ..default()
         },
-        HudPanel,
+        Visibility::Hidden,
+        HudAlert,
     ));
     commands.spawn((
         Text::new(""),
@@ -499,6 +749,13 @@ fn shot_driver(
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
     mut exit: MessageWriter<AppExit>,
+    hud_buttons: Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
 ) {
     let Some(mut plan) = plan else { return };
     sim.paused = true;
@@ -544,6 +801,18 @@ fn shot_driver(
                 u.orders.iter().take(2).collect::<Vec<_>>()
             );
         }
+        for imp in sim.session.sim.world().combat.impacts.iter().rev().take(3) {
+            let key = crate::game::weapon_key(imp.weapon);
+            eprintln!(
+                "  impact tick {} weapon {:?} at ({:.0}, {:.0}) by {:?}: {:?}",
+                imp.tick,
+                key,
+                f(imp.point.x),
+                f(imp.point.y),
+                imp.shooter,
+                sim.session.weapon_art.get(&key)
+            );
+        }
         let fs = &sim.session.sim.world().features;
         eprintln!(
             "  features {} (corpses spawned {})",
@@ -558,6 +827,31 @@ fn shot_driver(
         );
     }
     plan.wait += 1;
+    // `--click`: HUD clicks once the layout exists, through the same hit
+    // test and key path as a real click.
+    if plan.wait == 10 {
+        let clicks = plan.clicks.clone();
+        for (x, y) in clicks {
+            let hit = hud_hit(x, y, &hud_buttons, &hud_panel);
+            eprintln!("  click ({x}, {y}): {hit:?}");
+            if let Some(Some(k)) = hit {
+                let tick = sim.session.tick();
+                let view = SimView {
+                    world: sim.session.sim.world(),
+                    local: sim.session.local,
+                };
+                for kind in [
+                    EventKind::KeyDown { key: Key(k.key()) },
+                    EventKind::KeyUp { key: Key(k.key()) },
+                ] {
+                    let outs = input
+                        .mapper
+                        .handle(&InputEvent::new(2_000_000, kind), &view, tick);
+                    eprintln!("    -> {outs:?}");
+                }
+            }
+        }
+    }
     // Give assets a few frames to upload before capturing.
     if plan.wait >= if plan.requested == 0 { 150 } else { 20 } {
         let saved = plan.saved.clone();
@@ -730,6 +1024,14 @@ fn input_system(
     mut sim: NonSendMut<SimRes>,
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
+    mut minimap: ResMut<MinimapState>,
+    hud_buttons: Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
 ) {
     if let Ok(win) = windows.single() {
         cam.geom.size = [win.width(), win.height()];
@@ -752,11 +1054,52 @@ fn input_system(
             }
         }
     }
+    // Minimap: a left click or drag on it moves the camera and is not
+    // passed to the mapper (so it neither selects nor deselects).
+    let mouse_pos = windows.single().ok().and_then(|w| w.cursor_position());
+    let mm_geom = minimap.geom(geom.size);
+    if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
+        && mouse.just_pressed(MouseButton::Left)
+        && mg.contains(pos.x, pos.y)
+    {
+        minimap.mouse_drag = true;
+    }
+    if minimap.mouse_drag {
+        if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
+            cam.geom.target = mg.target_at(pos.x, pos.y);
+        }
+        if !mouse.pressed(MouseButton::Left) {
+            minimap.mouse_drag = false;
+        }
+    }
+    // HUD panel and buttons: a click there presses the button's key (the
+    // same action as the keyboard) and never reaches the world.
+    let mut pressed_keys: Vec<String> = Vec::new();
+    if let Some(pos) = mouse_pos
+        && mouse.just_pressed(MouseButton::Left)
+        && !minimap.mouse_drag
+        && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
+    {
+        minimap.ui_held = true;
+        if let Some(k) = hit {
+            pressed_keys.push(k.key());
+        }
+    }
+    let swallow_left = minimap.mouse_drag
+        || minimap.ui_held
+        || mouse.just_released(MouseButton::Left) && minimap.swallow_release;
+    minimap.swallow_release = minimap.mouse_drag || minimap.ui_held;
+    if !mouse.pressed(MouseButton::Left) {
+        minimap.ui_held = false;
+    }
     for (mb, b) in [
         (MouseButton::Left, InButton::MouseLeft),
         (MouseButton::Right, InButton::MouseRight),
         (MouseButton::Middle, InButton::MouseMiddle),
     ] {
+        if mb == MouseButton::Left && swallow_left {
+            continue;
+        }
         if mouse.just_pressed(mb) {
             events.push(EventKind::ButtonDown { button: b });
         }
@@ -776,7 +1119,36 @@ fn input_system(
     }
     // One pad drives the mapper.
     if let Some(pad) = pads.iter().next() {
+        // A with the virtual cursor over the minimap jumps the camera there.
+        let c = input.mapper.cursor_world();
+        let (cx, cz) = (f(c.x), f(c.y));
+        let csp = geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
+        let mut swallow_a = false;
+        if let Some(mg) = mm_geom
+            && mg.contains(csp[0], csp[1])
+            && pad.just_pressed(GamepadButton::South)
+        {
+            cam.geom.target = mg.target_at(csp[0], csp[1]);
+            minimap.pad_swallow = true;
+        }
+        if pad.just_pressed(GamepadButton::South)
+            && let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel)
+        {
+            minimap.pad_swallow = true;
+            if let Some(k) = hit {
+                pressed_keys.push(k.key());
+            }
+        }
+        if minimap.pad_swallow {
+            swallow_a = true;
+            if pad.just_released(GamepadButton::South) || !pad.pressed(GamepadButton::South) {
+                minimap.pad_swallow = false;
+            }
+        }
         for (gb, b) in PAD_BUTTONS {
+            if gb == GamepadButton::South && swallow_a {
+                continue;
+            }
             if pad.just_pressed(gb) {
                 events.push(EventKind::ButtonDown { button: b });
             }
@@ -798,6 +1170,12 @@ fn input_system(
                 events.push(EventKind::Axis { axis, value: q });
             }
         }
+    }
+    for k in pressed_keys {
+        events.push(EventKind::KeyDown {
+            key: Key(k.clone()),
+        });
+        events.push(EventKind::KeyUp { key: Key(k) });
     }
     events.push(EventKind::Frame);
 
@@ -893,22 +1271,75 @@ fn sim_driver(time: Res<Time>, plan: Option<Res<ShotPlan>>, mut sim: NonSendMut<
     }
 }
 
+/// Depth range of the oblique projection, in units of `y + SHEAR * z`
+/// either side of the camera (covers a 4-world-unit-per-pixel view of a
+/// 1080-px window plus every height).
+const DEPTH_RANGE: f32 = 8000.0;
+
+/// TA's oblique projection as a Bevy camera projection (see
+/// [`ViewGeom`]): the camera sits at `(target.x, 0, target.z)` with no
+/// rotation and this matrix does the shear.
+#[derive(Debug, Clone)]
+struct ObliqueProjection {
+    geom: ViewGeom,
+}
+
+impl bevy::camera::CameraProjection for ObliqueProjection {
+    fn get_clip_from_view(&self) -> Mat4 {
+        Mat4::from_cols_array_2d(&self.geom.clip_from_view(DEPTH_RANGE))
+    }
+
+    fn get_clip_from_view_for_sub(&self, _sub_view: &bevy::camera::SubCameraView) -> Mat4 {
+        self.get_clip_from_view()
+    }
+
+    fn update(&mut self, width: f32, height: f32) {
+        self.geom.size = [width, height];
+    }
+
+    fn far(&self) -> f32 {
+        DEPTH_RANGE
+    }
+
+    fn get_frustum_corners(&self, _z_near: f32, _z_far: f32) -> [bevy::math::Vec3A; 8] {
+        let inv = self.get_clip_from_view().inverse();
+        let c = |x: f32, y: f32, z: f32| {
+            bevy::math::Vec3A::from(inv.project_point3(Vec3::new(x, y, z)))
+        };
+        [
+            c(1.0, -1.0, 1.0),
+            c(1.0, 1.0, 1.0),
+            c(-1.0, 1.0, 1.0),
+            c(-1.0, -1.0, 1.0),
+            c(1.0, -1.0, 0.0),
+            c(1.0, 1.0, 0.0),
+            c(-1.0, 1.0, 0.0),
+            c(-1.0, -1.0, 0.0),
+        ]
+    }
+
+    fn compute_frustum(
+        &self,
+        camera_transform: &GlobalTransform,
+    ) -> bevy::camera::primitives::Frustum {
+        let clip_from_world = self.get_clip_from_view() * camera_transform.affine().inverse();
+        bevy::camera::primitives::Frustum(bevy::shape::ViewFrustum::from_clip_from_world(
+            &clip_from_world,
+        ))
+    }
+}
+
 fn camera_system(
     cam: Res<CamState>,
     mut q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let g = cam.geom;
-    let back = g.back();
     for (mut tf, mut proj) in &mut q {
-        let target = Vec3::new(g.target[0], 0.0, g.target[1]);
-        let eye = target + Vec3::from_array(back) * 6000.0;
-        *tf = Transform::from_translation(eye).looking_at(target, Vec3::Y);
-        if let Projection::Orthographic(o) = &mut *proj {
-            o.scaling_mode = bevy::camera::ScalingMode::Fixed {
-                width: g.size[0] * g.zoom,
-                height: g.size[1] * g.zoom,
-            };
-            o.scale = 1.0;
+        *tf = Transform::from_xyz(g.target[0], 0.0, g.target[1]);
+        if let Projection::Custom(c) = &mut *proj
+            && let Some(o) = c.get_mut::<ObliqueProjection>()
+        {
+            o.geom = g;
         }
     }
 }
@@ -966,7 +1397,86 @@ fn upload_model(
             }),
         })
         .collect();
-    ModelAssets { pieces, material }
+    ModelAssets {
+        pieces,
+        material,
+        y_range: model_y_range(built),
+    }
+}
+
+/// Lowest and highest vertex height of a model at rest pose (piece offsets
+/// accumulated down the tree).
+fn model_y_range(built: &BuiltModel) -> (f32, f32) {
+    let mut origin_y = vec![0.0f32; built.pieces.len()];
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for (i, p) in built.pieces.iter().enumerate() {
+        let base = p.parent.map_or(0.0, |q| origin_y[q]);
+        origin_y[i] = base + p.offset[1];
+        if let Some(m) = &p.mesh {
+            for v in &m.positions {
+                lo = lo.min(origin_y[i] + v[1]);
+                hi = hi.max(origin_y[i] + v[1]);
+            }
+        }
+    }
+    if lo > hi {
+        (0.0, 1.0)
+    } else {
+        (lo, hi.max(lo + 1.0))
+    }
+}
+
+/// Material for units under construction: the standard material cut at a
+/// world height by `build_clip.wesl`.
+type BuildMat = bevy::pbr::ExtendedMaterial<StandardMaterial, BuildClip>;
+
+/// Uniform of `build_clip.wesl`.
+#[derive(Asset, bevy::render::render_resource::AsBindGroup, Reflect, Debug, Clone, Default)]
+struct BuildClip {
+    /// World height of the cut.
+    #[uniform(100)]
+    clip_y: f32,
+    /// 0: keep below the cut (built part); 1: keep above (ghost).
+    #[uniform(100)]
+    keep_above: f32,
+    #[uniform(100)]
+    _pad1: f32,
+    #[uniform(100)]
+    _pad2: f32,
+}
+
+static BUILD_CLIP_SHADER: std::sync::OnceLock<Handle<bevy::shader::Shader>> =
+    std::sync::OnceLock::new();
+
+impl bevy::pbr::MaterialExtension for BuildClip {
+    fn fragment_shader() -> bevy::shader::ShaderRef {
+        match BUILD_CLIP_SHADER.get() {
+            Some(h) => bevy::shader::ShaderRef::Handle(h.clone()),
+            None => bevy::shader::ShaderRef::Default,
+        }
+    }
+}
+
+/// Ghost of the unbuilt part (**Chosen**: TA:K's own build-up look is not
+/// documented; a pale translucent copy above the rising cut reads as "being
+/// built" and keeps the finished shape visible).
+const GHOST_RGBA: [f32; 4] = [0.7, 0.9, 1.0, 0.6];
+
+/// Height of each unit's model top at rest pose (for bars above it).
+#[derive(Resource, Default)]
+struct UnitTops(BTreeMap<UnitId, f32>);
+
+/// A unit's construction look while it is a frame.
+struct BuildVis {
+    solid: Handle<BuildMat>,
+    ghost: Handle<BuildMat>,
+    /// Mesh entities with the solid build material.
+    meshes: Vec<Entity>,
+    /// Ghost mesh entities (children of `meshes`).
+    ghosts: Vec<Entity>,
+    /// The finished material to swap back to.
+    material: Handle<StandardMaterial>,
+    y_range: (f32, f32),
 }
 
 /// Heading (0 = east, quarter = south) to a rotation of the model, whose
@@ -991,7 +1501,10 @@ fn units_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    vis_q: Query<&UnitVis>,
+    mut build_mats: ResMut<Assets<BuildMat>>,
+    mut tops: ResMut<UnitTops>,
+    fog: Res<FogRes>,
+    mut vis_q: Query<&mut UnitVis>,
     mut tf_q: Query<&mut Transform>,
     mut v_q: Query<&mut Visibility>,
 ) {
@@ -1009,6 +1522,7 @@ fn units_system(
         if let Some(e) = ents.0.remove(&id) {
             commands.entity(e).despawn();
         }
+        tops.0.remove(&id);
     }
     for u in &sim.curr.units {
         let p = prev.get(&u.id).copied();
@@ -1037,6 +1551,9 @@ fn units_system(
                         usize::from(u.owner),
                     ) {
                         Ok(b) => {
+                            if !b.stand_ins.is_empty() {
+                                info!("{}: stand-in textures {:?}", def.object, b.stand_ins);
+                            }
                             if !b.missing.is_empty() {
                                 warn!("{}: missing textures {:?}", def.object, b.missing);
                             }
@@ -1056,7 +1573,42 @@ fn units_system(
                 .clone();
             let root = commands.spawn((root_tf, Visibility::default())).id();
             let mut pieces = Vec::new();
+            let mut build = None;
             if let Some(a) = assets {
+                tops.0.insert(u.id, a.y_range.1);
+                let building = u.build_percent_left > 0;
+                if building {
+                    let mk = |keep_above: f32, mats: &Assets<StandardMaterial>| {
+                        let mut base = mats.get(&a.material).cloned().unwrap_or_default();
+                        if keep_above > 0.5 {
+                            base.base_color = Color::srgba(
+                                GHOST_RGBA[0],
+                                GHOST_RGBA[1],
+                                GHOST_RGBA[2],
+                                GHOST_RGBA[3],
+                            );
+                            base.alpha_mode = AlphaMode::Blend;
+                        }
+                        BuildMat {
+                            base,
+                            extension: BuildClip {
+                                clip_y: g + a.y_range.0,
+                                keep_above,
+                                ..default()
+                            },
+                        }
+                    };
+                    let solid = build_mats.add(mk(0.0, &materials));
+                    let ghost = build_mats.add(mk(1.0, &materials));
+                    build = Some(BuildVis {
+                        solid,
+                        ghost,
+                        meshes: Vec::new(),
+                        ghosts: Vec::new(),
+                        material: a.material.clone(),
+                        y_range: a.y_range,
+                    });
+                }
                 // COB piece index for each model piece, by the script type's
                 // name map.
                 let mut cob_of = vec![None; a.pieces.len()];
@@ -1081,8 +1633,8 @@ fn units_system(
                             Name::new(pa.name.clone()),
                         ))
                         .id();
-                    let me = pa.mesh.as_ref().map(|m| {
-                        commands
+                    let me = pa.mesh.as_ref().map(|m| match &mut build {
+                        None => commands
                             .spawn((
                                 Mesh3d(m.clone()),
                                 MeshMaterial3d(a.material.clone()),
@@ -1090,21 +1642,95 @@ fn units_system(
                                 Visibility::default(),
                                 ChildOf(pe),
                             ))
-                            .id()
+                            .id(),
+                        Some(b) => {
+                            let e = commands
+                                .spawn((
+                                    Mesh3d(m.clone()),
+                                    MeshMaterial3d(b.solid.clone()),
+                                    Transform::default(),
+                                    Visibility::default(),
+                                    ChildOf(pe),
+                                ))
+                                .id();
+                            let gh = commands
+                                .spawn((
+                                    Mesh3d(m.clone()),
+                                    MeshMaterial3d(b.ghost.clone()),
+                                    Transform::default(),
+                                    Visibility::default(),
+                                    ChildOf(e),
+                                ))
+                                .id();
+                            b.meshes.push(e);
+                            b.ghosts.push(gh);
+                            e
+                        }
                     });
                     ids.push(pe);
                     pieces.push((pe, me, cob_of[i], pa.offset));
                 }
             }
-            commands.entity(root).insert(UnitVis { id: u.id, pieces });
+            commands.entity(root).insert(UnitVis {
+                id: u.id,
+                pieces,
+                build,
+            });
             ents.0.insert(u.id, root);
             continue;
         };
         if let Ok(mut tf) = tf_q.get_mut(e) {
             *tf = root_tf;
         }
-        let Ok(vis) = vis_q.get(e) else { continue };
+        // Enemies outside the local player's sight are not drawn.
+        let shown = PlayerId(u.owner) == sim.session.local || fog_visible(&fog, &sim, x, y);
+        if let Ok(mut v) = v_q.get_mut(e) {
+            let want = if shown {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
+        }
+        let Ok(mut vis) = vis_q.get_mut(e) else {
+            continue;
+        };
         debug_assert_eq!(vis.id, u.id);
+        // Construction: move the cut with the build progress; swap to the
+        // finished material once complete.
+        if let Some(b) = &vis.build {
+            if u.build_percent_left > 0 {
+                let done = lerp(
+                    p.map_or(u.build_done, |p| p.build_done),
+                    u.build_done,
+                    alpha,
+                );
+                let clip = g + b.y_range.0 + (b.y_range.1 - b.y_range.0) * done.clamp(0.0, 1.0);
+                debug!(
+                    "build cut {:?}: y {:?} ground {g} done {done} clip {clip}",
+                    u.id, b.y_range
+                );
+                for h in [&b.solid, &b.ghost] {
+                    if let Some(mut m) = build_mats.get_mut(h) {
+                        m.extension.clip_y = clip;
+                    }
+                }
+            } else if let Some(b) = vis.build.take() {
+                for me in b.meshes {
+                    commands
+                        .entity(me)
+                        .remove::<MeshMaterial3d<BuildMat>>()
+                        .insert(MeshMaterial3d(b.material.clone()));
+                }
+                for gh in b.ghosts {
+                    commands.entity(gh).despawn();
+                }
+                build_mats.remove(&b.solid);
+                build_mats.remove(&b.ghost);
+            }
+        }
         for &(pe, me, cob, base) in &vis.pieces {
             let Some(ci) = cob else { continue };
             let Some(now) = u.pieces.get(ci) else {
@@ -1132,27 +1758,21 @@ fn units_system(
     }
 }
 
-/// Corpses and wrecks from the sim's feature layer, drawn with their 3DO
-/// (`<unit>_dead`) at rest pose, or a box when the feature has no model.
-/// Map-placed features keep the static markers from `setup_scene`.
-fn corpses_system(
+/// Live features from the sim's feature layer: gameplay-relevant map
+/// features (henges, rocks, trees that block or can be reclaimed) and
+/// corpses/wrecks, drawn with their art ([`spawn_feature_art`]) and removed
+/// when the sim removes them. Scenery the sim does not keep is drawn once
+/// by [`spawn_scenery`].
+fn features_system(
     mut commands: Commands,
     sim: NonSend<SimRes>,
     content: NonSend<Content>,
     ground: Res<Ground>,
-    mut cache: ResMut<ModelCache>,
-    mut ents: ResMut<CorpseEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut art_assets: ArtAssets,
+    mut ents: ResMut<FeatureEntities>,
 ) {
-    use tak_sim::features::Origin;
     let fs = &sim.session.sim.world().features;
-    let live: Vec<_> = fs
-        .iter()
-        .filter(|(_, f)| matches!(f.origin, Origin::Corpse(_)))
-        .collect();
-    let keep: std::collections::BTreeSet<_> = live.iter().map(|(id, _)| *id).collect();
+    let keep: std::collections::BTreeSet<_> = fs.iter().map(|(id, _)| id).collect();
     let gone: Vec<_> = ents
         .0
         .keys()
@@ -1164,70 +1784,1127 @@ fn corpses_system(
             commands.entity(e).despawn();
         }
     }
-    for (id, feat) in live {
+    for (id, feat) in fs.iter() {
         if ents.0.contains_key(&id) {
             continue;
         }
         let r = feat.rect;
         let x = (r.x as f32 + r.w as f32 / 2.0) * 16.0;
         let z = (r.z as f32 + r.h as f32 / 2.0) * 16.0;
-        let tf = Transform::from_xyz(x, ground.0.height_at(x, z), z)
-            .with_rotation(heading_rotation(angle_rad(feat.heading.raw())));
-        let object = fs
+        let name = fs
             .def(feat)
-            .and_then(|d| d.object.clone())
-            .map(|o| o.to_ascii_lowercase());
-        let root = commands.spawn((tf, Visibility::default())).id();
-        let assets = object.and_then(|o| {
-            cache
+            .map(|d| d.name.to_ascii_lowercase())
+            .unwrap_or_default();
+        let art = sim
+            .session
+            .feature_art
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| FeatureArt {
+                object: fs.def(feat).and_then(|d| d.object.clone()),
+                ..FeatureArt::default()
+            });
+        let heading = match feat.origin {
+            tak_sim::features::Origin::Corpse(_) => Some(angle_rad(feat.heading.raw())),
+            tak_sim::features::Origin::Map => None,
+        };
+        let pos = Vec3::new(x, ground.0.height_at(x, z), z);
+        let root = spawn_feature_art(
+            &mut commands,
+            &content,
+            &mut art_assets,
+            &art,
+            pos,
+            heading,
+            (r.x as u32)
+                .wrapping_mul(7)
+                .wrapping_add((r.z as u32).wrapping_mul(13)),
+        )
+        .unwrap_or_else(|| {
+            // No art: a low box over the footprint.
+            let (w, d) = (r.w as f32 * 16.0, r.h as f32 * 16.0);
+            let mat = art_assets.materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.22, 0.15),
+                unlit: true,
+                ..default()
+            });
+            let root = commands
+                .spawn((Transform::from_translation(pos), Visibility::default()))
+                .id();
+            commands.spawn((
+                Mesh3d(art_assets.meshes.add(Cuboid::new(w * 0.7, 6.0, d * 0.7))),
+                MeshMaterial3d(mat),
+                Transform::from_xyz(0.0, 3.0, 0.0),
+                ChildOf(root),
+            ));
+            root
+        });
+        ents.0.insert(id, root);
+    }
+}
+
+/// Asset stores the feature and effect spawners share.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ArtAssets<'w> {
+    models: ResMut<'w, ModelCache>,
+    sprites: ResMut<'w, SpriteCache>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    images: ResMut<'w, Assets<Image>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+}
+
+/// GPU assets of one sprite sequence: a quad and a material per frame,
+/// shared by every instance (so Bevy batches them).
+struct SpriteAssets {
+    frames: Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+    /// Durations only (pixels dropped), for [`SpriteSeq::frame_at`].
+    timing: SpriteSeq,
+}
+
+/// How a sprite is blended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SpriteBlend {
+    /// Cut out at alpha 0.5 (feature and unit art, indexed effects).
+    Mask,
+    /// Shadow: the silhouette at half opacity (`shadtrans=1`).
+    Shadow,
+    /// Alpha blend by the frame's own alpha (TAF frames with the `0xFF00`
+    /// subframe word: smoke, dust, blood).
+    Alpha,
+    /// Additive (other TAF frames: fire, sparks, lightning, rings).
+    Add,
+}
+
+impl SpriteBlend {
+    /// The blend an effect sequence gets (**Chosen** reading of the Unknown
+    /// `0xFF00` word: the 37 TAF pairs carrying it are grey smoke, dust and
+    /// blood, which look right alpha-blended and wrong additive; the rest
+    /// are glowing fire and magic, which look right additive).
+    fn for_effect(seq: &SpriteSeq) -> SpriteBlend {
+        match seq.frames.first() {
+            Some(f) if f.direct && f.subframe_word == 0xFF00 => SpriteBlend::Alpha,
+            Some(f) if f.direct => SpriteBlend::Add,
+            _ => SpriteBlend::Mask,
+        }
+    }
+}
+
+/// Sprite assets by (file, sequence, lift in 1/4 units, blend).
+#[derive(Resource, Default)]
+struct SpriteCache(BTreeMap<(String, String, i32, SpriteBlend), Option<Arc<SpriteAssets>>>);
+
+/// Opacity of feature shadows (**Chosen**; TA draws `shadtrans` shadows
+/// translucent, the exact level is Unknown).
+const SHADOW_ALPHA: f32 = 0.85;
+
+fn sprite_assets(
+    art: &mut ArtAssets,
+    seq: &SpriteSeq,
+    key: (String, String, i32, SpriteBlend),
+) -> Option<Arc<SpriteAssets>> {
+    if let Some(a) = art.sprites.0.get(&key) {
+        return a.clone();
+    }
+    let lift = key.2 as f32 / 4.0;
+    let blend = key.3;
+    let frames = seq
+        .frames
+        .iter()
+        .map(|fr| {
+            let (pos, uv, idx) = billboard(fr, lift);
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos.to_vec());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.to_vec());
+            mesh.insert_indices(Indices::U32(idx.to_vec()));
+            let mut px = fr.rgba.clone();
+            if blend == SpriteBlend::Shadow {
+                // Shadow opacity baked into the texture (a material alpha
+                // below 0.5 did not show on lavapipe).
+                let a = (SHADOW_ALPHA * 255.0) as u8;
+                for p in px.chunks_exact_mut(4) {
+                    p[3] = p[3].min(a);
+                }
+            }
+            let img = art.images.add(rgba_image(fr.w, fr.h, px));
+            let material = match blend {
+                SpriteBlend::Mask => StandardMaterial {
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Mask(0.5),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+                SpriteBlend::Shadow | SpriteBlend::Alpha => StandardMaterial {
+                    base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+                SpriteBlend::Add => StandardMaterial {
+                    base_color_texture: Some(img),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Add,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                },
+            };
+            (art.meshes.add(mesh), art.materials.add(material))
+        })
+        .collect();
+    let mut timing = seq.clone();
+    for f in &mut timing.frames {
+        f.rgba = Vec::new();
+    }
+    let a = Some(Arc::new(SpriteAssets { frames, timing }));
+    art.sprites.0.insert(key, a.clone());
+    a
+}
+
+/// A sprite that plays its sequence.
+#[derive(Component)]
+struct Animated {
+    assets: Arc<SpriteAssets>,
+    phase: u32,
+    shown: usize,
+}
+
+/// Step animated sprites by sim tick.
+fn animate_sprites(
+    sim: NonSend<SimRes>,
+    mut q: Query<(
+        &mut Animated,
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    let tick = sim.session.tick().0;
+    for (mut a, mut mesh, mut mat) in &mut q {
+        let i = a.assets.timing.frame_at(tick.wrapping_add(a.phase));
+        if i != a.shown {
+            a.shown = i;
+            let (m, t) = &a.assets.frames[i];
+            mesh.0 = m.clone();
+            mat.0 = t.clone();
+        }
+    }
+}
+
+/// Explosions, hit effects and projectiles in flight.
+#[derive(Resource, Default)]
+struct FxState {
+    /// Impacts with a tick below this were handled.
+    impact_cursor: u32,
+    /// Projectile visuals by key: entity and where it was first seen.
+    projectiles: BTreeMap<ProjKey, (Entity, [f32; 2])>,
+}
+
+type ProjKey = (UnitId, (u32, u8), u32);
+
+/// A one-shot effect sprite playing from sim tick `start`.
+#[derive(Component)]
+struct Effect {
+    assets: Arc<SpriteAssets>,
+    start: u32,
+    shown: usize,
+}
+
+/// Effect sprite assets by name (and weapon GAF file), cached.
+fn effect_assets(
+    content: &Content,
+    art: &mut ArtAssets,
+    name: &str,
+    file: Option<&str>,
+) -> Option<Arc<SpriteAssets>> {
+    let key_name = format!("fx:{}:{}", file.unwrap_or(""), name.to_ascii_lowercase());
+    // Quick path: any lift/blend variant already built for this name.
+    if let Some((_, a)) = art
+        .sprites
+        .0
+        .range((key_name.clone(), String::new(), i32::MIN, SpriteBlend::Mask)..)
+        .next()
+        .filter(|(k, _)| k.0 == key_name)
+    {
+        return a.clone();
+    }
+    let seq = content.sprites.effect_seq(&content.vfs, name, file);
+    let Some(seq) = seq else {
+        art.sprites
+            .0
+            .insert((key_name, String::new(), 0, SpriteBlend::Mask), None);
+        return None;
+    };
+    let lift = lift_for(seq.max_below(), 2.0);
+    let blend = SpriteBlend::for_effect(&seq);
+    sprite_assets(
+        art,
+        &seq,
+        (
+            key_name,
+            name.to_ascii_lowercase(),
+            (lift * 4.0).round() as i32,
+            blend,
+        ),
+    )
+}
+
+/// Total duration of a sequence in ticks.
+fn seq_ticks(seq: &SpriteSeq) -> u32 {
+    seq.frames.iter().map(|f| f.duration.max(1)).sum()
+}
+
+/// Hit explosions (from the sim's impact log: projectile landings and
+/// instant hits alike, death explosions included), played once by sim
+/// tick; projectiles in flight drawn with their model or sprite.
+fn effects_system(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    mut art_assets: ArtAssets,
+    mut fx: ResMut<FxState>,
+    mut effects: Query<(
+        Entity,
+        &mut Effect,
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut tf_q: Query<&mut Transform, Without<Effect>>,
+) {
+    let s = &sim.session;
+    let w = s.sim.world();
+    let now = s.tick().0;
+    // New impacts.
+    let cursor = fx.impact_cursor;
+    for imp in &w.combat.impacts {
+        if imp.tick < cursor || imp.tick >= now {
+            continue;
+        }
+        let key = crate::game::weapon_key(imp.weapon);
+        let Some(class) = s.weapon_art.get(&key).and_then(|a| a.explosion.as_ref()) else {
+            continue;
+        };
+        let Some(names) = s.explosions.get(class) else {
+            continue;
+        };
+        if names.is_empty() {
+            continue;
+        }
+        let (px, pz) = (f(imp.point.x), f(imp.point.y));
+        let pick = (imp.tick as usize + (px as usize) * 7 + (pz as usize) * 13) % names.len();
+        let Some(a) = effect_assets(&content, &mut art_assets, &names[pick], None) else {
+            continue;
+        };
+        if now.saturating_sub(imp.tick) >= seq_ticks(&a.timing) {
+            continue;
+        }
+        let (m, t) = a.frames[0].clone();
+        commands.spawn((
+            Mesh3d(m),
+            MeshMaterial3d(t),
+            Transform::from_xyz(px, ground.0.height_at(px, pz), pz),
+            Visibility::default(),
+            Effect {
+                assets: a,
+                start: imp.tick,
+                shown: 0,
+            },
+        ));
+    }
+    fx.impact_cursor = now;
+    // Age effects.
+    for (e, mut eff, mut mesh, mut mat) in &mut effects {
+        let age = now.saturating_sub(eff.start);
+        if age >= seq_ticks(&eff.assets.timing) {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let i = eff.assets.timing.frame_at(age);
+        if i != eff.shown {
+            eff.shown = i;
+            let (m, t) = &eff.assets.frames[i];
+            mesh.0 = m.clone();
+            mat.0 = t.clone();
+        }
+    }
+    // Projectiles.
+    let alpha = sim.alpha();
+    let prev: BTreeMap<ProjKey, &crate::game::ProjSnap> =
+        sim.prev.projectiles.iter().map(|p| (p.key, p)).collect();
+    let live: std::collections::BTreeSet<ProjKey> =
+        sim.curr.projectiles.iter().map(|p| p.key).collect();
+    let gone: Vec<ProjKey> = fx
+        .projectiles
+        .keys()
+        .filter(|k| !live.contains(k))
+        .copied()
+        .collect();
+    for k in gone {
+        if let Some((e, _)) = fx.projectiles.remove(&k) {
+            commands.entity(e).despawn();
+        }
+    }
+    for p in &sim.curr.projectiles {
+        let Some(art) = s.weapon_art.get(&p.weapon) else {
+            continue;
+        };
+        let q = prev.get(&p.key).copied();
+        let x = lerp(q.map_or(p.x, |q| q.x), p.x, alpha);
+        let z = lerp(q.map_or(p.y, |q| q.y), p.y, alpha);
+        let g = lerp(q.map_or(p.ground, |q| q.ground), p.ground, alpha);
+        let start = fx.projectiles.get(&p.key).map(|v| v.1);
+        let start = start.unwrap_or([x, z]);
+        // Ballistic shots arc (**Chosen** shape: a parabola peaking at a
+        // quarter of the range; the sim moves them on the ground only).
+        let total = ((p.dest[0] - start[0]).powi(2) + (p.dest[1] - start[1]).powi(2)).sqrt();
+        let done = ((x - start[0]).powi(2) + (z - start[1]).powi(2)).sqrt();
+        let arc = if art.kind == "ballistic" && total > 1.0 {
+            let t = (done / total).clamp(0.0, 1.0);
+            total * 0.25 * 4.0 * t * (1.0 - t)
+        } else {
+            0.0
+        };
+        let pos = Vec3::new(x, g + 18.0 + arc, z);
+        let heading = (p.dest[1] - z).atan2(p.dest[0] - x);
+        let rot = heading_rotation(heading);
+        if let Some((e, _)) = fx.projectiles.get(&p.key) {
+            if let Ok(mut tf) = tf_q.get_mut(*e) {
+                tf.translation = pos;
+                if art.model.is_some() {
+                    tf.rotation = rot;
+                }
+            }
+            continue;
+        }
+        let root = commands
+            .spawn((
+                Transform::from_translation(pos).with_rotation(rot),
+                Visibility::default(),
+            ))
+            .id();
+        let mut drawn = false;
+        if let Some(o) = &art.model {
+            let ArtAssets {
+                models,
+                meshes,
+                images,
+                materials,
+                ..
+            } = &mut art_assets;
+            let assets = models
                 .models
                 .entry((o.clone(), 0))
                 .or_insert_with(|| {
-                    load_model(&content.vfs, &content.tex, &o, 0).ok().map(|b| {
-                        Arc::new(upload_model(&b, &mut meshes, &mut images, &mut materials))
-                    })
+                    load_model(&content.vfs, &content.tex, o, 0)
+                        .ok()
+                        .map(|b| Arc::new(upload_model(&b, meshes, images, materials)))
                 })
-                .clone()
+                .clone();
+            if let Some(a) = assets {
+                spawn_static_pieces(&mut commands, &a, root);
+                drawn = true;
+            }
+        }
+        if !drawn
+            && let Some(name) = &art.art
+            && let Some(a) = effect_assets(&content, &mut art_assets, name, art.art_file.as_deref())
+        {
+            commands
+                .entity(root)
+                .insert(Transform::from_translation(pos));
+            let (m, t) = a.frames[0].clone();
+            let child = commands
+                .spawn((
+                    Mesh3d(m),
+                    MeshMaterial3d(t),
+                    Transform::default(),
+                    ChildOf(root),
+                ))
+                .id();
+            if a.frames.len() > 1 {
+                commands.entity(child).insert(Animated {
+                    assets: a.clone(),
+                    phase: 0,
+                    shown: 0,
+                });
+            }
+        }
+        fx.projectiles.insert(p.key, (root, start));
+    }
+}
+
+/// Spawn a feature's art at `pos` (footprint centre on the ground): its 3DO
+/// when it names one (rest pose, rotated by `heading` if given), else its
+/// GAF sequence as a billboard with its shadow, animated when `animating`.
+/// Returns the root entity, or `None` when the feature has no drawable art.
+fn spawn_feature_art(
+    commands: &mut Commands,
+    content: &Content,
+    art_assets: &mut ArtAssets,
+    art: &FeatureArt,
+    pos: Vec3,
+    heading: Option<f32>,
+    phase: u32,
+) -> Option<Entity> {
+    if let Some(o) = &art.object {
+        let o = o.to_ascii_lowercase();
+        let ArtAssets {
+            models,
+            meshes,
+            images,
+            materials,
+            ..
+        } = art_assets;
+        let assets = models
+            .models
+            .entry((o.clone(), 0))
+            .or_insert_with(|| {
+                load_model(&content.vfs, &content.tex, &o, 0)
+                    .ok()
+                    .map(|b| Arc::new(upload_model(&b, meshes, images, materials)))
+            })
+            .clone();
+        if let Some(a) = assets {
+            let rot = heading.map_or(Quat::IDENTITY, heading_rotation);
+            let root = commands
+                .spawn((
+                    Transform::from_translation(pos).with_rotation(rot),
+                    Visibility::default(),
+                ))
+                .id();
+            spawn_static_pieces(commands, &a, root);
+            return Some(root);
+        }
+    }
+    let file = art.filename.as_ref()?;
+    let seqname = art.seqname.as_ref()?;
+    let path = format!("anims/{file}.gaf");
+    let pal = content
+        .sprites
+        .feature_palette(&content.vfs, &path, content.kingdom.as_deref());
+    let seq = content.sprites.seq(&content.vfs, &path, seqname, &pal)?;
+    let shadow = art
+        .seqname_shadow
+        .as_ref()
+        .and_then(|sn| content.sprites.seq(&content.vfs, &path, sn, &pal));
+    let below = seq
+        .max_below()
+        .max(shadow.as_ref().map_or(0, SpriteSeq::max_below));
+    let lift = lift_for(below, 6.0);
+    let q = |l: f32| (l * 4.0).round() as i32;
+    let root = commands
+        .spawn((Transform::from_translation(pos), Visibility::default()))
+        .id();
+    let obj = sprite_assets(
+        art_assets,
+        &seq,
+        (
+            path.clone(),
+            seqname.to_ascii_lowercase(),
+            q(lift),
+            SpriteBlend::Mask,
+        ),
+    )?;
+    let animate = art.animating && obj.frames.len() > 1;
+    let (m, t) = obj.frames[0].clone();
+    let child = commands
+        .spawn((
+            Mesh3d(m),
+            MeshMaterial3d(t),
+            Transform::default(),
+            ChildOf(root),
+        ))
+        .id();
+    if animate {
+        commands.entity(child).insert(Animated {
+            assets: obj.clone(),
+            phase,
+            shown: 0,
         });
-        match assets {
-            Some(a) => {
-                let mut ids: Vec<Entity> = Vec::new();
-                for pa in &a.pieces {
-                    let parent = pa.parent.and_then(|p| ids.get(p).copied()).unwrap_or(root);
-                    let pe = commands
-                        .spawn((
-                            Transform::from_translation(pa.offset),
-                            Visibility::default(),
-                            ChildOf(parent),
-                        ))
-                        .id();
-                    if let Some(m) = &pa.mesh {
-                        commands.spawn((
-                            Mesh3d(m.clone()),
-                            MeshMaterial3d(a.material.clone()),
-                            Transform::default(),
-                            ChildOf(pe),
-                        ));
-                    }
-                    ids.push(pe);
+    }
+    if let (Some(sh), Some(sn)) = (shadow, &art.seqname_shadow)
+        && let Some(sa) = sprite_assets(
+            art_assets,
+            &sh,
+            (
+                path.clone(),
+                sn.to_ascii_lowercase(),
+                q(lift - 3.0),
+                SpriteBlend::Shadow,
+            ),
+        )
+    {
+        let (m, t) = sa.frames[0].clone();
+        let child = commands
+            .spawn((
+                Mesh3d(m),
+                MeshMaterial3d(t),
+                Transform::default(),
+                ChildOf(root),
+            ))
+            .id();
+        if art.animating && sa.frames.len() > 1 {
+            commands.entity(child).insert(Animated {
+                assets: sa.clone(),
+                phase,
+                shown: 0,
+            });
+        }
+    }
+    Some(root)
+}
+
+/// Map features the sim does not keep (pure scenery): drawn once, never
+/// removed. The rest come from the sim's feature layer
+/// ([`features_system`]).
+fn spawn_scenery(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    mut art_assets: ArtAssets,
+) {
+    let t0 = std::time::Instant::now();
+    let mut n = 0;
+    for fb in &sim.session.features {
+        if fb.in_sim {
+            continue;
+        }
+        let Some(art) = fb.def.as_ref().and_then(|d| sim.session.feature_art.get(d)) else {
+            continue;
+        };
+        let (w, d) = (
+            f32::from(fb.footprint.0) * 16.0,
+            f32::from(fb.footprint.1) * 16.0,
+        );
+        let x = fb.cell.0 as f32 * 16.0 + w / 2.0;
+        let z = fb.cell.1 as f32 * 16.0 + d / 2.0;
+        let pos = Vec3::new(x, ground.0.height_at(x, z), z);
+        let phase = fb
+            .cell
+            .0
+            .wrapping_mul(7)
+            .wrapping_add(fb.cell.1.wrapping_mul(13));
+        if spawn_feature_art(
+            &mut commands,
+            &content,
+            &mut art_assets,
+            art,
+            pos,
+            None,
+            phase,
+        )
+        .is_some()
+        {
+            n += 1;
+        }
+    }
+    eprintln!(
+        "scenery: {n} of {} placed features drawn as scenery in {:.2}s",
+        sim.session.features.len(),
+        t0.elapsed().as_secs_f32()
+    );
+}
+
+/// Spawn a model's pieces at rest pose under `root`.
+fn spawn_static_pieces(commands: &mut Commands, a: &ModelAssets, root: Entity) {
+    let mut ids: Vec<Entity> = Vec::new();
+    for pa in &a.pieces {
+        let parent = pa.parent.and_then(|p| ids.get(p).copied()).unwrap_or(root);
+        let pe = commands
+            .spawn((
+                Transform::from_translation(pa.offset),
+                Visibility::default(),
+                ChildOf(parent),
+            ))
+            .id();
+        if let Some(m) = &pa.mesh {
+            commands.spawn((
+                Mesh3d(m.clone()),
+                MeshMaterial3d(a.material.clone()),
+                Transform::default(),
+                ChildOf(pe),
+            ));
+        }
+        ids.push(pe);
+    }
+}
+
+/// Models placed by `--showcase` (render only: the sim never sees them).
+#[derive(Resource)]
+struct Showcase(Vec<String>);
+
+/// `--showcase a,b,c`: static models in a row south of the focus point,
+/// facing the camera, for checking textures and art by eye.
+fn showcase_system(
+    mut commands: Commands,
+    show: Option<Res<Showcase>>,
+    mut done: Local<bool>,
+    sim: NonSend<SimRes>,
+    content: NonSend<Content>,
+    ground: Res<Ground>,
+    plan: Option<Res<ShotPlan>>,
+    mut cache: ResMut<ModelCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(show) = show else { return };
+    if *done || sim.session.tick().0 == 0 {
+        return;
+    }
+    *done = true;
+    let focus = plan.map_or(Focus::Monarch(0), |p| p.focus);
+    let w = sim.session.sim.world();
+    let centre = match focus {
+        Focus::Point(x, y) => [x, y],
+        _ => w
+            .players()
+            .first()
+            .and_then(|p| p.monarch.and_then(|m| w.unit(m)).map(|u| u.pos))
+            .map_or([0.0, 0.0], |p| [f(p.x), f(p.y)]),
+    };
+    let n = show.0.len() as f32;
+    for (i, name) in show.0.iter().enumerate() {
+        let o = name.to_ascii_lowercase();
+        let assets = cache
+            .models
+            .entry((o.clone(), 0))
+            .or_insert_with(|| match load_model(&content.vfs, &content.tex, &o, 0) {
+                Ok(b) => {
+                    eprintln!(
+                        "showcase {o}: stand-ins {:?} missing {:?}",
+                        b.stand_ins, b.missing
+                    );
+                    Some(Arc::new(upload_model(
+                        &b,
+                        &mut meshes,
+                        &mut images,
+                        &mut materials,
+                    )))
+                }
+                Err(e) => {
+                    eprintln!("showcase {o}: {e}");
+                    None
+                }
+            })
+            .clone();
+        let Some(a) = assets else { continue };
+        let x = centre[0] + (i as f32 - (n - 1.0) / 2.0) * 150.0;
+        let z = centre[1] + 60.0;
+        // Heading a quarter turn = facing south, toward the camera.
+        let tf = Transform::from_xyz(x, ground.0.height_at(x, z), z)
+            .with_rotation(heading_rotation(FRAC_PI_2));
+        let root = commands.spawn((tf, Visibility::default())).id();
+        spawn_static_pieces(&mut commands, &a, root);
+    }
+}
+
+/// Visual fog of war (`fog.rs`): one overlay mesh per terrain chunk, its
+/// vertex colours black with the fog opacity.
+#[derive(Resource, Default)]
+struct FogRes {
+    enabled: bool,
+    /// Per chunk: mesh, first corner (x, z), corners (nx, nz).
+    chunks: Vec<(Handle<Mesh>, i64, i64, i64, i64)>,
+    /// Minimap fog image.
+    mini: Option<Handle<Image>>,
+    /// Shown state last applied (to react to toggling).
+    applied: Option<bool>,
+}
+
+/// Height the fog layer is moved toward the viewer along the view ray: it
+/// stays over the same screen pixels but in front of everything below it
+/// (the tallest models are about 200 high), so units and features in
+/// unexplored ground are hidden too.
+const FOG_LIFT: f32 = 400.0;
+
+#[derive(Component)]
+struct FogMini;
+
+fn setup_fog(
+    mut commands: Commands,
+    ground: Res<Ground>,
+    mut fog: ResMut<FogRes>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mm_root: Query<Entity, With<MinimapRoot>>,
+) {
+    let t = &ground.0;
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        depth_bias: FOG_SORT_BIAS,
+        ..default()
+    });
+    let b = Vec3::from_array(ViewGeom::back()) * FOG_LIFT;
+    for chunk in &t.chunks {
+        let cx0 = i64::from(chunk.tile0.0 * 2);
+        let cz0 = i64::from(chunk.tile0.1 * 2);
+        let nx = i64::from(chunk.tiles.0 * 2);
+        let nz = i64::from(chunk.tiles.1 * 2);
+        let mut pos = Vec::new();
+        for z in 0..=nz {
+            for x in 0..=nx {
+                let (cx, cz) = (cx0 + x, cz0 + z);
+                let p = Vec3::new(
+                    cx as f32 * terrain::CELL,
+                    t.corner(cx, cz),
+                    cz as f32 * terrain::CELL,
+                ) + b;
+                pos.push(p.to_array());
+            }
+        }
+        let row = (nx + 1) as u32;
+        let mut idx = Vec::new();
+        for z in 0..nz as u32 {
+            for x in 0..nx as u32 {
+                let i = z * row + x;
+                idx.extend_from_slice(&[i, i + row, i + 1, i + 1, i + row, i + row + 1]);
+            }
+        }
+        let n = pos.len();
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0, 0.0, 0.0, 1.0]; n]);
+        mesh.insert_indices(Indices::U32(idx));
+        let h = meshes.add(mesh);
+        commands.spawn((
+            Mesh3d(h.clone()),
+            MeshMaterial3d(mat.clone()),
+            FogMesh(fog.chunks.len()),
+        ));
+        fog.chunks.push((h, cx0, cz0, nx, nz));
+    }
+    // Minimap overlay: one texel per cell (heights ignored: the minimap is
+    // screen-space, so fog edges sit up to a few pixels off on hills).
+    if let Ok(root) = mm_root.single() {
+        let (w, h) = t.cells;
+        let img = images.add(rgba_image(w, h, vec![0; (w * h * 4) as usize]));
+        fog.mini = Some(img.clone());
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            ImageNode {
+                image: img,
+                image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                ..default()
+            },
+            ZIndex(1),
+            FogMini,
+            ChildOf(root),
+        ));
+    }
+}
+
+/// A fog overlay chunk (its index in `FogRes::chunks`).
+#[derive(Component)]
+struct FogMesh(usize);
+
+/// Recompute the fog from the local player's units after each tick and
+/// repaint the overlay; F9 toggles it.
+fn fog_system(
+    mut sim: NonSendMut<SimRes>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut fog: ResMut<FogRes>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut vis: Query<&mut Visibility, Or<(With<FogMesh>, With<FogMini>)>>,
+    fog_meshes: Query<(Entity, &FogMesh)>,
+) {
+    let mut chunk_entities: Vec<(usize, Entity)> =
+        fog_meshes.iter().map(|(e, m)| (m.0, e)).collect();
+    chunk_entities.sort();
+    let chunk_entities: Vec<Entity> = chunk_entities.into_iter().map(|(_, e)| e).collect();
+    if keys.just_pressed(KeyCode::F9) {
+        fog.enabled = !fog.enabled;
+    }
+    let enabled = fog.enabled;
+    if fog.applied != Some(enabled) {
+        fog.applied = Some(enabled);
+        for mut v in &mut vis {
+            *v = if enabled {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        // Repaint (re-applies per-chunk visibility).
+        sim.fog_changed = true;
+    }
+    if !sim.fog_changed {
+        return;
+    }
+    sim.fog_changed = false;
+    let grid = &sim.fog;
+    let FogRes { chunks, mini, .. } = &mut *fog;
+    for (i, (h, cx0, cz0, nx, nz)) in chunks.iter().enumerate() {
+        let Some(mut mesh) = meshes.get_mut(h) else {
+            continue;
+        };
+        let mut cols = Vec::with_capacity(((nx + 1) * (nz + 1)) as usize);
+        let mut any = false;
+        for z in 0..=*nz {
+            for x in 0..=*nx {
+                let a = grid.corner_alpha(cx0 + x, cz0 + z);
+                any |= a > 0.0;
+                cols.push([0.0, 0.0, 0.0, a]);
+            }
+        }
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols);
+        // Fully clear chunks are skipped (saves a blended pass over them).
+        if let Some(e) = chunk_entities.get(i)
+            && let Ok(mut v) = vis.get_mut(*e)
+        {
+            let want = if any && enabled {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
+        }
+    }
+    if let Some(img) = mini.as_ref()
+        && let Some(mut im) = images.get_mut(img)
+    {
+        let (gw, gh) = grid.size;
+        let mut px = Vec::with_capacity((gw * gh * 4) as usize);
+        for z in 0..i64::from(gh) {
+            for x in 0..i64::from(gw) {
+                let a = match grid.cell(x, z) {
+                    crate::fog::FogCell::Unexplored => 255,
+                    crate::fog::FogCell::Explored => 140,
+                    crate::fog::FogCell::Seen => 0,
+                };
+                px.extend_from_slice(&[0, 0, 0, a]);
+            }
+        }
+        im.data = Some(px);
+    }
+}
+
+/// Whether the local player can see a world point (always, with the fog
+/// off).
+fn fog_visible(fog: &FogRes, sim: &SimRes, x: f32, z: f32) -> bool {
+    !fog.enabled || sim.fog.at(x, z) == crate::fog::FogCell::Seen
+}
+
+/// Sight radius for units whose `sightdistance` is 0 (**Chosen**).
+const FOG_MIN_SIGHT: f32 = 32.0;
+
+/// Sort bias of the fog material: transparent items are drawn back to
+/// front by view depth plus this, so the fog comes after every other
+/// translucent surface (water, shadows, ghosts, effects). A second camera
+/// for the overlay cost about 3 fps on lavapipe.
+const FOG_SORT_BIAS: f32 = 100_000.0;
+
+/// Minimap width on screen, logical pixels (height follows the image).
+const MINIMAP_W: f32 = 230.0;
+/// Gap to the window edge.
+const MINIMAP_MARGIN: f32 = 8.0;
+
+/// Minimap layout and pointer state.
+#[derive(Resource, Default)]
+struct MinimapState {
+    /// Image size, if the map has a minimap.
+    image: Option<(u32, u32)>,
+    /// Map size in world units.
+    map: [f32; 2],
+    mouse_drag: bool,
+    swallow_release: bool,
+    pad_swallow: bool,
+    /// The left button went down on the HUD panel.
+    ui_held: bool,
+}
+
+impl MinimapState {
+    /// Where the minimap is for a viewport (bottom-right corner).
+    fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
+        let (iw, ih) = self.image?;
+        let w = MINIMAP_W;
+        let h = w * ih as f32 / iw.max(1) as f32;
+        Some(MinimapGeom {
+            rect: [
+                view[0] - w - MINIMAP_MARGIN,
+                view[1] - h - MINIMAP_MARGIN,
+                w,
+                h,
+            ],
+            map: self.map,
+        })
+    }
+}
+
+#[derive(Component)]
+struct MinimapRoot;
+#[derive(Component)]
+struct MinimapView;
+#[derive(Component)]
+struct MinimapDot(usize);
+
+/// Team colours for minimap dots (**Chosen**: TA's player order blue, red,
+/// white, green, yellow, purple, cyan, orange).
+fn team_color(player: u8) -> Color {
+    const C: [(u8, u8, u8); 8] = [
+        (60, 120, 255),
+        (230, 40, 30),
+        (235, 235, 235),
+        (40, 200, 60),
+        (240, 220, 40),
+        (170, 60, 220),
+        (40, 220, 220),
+        (250, 140, 30),
+    ];
+    let (r, g, b) = C[usize::from(player) % C.len()];
+    Color::srgb_u8(r, g, b)
+}
+
+fn setup_minimap(
+    mut commands: Commands,
+    ground: Res<Ground>,
+    mut images: ResMut<Assets<Image>>,
+    mut mm: ResMut<MinimapState>,
+) {
+    let t = &ground.0;
+    mm.map = [
+        t.cells.0 as f32 * terrain::CELL,
+        t.cells.1 as f32 * terrain::CELL,
+    ];
+    let Some((w, h, rgba)) = &t.minimap else {
+        return;
+    };
+    mm.image = Some((*w, *h));
+    let img = images.add(rgba_image(*w, *h, rgba.clone()));
+    let mh = MINIMAP_W * *h as f32 / (*w).max(1) as f32;
+    let root = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(MINIMAP_MARGIN),
+                bottom: Val::Px(MINIMAP_MARGIN),
+                width: Val::Px(MINIMAP_W),
+                height: Val::Px(mh),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            ImageNode::new(img),
+            MinimapRoot,
+        ))
+        .id();
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BorderColor::all(Color::WHITE),
+        ZIndex(2),
+        MinimapView,
+        ChildOf(root),
+    ));
+}
+
+/// Unit dots in team colours and the camera rectangle.
+fn minimap_system(
+    mut commands: Commands,
+    sim: NonSend<SimRes>,
+    cam: Res<CamState>,
+    mm: Res<MinimapState>,
+    fog: Res<FogRes>,
+    root: Query<Entity, With<MinimapRoot>>,
+    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>)>,
+    mut dots: Query<
+        (
+            &MinimapDot,
+            &mut Node,
+            &mut BackgroundColor,
+            &mut Visibility,
+        ),
+        Without<MinimapView>,
+    >,
+) {
+    let Ok(root) = root.single() else { return };
+    let Some(g) = mm.geom(cam.geom.size) else {
+        return;
+    };
+    if let Ok(mut n) = view.single_mut() {
+        let r = g.view_rect(&cam.geom);
+        n.left = Val::Px(r[0]);
+        n.top = Val::Px(r[1]);
+        n.width = Val::Px(r[2].max(2.0));
+        n.height = Val::Px(r[3].max(2.0));
+    }
+    let units = &sim.curr.units;
+    let mut have = 0;
+    for (d, mut n, mut bg, mut v) in &mut dots {
+        have = have.max(d.0 + 1);
+        let unit = units.get(d.0).filter(|u| {
+            PlayerId(u.owner) == sim.session.local || fog_visible(&fog, &sim, u.x, u.y)
+        });
+        match unit {
+            Some(u) => {
+                let p = g.to_mini(u.x, u.y - crate::view::SHEAR * u.ground);
+                let size = if sim
+                    .session
+                    .def(u.def)
+                    .is_some_and(|d| d.footprint.0.max(d.footprint.1) >= 3)
+                {
+                    6.0
+                } else {
+                    4.0
+                };
+                n.left = Val::Px(p[0] - size / 2.0);
+                n.top = Val::Px(p[1] - size / 2.0);
+                n.width = Val::Px(size);
+                n.height = Val::Px(size);
+                bg.0 = team_color(u.owner);
+                if *v != Visibility::Inherited {
+                    *v = Visibility::Inherited;
                 }
             }
             None => {
-                let (w, d) = (r.w as f32 * 16.0, r.h as f32 * 16.0);
-                let mat = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.3, 0.22, 0.15),
-                    unlit: true,
-                    ..default()
-                });
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(w * 0.7, 6.0, d * 0.7))),
-                    MeshMaterial3d(mat),
-                    Transform::from_xyz(0.0, 3.0, 0.0),
-                    ChildOf(root),
-                ));
+                if *v != Visibility::Hidden {
+                    *v = Visibility::Hidden;
+                }
             }
         }
-        ents.0.insert(id, root);
+    }
+    for i in have..units.len() {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(3.0),
+                height: Val::Px(3.0),
+                ..default()
+            },
+            BackgroundColor(Color::WHITE),
+            Visibility::Hidden,
+            ZIndex(2),
+            MinimapDot(i),
+            ChildOf(root),
+        ));
     }
 }
 
@@ -1258,11 +2935,8 @@ fn hud_system(
     cam: Res<CamState>,
     ground: Res<Ground>,
     mut top: Query<&mut Text, (With<HudTop>, Without<HudPanel>, Without<HudWheel>)>,
-    mut panel: Query<&mut Text, (With<HudPanel>, Without<HudTop>, Without<HudWheel>)>,
-    mut wheel_q: Query<
-        (&mut Text, &mut Node),
-        (With<HudWheel>, Without<HudTop>, Without<HudPanel>),
-    >,
+    mut panel: Query<&mut Text, (With<HudInfo>, Without<HudTop>, Without<HudWheel>)>,
+    mut wheel_q: Query<(&mut Text, &mut Node), (With<HudWheel>, Without<HudTop>, Without<HudInfo>)>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
@@ -1281,12 +2955,12 @@ fn hud_system(
             }
         );
         for p in w.players() {
-            if let Some(e) = tak_sim::economy::player(w, p.id) {
-                let side = p
-                    .monarch
-                    .and_then(|m| w.unit(m))
-                    .and_then(|u| s.def(u.def))
-                    .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
+            let side = s
+                .def(p.monarch_def)
+                .map_or("-", |d| &d.unitname[..3.min(d.unitname.len())]);
+            if player_defeated(w, p) {
+                line.push_str(&format!("   P{} {}: DEFEATED", p.id.0, side));
+            } else if let Some(e) = tak_sim::economy::player(w, p.id) {
                 line.push_str(&format!(
                     "   P{} {}: mana {:.0}/{:.0} (+{:.1}/s)",
                     p.id.0,
@@ -1300,7 +2974,6 @@ fn hud_system(
         t.0 = line;
     }
     if let Ok(mut t) = panel.single_mut() {
-        let mut out = String::new();
         let sel: Vec<UnitId> = input
             .mapper
             .selection()
@@ -1308,56 +2981,27 @@ fn hud_system(
             .copied()
             .filter(|id| w.unit(*id).is_some())
             .collect();
-        if let Some(&first) = sel.first()
-            && let Some(u) = w.unit(first)
-        {
-            let d = s.def(u.def);
-            out.push_str(&format!(
-                "{} ({})   HP {}/{}   {}{}",
-                d.map_or("?", |d| d.display.as_str()),
-                d.map_or("?", |d| d.unitname.as_str()),
-                u.combat.health,
-                u.combat.max_health,
-                if u.orders.is_empty() {
-                    "idle".to_string()
-                } else {
-                    format!("{} orders", u.orders.len())
-                },
-                if sel.len() > 1 {
-                    format!("   (+{} more)", sel.len() - 1)
-                } else {
-                    String::new()
-                }
-            ));
-            if u.build.percent_left() > 0 {
-                out.push_str(&format!(
-                    "\nunder construction: {}%",
-                    100 - u.build.percent_left()
-                ));
+        t.0 = match sel.first().and_then(|&id| w.unit(id)) {
+            Some(u) => {
+                let d = s.def(u.def);
+                format!(
+                    "{} ({})   {}{}",
+                    d.map_or("?", |d| d.display.as_str()),
+                    d.map_or("?", |d| d.unitname.as_str()),
+                    if u.orders.is_empty() {
+                        "idle".to_string()
+                    } else {
+                        format!("{} orders", u.orders.len())
+                    },
+                    if sel.len() > 1 {
+                        format!("   (+{} more)", sel.len() - 1)
+                    } else {
+                        String::new()
+                    }
+                )
             }
-            let opts = w
-                .defs()
-                .get(u.def)
-                .map(|d| d.build.canbuild.clone())
-                .unwrap_or_default();
-            if !opts.is_empty() {
-                out.push_str("\nBuild (F1-F8, LB wheel):");
-                let mode = input.mapper.mode();
-                for (i, o) in opts.iter().enumerate() {
-                    let name = s.def(*o).map_or("?", |d| d.display.as_str());
-                    let cost = w.defs().get(*o).map_or(0, |d| d.build.buildcost);
-                    let mark = if mode == Mode::Build(*o) { ">" } else { " " };
-                    out.push_str(&format!("\n{mark}F{} {name} ({cost})", i + 1));
-                }
-            }
-        } else {
-            out.push_str("Nothing selected. LMB / A: select   RMB / X: order   arrows / right stick: pan   wheel: zoom");
-        }
-        match input.mapper.mode() {
-            Mode::None => {}
-            m => out.push_str(&format!("\nmode: {m:?}")),
-        }
-        t.0 = out;
+            None => "Nothing selected. LMB / A: select   RMB / X: order\narrows / right stick: pan   wheel: zoom".to_string(),
+        };
     }
     if let Ok((mut t, mut node)) = wheel_q.single_mut() {
         let mut text = String::new();
@@ -1391,6 +3035,255 @@ fn hud_system(
     }
 }
 
+/// A player is shown as defeated once its monarch is dead (**Believed**:
+/// TA:K's default game ends for a player with its monarch) or it has no
+/// units left. Display only; the sim has no defeat rule yet.
+fn player_defeated(w: &tak_sim::World, p: &tak_sim::Player) -> bool {
+    let monarch_alive = p
+        .monarch
+        .and_then(|m| w.unit(m))
+        .is_some_and(|u| !u.combat.is_dying());
+    let any = w.units().any(|(_, u)| u.owner == p.id);
+    (p.monarch.is_some() && !monarch_alive) || (!any && w.tick().0 > 0)
+}
+
+/// Selection bars, buttons, the status line and the build-rejection alert.
+fn hud_widgets_system(
+    sim: NonSend<SimRes>,
+    input: Res<InputRes>,
+    mut bars: Query<
+        (&HudBar, &mut Node),
+        (
+            Without<HudBarFill>,
+            Without<HudBarEarned>,
+            Without<ButtonKind>,
+        ),
+    >,
+    mut fills: Query<
+        (&HudBarFill, &mut Node),
+        (Without<HudBar>, Without<HudBarEarned>, Without<ButtonKind>),
+    >,
+    mut earned: Query<
+        &mut Node,
+        (
+            With<HudBarEarned>,
+            Without<HudBar>,
+            Without<HudBarFill>,
+            Without<ButtonKind>,
+        ),
+    >,
+    mut texts: Query<
+        (&mut Text, Option<&HudBarText>, Option<&HudStatus>),
+        (Without<HudButtonLabel>, Without<HudAlert>),
+    >,
+    mut buttons: Query<
+        (
+            &ButtonKind,
+            &mut Visibility,
+            &mut Node,
+            &mut BackgroundColor,
+            &Children,
+        ),
+        Without<HudAlert>,
+    >,
+    mut labels: Query<&mut Text, (With<HudButtonLabel>, Without<HudAlert>)>,
+    mut alert: Query<(&mut Text, &mut Visibility), (With<HudAlert>, Without<ButtonKind>)>,
+) {
+    let s = &sim.session;
+    let w = s.sim.world();
+    let unit = input
+        .mapper
+        .selection()
+        .iter()
+        .copied()
+        .find_map(|id| w.unit(id).map(|u| (id, u)));
+    // Bars: (fraction, earned fraction, text) per kind, None = hidden.
+    let bar = |k: BarKind| -> Option<(f32, f32, String)> {
+        let (id, u) = unit?;
+        match k {
+            BarKind::Health => {
+                let max = u.combat.max_health.max(1);
+                let (d, t) = u.build.built_fraction();
+                let earned = max - tak_sim::combat::frame_health(max, t - d, t);
+                Some((
+                    u.combat.health as f32 / max as f32,
+                    earned as f32 / max as f32,
+                    format!("{}/{}", u.combat.health, u.combat.max_health),
+                ))
+            }
+            BarKind::Mana => {
+                let m = tak_sim::economy::unit_mana(w, id)?;
+                let (a, b) = (f(m.mana), f(m.max).max(1.0));
+                Some((a / b, 0.0, format!("{a:.0}/{b:.0}")))
+            }
+            BarKind::Build => {
+                let left = u.build.percent_left();
+                (left > 0).then(|| ((100 - left) as f32 / 100.0, 0.0, format!("{}%", 100 - left)))
+            }
+        }
+    };
+    let vals: Vec<(BarKind, Option<(f32, f32, String)>)> =
+        [BarKind::Health, BarKind::Mana, BarKind::Build]
+            .into_iter()
+            .map(|k| (k, bar(k)))
+            .collect();
+    let get = |k: BarKind| {
+        vals.iter()
+            .find(|(x, _)| *x == k)
+            .and_then(|(_, v)| v.clone())
+    };
+    for (b, mut n) in &mut bars {
+        let want = if get(b.0).is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if n.display != want {
+            n.display = want;
+        }
+    }
+    for (b, mut n) in &mut fills {
+        if let Some((frac, _, _)) = get(b.0) {
+            n.width = Val::Percent(frac.clamp(0.0, 1.0) * 100.0);
+        }
+    }
+    if let Some((_, e, _)) = get(BarKind::Health) {
+        for mut n in &mut earned {
+            n.width = Val::Percent(e.clamp(0.0, 1.0) * 100.0);
+        }
+    }
+    let mode = input.mapper.mode();
+    for (mut t, bt, st) in &mut texts {
+        if let Some(bt) = bt {
+            t.0 = get(bt.0).map(|v| v.2).unwrap_or_default();
+        } else if st.is_some() {
+            t.0 = match mode {
+                Mode::None => String::new(),
+                Mode::Build(d) => format!(
+                    "Place {}: RMB / X on the map, Esc / B cancels",
+                    s.def(d).map_or("?", |d| d.display.as_str())
+                ),
+                m => format!("mode: {m:?}"),
+            };
+        }
+    }
+    // Buttons: orders for own units, build options for own builders.
+    let own = unit.filter(|(_, u)| u.owner == s.local);
+    let opts: Vec<tak_commands::UnitDefId> = own
+        .and_then(|(_, u)| w.defs().get(u.def))
+        .map(|d| d.build.canbuild.clone())
+        .unwrap_or_default();
+    for (kind, mut vis, mut node, mut bg, children) in &mut buttons {
+        let (label, shown, active) = match *kind {
+            ButtonKind::Order(i) => {
+                let fs = own.map(|(_, u)| u.fire_state);
+                let active = match i {
+                    1 => mode == Mode::Patrol,
+                    2 => mode == Mode::Guard,
+                    4 => fs == Some(tak_commands::FireState::HoldFire),
+                    5 => fs == Some(tak_commands::FireState::ReturnFire),
+                    6 => fs == Some(tak_commands::FireState::FireAtWill),
+                    _ => false,
+                };
+                (
+                    format!(
+                        "{} [{}]",
+                        ORDER_BUTTONS[i].0,
+                        ORDER_BUTTONS[i].1.to_ascii_uppercase()
+                    ),
+                    own.is_some(),
+                    active,
+                )
+            }
+            ButtonKind::Build(i) => match opts.get(i) {
+                Some(&o) => (
+                    format!(
+                        "F{} {} ({})",
+                        i + 1,
+                        s.def(o).map_or("?", |d| d.display.as_str()),
+                        w.defs().get(o).map_or(0, |d| d.build.buildcost)
+                    ),
+                    true,
+                    mode == Mode::Build(o),
+                ),
+                None => (String::new(), false, false),
+            },
+        };
+        let want = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+        // Hidden buttons take no room either.
+        let disp = if shown { Display::Flex } else { Display::None };
+        if node.display != disp {
+            node.display = disp;
+        }
+        bg.0 = if active {
+            Color::srgb(0.45, 0.36, 0.12)
+        } else {
+            Color::srgb(0.16, 0.14, 0.11)
+        };
+        for c in children.iter() {
+            if let Ok(mut t) = labels.get_mut(c)
+                && t.0 != label
+            {
+                t.0 = label.clone();
+            }
+        }
+    }
+    // The local player's latest refused build, for 5 s.
+    if let Ok((mut t, mut v)) = alert.single_mut() {
+        let now = w.tick().0;
+        let r = w
+            .construction
+            .rejections
+            .iter()
+            .rev()
+            .find(|r| r.player == s.local && now.saturating_sub(r.tick.0) < 150);
+        match r {
+            Some(r) => {
+                t.0 = format!(
+                    "Cannot build {}: {}",
+                    s.def(r.def).map_or("?", |d| d.display.as_str()),
+                    r.reason.reason()
+                );
+                *v = Visibility::Inherited;
+            }
+            None => *v = Visibility::Hidden,
+        }
+    }
+}
+
+/// What a click at a screen point hits on the HUD: a button, or just the
+/// panel (swallowed so it does not select or order behind it).
+fn hud_hit(
+    sx: f32,
+    sy: f32,
+    buttons: &Query<(
+        &ButtonKind,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
+    panel: &Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+) -> Option<Option<ButtonKind>> {
+    let inside = |n: &ComputedNode, t: &UiGlobalTransform| {
+        let c = t.translation;
+        let h = n.size / 2.0;
+        sx >= c.x - h.x && sx <= c.x + h.x && sy >= c.y - h.y && sy <= c.y + h.y
+    };
+    for (k, n, t, v) in buttons {
+        if v.get() && inside(n, t) {
+            return Some(Some(*k));
+        }
+    }
+    panel.iter().any(|(n, t)| inside(n, t)).then_some(None)
+}
+
 fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color: Color) {
     let n = 32;
     let mut prev = None;
@@ -1407,6 +3300,8 @@ fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color:
 
 fn gizmo_system(
     mut g: Gizmos,
+    tops: Res<UnitTops>,
+    fog: Res<FogRes>,
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
     ground: Res<Ground>,
@@ -1421,6 +3316,9 @@ fn gizmo_system(
         let p = prev.get(&u.id).copied();
         let x = lerp(p.map_or(u.x, |p| p.x), u.x, alpha);
         let y = lerp(p.map_or(u.y, |p| p.y), u.y, alpha);
+        if PlayerId(u.owner) != local && !fog_visible(&fog, &sim, x, y) {
+            continue;
+        }
         let (fx, fz) = sim.session.def(u.def).map_or((1, 1), |d| d.footprint);
         let r = pick_radius(fx, fz);
         let team = if PlayerId(u.owner) == local {
@@ -1435,12 +3333,24 @@ fn gizmo_system(
             ground_circle(&mut g, t, x, y, r + 3.0, Color::srgb(0.3, 1.0, 0.3));
         }
         if selected || u.health_percent < 100 || u.build_percent_left > 0 {
-            let h = u.ground + 70.0;
+            let top = tops.0.get(&u.id).copied().unwrap_or(60.0);
+            let h = u.ground + top + 12.0;
             let left = Vec3::new(x - 16.0, h, y);
-            let frac = u.health_percent.clamp(0, 100) as f32 / 100.0;
+            let max = u.max_health.max(1) as f32;
+            let frac = (u.health as f32 / max).clamp(0.0, 1.0);
             g.line(left, left + Vec3::X * 32.0, Color::srgb(0.25, 0.0, 0.0));
             // Foreground nudged toward the camera so it wins the depth test.
             let nudge = Vec3::new(0.0, 1.0, 1.0);
+            // A frame's earned health (`max - frame_health`): the part of
+            // it the frame lacks through damage shows dim.
+            if u.build_percent_left > 0 {
+                let earned = (u.earned_health as f32 / max).clamp(0.0, 1.0);
+                g.line(
+                    left + nudge * 0.5,
+                    left + nudge * 0.5 + Vec3::X * 32.0 * earned,
+                    Color::srgb(0.15, 0.4, 0.15),
+                );
+            }
             g.line(
                 left + nudge,
                 left + nudge + Vec3::X * 32.0 * frac,
@@ -1482,12 +3392,60 @@ fn gizmo_system(
             }
         }
     }
+    // Projectiles with neither a model nor a sprite: a small orange ball.
     for pr in &sim.curr.projectiles {
+        let art = sim.session.weapon_art.get(&pr.weapon);
+        if art.is_some_and(|a| a.model.is_some() || a.art.is_some()) {
+            continue;
+        }
         g.sphere(
-            Isometry3d::from_translation(Vec3::new(pr[0], pr[2] + 20.0, pr[1])),
-            5.0,
+            Isometry3d::from_translation(Vec3::new(pr.x, pr.ground + 18.0, pr.y)),
+            4.0,
             Color::srgb(1.0, 0.6, 0.1),
         );
+    }
+    // Lightning (`hweffect=lightning`): jagged bolts from the shooter to the
+    // impact for `emittime` ticks (**Chosen** look; TA:K draws it with its
+    // own effect code, Unknown).
+    let now = sim.session.tick().0;
+    for imp in &w.combat.impacts {
+        let key = crate::game::weapon_key(imp.weapon);
+        let Some((emit, rgb)) = sim.session.weapon_art.get(&key).and_then(|a| a.lightning) else {
+            continue;
+        };
+        if now.saturating_sub(imp.tick) > emit {
+            continue;
+        }
+        let Some(sh) = imp
+            .shooter
+            .and_then(|id| sim.curr.units.iter().find(|u| u.id == id))
+        else {
+            continue;
+        };
+        let top = tops.0.get(&sh.id).copied().unwrap_or(40.0);
+        let a = Vec3::new(sh.x, sh.ground + top * 0.7, sh.y);
+        let (px, pz) = (f(imp.point.x), f(imp.point.y));
+        let b = Vec3::new(px, t.height_at(px, pz) + 10.0, pz);
+        let color = Color::srgb_u8(rgb[0], rgb[1], rgb[2]);
+        for bolt in 0..2u32 {
+            let n = 8;
+            let mut prev = a;
+            for i in 1..=n {
+                let k = i as f32 / n as f32;
+                let mut q = a.lerp(b, k);
+                if i < n {
+                    let h = (now / 2)
+                        .wrapping_mul(2654435761)
+                        .wrapping_add(i * 97 + bolt * 31)
+                        .wrapping_mul(40503);
+                    let jx = ((h & 0xff) as f32 / 255.0 - 0.5) * 18.0;
+                    let jy = (((h >> 8) & 0xff) as f32 / 255.0 - 0.5) * 18.0;
+                    q += Vec3::new(jx, jy, 0.0);
+                }
+                g.line(prev, q, if bolt == 0 { Color::WHITE } else { color });
+                prev = q;
+            }
+        }
     }
     // Cursor, brush and build placement (no cursor in screenshots: the
     // mouse is not there).
