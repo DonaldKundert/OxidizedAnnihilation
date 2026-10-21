@@ -78,6 +78,9 @@ pub struct ScriptType {
     pub program: Arc<Program>,
     /// COB piece index → model piece index (`None`: no piece of that name).
     pub piece_map: Vec<Option<u16>>,
+    /// COB piece index → static model-space origin of the mapped model
+    /// piece (sum of 3DO offsets from the root, raw 16.16 `[x, y, z]`).
+    pub piece_origins: Vec<Option<[i32; 3]>>,
 }
 
 impl ScriptType {
@@ -94,11 +97,16 @@ impl ScriptType {
                     .and_then(|m| m.find(p))
                     .and_then(|i| u16::try_from(i).ok())
             })
+            .collect::<Vec<_>>();
+        let piece_origins = piece_map
+            .iter()
+            .map(|m| Some(model?.origin(usize::from((*m)?))))
             .collect();
         ScriptType {
             name: name.to_string(),
             program,
             piece_map,
+            piece_origins,
         }
     }
 
@@ -277,6 +285,17 @@ impl ScriptHost for CobScripts {
         self.units
             .get_mut(&unit)
             .is_some_and(|us| us.vm.start(name, args).is_ok())
+    }
+
+    fn port_value(&self, unit: UnitId, port: i32) -> Option<i32> {
+        let us = self.units.get(&unit)?;
+        Some(us.regs.get(&port).copied().unwrap_or(0))
+    }
+
+    fn piece_origin(&self, unit: UnitId, piece: i32) -> Option<[i32; 3]> {
+        let def = self.units.get(&unit)?.def;
+        let t = self.script_type(def)?;
+        *t.piece_origins.get(usize::try_from(piece).ok()?)?
     }
 
     fn remove_unit(&mut self, unit: UnitId) {

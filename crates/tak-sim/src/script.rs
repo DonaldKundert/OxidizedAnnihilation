@@ -103,6 +103,22 @@ pub trait ScriptHost {
         false
     }
 
+    /// The value the unit's script last `set` on `port` (0 if it never
+    /// did), or `None` if the unit has no script. Lets the sim wait on
+    /// script-owned handshakes such as a factory's `INBUILDSTANCE`.
+    /// Default: no scripts.
+    fn port_value(&self, _unit: UnitId, _port: i32) -> Option<i32> {
+        None
+    }
+
+    /// Static model-space origin of a COB piece of the unit's model
+    /// (`[x, y, z]`, raw 16.16 model units, script animation not applied),
+    /// or `None` if unknown. Used to place factory products at the
+    /// `QueryBuildInfo` piece. Default: none.
+    fn piece_origin(&self, _unit: UnitId, _piece: i32) -> Option<[i32; 3]> {
+        None
+    }
+
     /// Forget a unit's script (it was removed from the world).
     fn remove_unit(&mut self, _unit: UnitId) {}
 
