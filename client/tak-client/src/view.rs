@@ -3,7 +3,7 @@
 //! No Bevy types.
 
 use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId};
-use tak_input::{BuilderKind, Camera, UnitInfo, WorldView};
+use tak_input::{BuilderKind, Camera, Category, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 use tak_sim::World;
 
@@ -21,6 +21,28 @@ pub struct SimView<'a> {
     pub world: &'a World,
     /// Local player.
     pub local: PlayerId,
+    /// Client definition info by `UnitDefId` (content categories for the
+    /// `Keys.TDF` select-category keys), when known.
+    pub defs: Option<&'a [crate::game::DefInfo]>,
+    /// The local player's fog of war: enemy units outside current sight
+    /// are not part of the view at all, so picking, aim assist, the
+    /// reticle snap, brushes, same-type select and context orders never see
+    /// them (an order onto ground where a hidden enemy stands is a move).
+    /// `None`: everything is visible (no fog).
+    pub fog: Option<&'a crate::fog::FogGrid>,
+}
+
+impl SimView<'_> {
+    /// `true` if the local player can currently see a unit of `owner` at
+    /// `pos`: own and allied units always, enemies only inside current
+    /// sight.
+    pub fn sees(&self, owner: PlayerId, pos: tak_commands::WorldPos) -> bool {
+        if !self.is_enemy(owner) {
+            return true;
+        }
+        self.fog
+            .is_none_or(|g| g.at(f(pos.x), f(pos.y)) == crate::fog::FogCell::Seen)
+    }
 }
 
 /// Pick radius for a unit: half its footprint's larger side plus a margin.
@@ -37,6 +59,9 @@ impl WorldView for SimView<'_> {
         let defs = self.world.defs();
         for (id, u) in self.world.units() {
             let Some(d) = defs.get(u.def) else { continue };
+            if !self.sees(u.owner, u.pos) {
+                continue;
+            }
             let builder =
                 (d.build.builder && !d.build.canbuild.is_empty()).then_some(if d.build.mobile {
                     BuilderKind::Mobile
@@ -92,6 +117,48 @@ impl WorldView for SimView<'_> {
 
     fn is_idle(&self, unit: UnitId) -> bool {
         self.world.unit(unit).is_some_and(|u| u.orders.is_empty())
+    }
+
+    fn monarch(&self) -> Option<UnitId> {
+        self.world
+            .players()
+            .iter()
+            .find(|p| p.id == self.local)
+            .and_then(|p| p.monarch)
+            .filter(|id| self.world.unit(*id).is_some())
+    }
+
+    fn in_category(&self, unit: UnitId, category: Category) -> bool {
+        let Some(u) = self.world.unit(unit) else {
+            return false;
+        };
+        let Some(d) = self.world.defs().get(u.def) else {
+            return false;
+        };
+        let cats = self
+            .defs
+            .and_then(|d| d.get(u.def.0 as usize))
+            .map_or(&[][..], |d| d.categories.as_slice());
+        let has = |name: &str| cats.iter().any(|c| c.eq_ignore_ascii_case(name));
+        let monarch = self.monarch() == Some(unit) || has("Monarch");
+        let armed = !d.combat.weapons.is_empty();
+        match category {
+            Category::Builder => d.build.builder && d.build.mobile && !d.build.canbuild.is_empty(),
+            Category::Factory => {
+                has("FACTORY")
+                    || (d.build.builder && !d.build.mobile && !d.build.canbuild.is_empty())
+            }
+            Category::Monarch => monarch,
+            Category::Naval => has("BOAT") || has("NAVAL"),
+            Category::Troops => {
+                armed && d.build.mobile && !has("BOAT") && !has("NAVAL") && !monarch
+            }
+            Category::Armed => (has("ATTACK") || armed) && !monarch,
+            Category::Magic => has("MAGIC") || d.combat.weapons.iter().any(|w| w.is_spell()),
+            Category::Melee => has("MELEE"),
+            Category::Ballistic => has("BALLISTIC"),
+            Category::Fly => has("FLY"),
+        }
     }
 }
 
@@ -251,7 +318,28 @@ impl ViewGeom {
 
     /// Input pixel of a world ground point (see [`ViewGeom::input_camera`]).
     pub fn virtual_px(&self, x: f32, z: f32) -> (i32, i32) {
-        let o = self.ground_at(0.0, 0.0, 0.0);
+        self.virtual_px_at(x, z, 0.0)
+    }
+
+    /// [`ViewGeom::input_camera`] for the plane at height `h` instead of 0:
+    /// with `h` the terrain height under the screen centre, the centre
+    /// pixel maps exactly to the ground point drawn there, so a reticle
+    /// fixed at the centre picks what it covers (the oblique view shifts
+    /// higher ground up the screen).
+    pub fn input_camera_at(&self, h: f32) -> Camera {
+        let o = self.ground_at(0.0, 0.0, h);
+        let fx = |v: f32| Fx::from_raw((v * 65536.0) as i32);
+        Camera {
+            origin: Vec2::new(fx(o[0]), fx(o[1])),
+            world_per_px: fx(self.zoom),
+            width_px: self.size[0] as i32,
+            height_px: self.size[1] as i32,
+        }
+    }
+
+    /// Input pixel of a world ground point for [`ViewGeom::input_camera_at`].
+    pub fn virtual_px_at(&self, x: f32, z: f32, h: f32) -> (i32, i32) {
+        let o = self.ground_at(0.0, 0.0, h);
         (
             ((x - o[0]) / self.zoom).round() as i32,
             ((z - o[1]) / self.zoom).round() as i32,
@@ -318,6 +406,48 @@ impl MinimapGeom {
         let (w, h) = ((iw * s).round().max(1.0), (ih * s).round().max(1.0));
         let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
         let (pl, pt) = (view[0] - pw - MINIMAP_MARGIN, view[1] - ph - MINIMAP_MARGIN);
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
+    /// [`MinimapGeom::fit`] above a bottom-right panel `reserved` px tall
+    /// (the Classic TA:K side panel): the box is the same share of the
+    /// window but no taller than the space between the top bar (34 px) and
+    /// the panel, and it sits right above the panel.
+    pub fn fit_above(view: [f32; 2], image: (u32, u32), map: [f32; 2], reserved: f32) -> Self {
+        let avail = (view[1] - reserved - 34.0 - 2.0 * MINIMAP_MARGIN).max(40.0);
+        let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+        let bh = (view[1] * MINIMAP_SHARE[1])
+            .clamp(MINIMAP_MIN[1], MINIMAP_MAX[1])
+            .min(avail);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let sc = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * sc).round().max(1.0), (ih * sc).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = (
+            view[0] - pw - MINIMAP_MARGIN,
+            view[1] - reserved - ph - MINIMAP_MARGIN,
+        );
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
+    /// The full-screen Crystal Ball (TA Tab): the same minimap, centred
+    /// and as large as fits in 88 % of the window width and 80 % of its
+    /// height, keeping its aspect.
+    pub fn full(view: [f32; 2], image: (u32, u32), map: [f32; 2]) -> Self {
+        let (bw, bh) = (view[0] * 0.88, view[1] * 0.80);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let s = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * s).round().max(1.0), (ih * s).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = ((view[0] - pw) / 2.0, (view[1] - ph) / 2.0);
         Self {
             rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
             panel: [pl, pt, pw, ph],
@@ -450,6 +580,19 @@ mod tests {
         assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
         assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
         assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn minimap_sits_above_the_side_panel() {
+        for view in [[1280.0, 720.0], [1920.0, 1080.0], [1024.0, 768.0]] {
+            for image in [(256, 256), (512, 107), (129, 431)] {
+                let g = MinimapGeom::fit_above(view, image, [4096.0, 4096.0], 352.0);
+                let [l, t, w, h] = g.panel;
+                assert!(t >= 34.0 - 1e-3, "{view:?} {image:?} {:?}", g.panel);
+                assert!(t + h <= view[1] - 352.0 + 1e-3, "{view:?} {image:?}");
+                assert!(l + w <= view[0] + 1e-3 && l >= 0.0);
+            }
+        }
     }
 
     #[test]

@@ -16,7 +16,7 @@ use tak_input::{
 };
 
 use crate::game::Session;
-use crate::view::{SimView, ViewGeom, f};
+use crate::view::{ViewGeom, f};
 
 // ---- profile file -----------------------------------------------------------
 
@@ -25,16 +25,35 @@ pub fn default_profile_path() -> PathBuf {
     PathBuf::from("tak-input-profile.json")
 }
 
-/// The combined controller + mouse/keyboard profile with a preset's tuning.
+/// The default control scheme (Kingdoms Console + Classic TA:K) with a
+/// preset's tuning.
 pub fn preset_profile(preset: &str) -> Result<Profile, String> {
+    scheme_profile("kingdoms", preset)
+}
+
+/// A control scheme ([`tak_input::CONTROL_SCHEMES`]: `kingdoms`, `wp_s`,
+/// `wp_j`) with a preset's feel values. The scheme keeps its own cursor mode
+/// (reticle or free) and right-stick role; `wp_j` keeps all its values.
+pub fn scheme_profile(scheme: &str, preset: &str) -> Result<Profile, String> {
     let tuning = Tuning::preset(preset).ok_or_else(|| {
         format!(
             "unknown --input-preset {preset:?} (try {})",
             tak_input::PRESETS.join(", ")
         )
     })?;
-    let mut p = Profile::default_combined();
-    p.tuning = tuning;
+    let mut p = Profile::named(scheme).ok_or_else(|| {
+        format!(
+            "unknown --controls {scheme:?} (try {})",
+            tak_input::CONTROL_SCHEMES.join(", ")
+        )
+    })?;
+    if !scheme.eq_ignore_ascii_case("wp_j") {
+        p.tuning = Tuning {
+            reticle: p.tuning.reticle,
+            right_stick_zoom: p.tuning.right_stick_zoom,
+            ..tuning
+        };
+    }
     Ok(p)
 }
 
@@ -46,6 +65,7 @@ fn mtime(path: &Path) -> Option<SystemTime> {
 /// valid profile), else the preset (written to `path` when one is given,
 /// so it can be edited). Returns the profile and the file's mtime.
 pub fn initial_profile(
+    scheme: &str,
     preset: &str,
     path: Option<&Path>,
 ) -> Result<(Profile, Option<SystemTime>), String> {
@@ -56,7 +76,7 @@ pub fn initial_profile(
         let prof = Profile::from_json(&s).map_err(|e| format!("{}: {e}", p.display()))?;
         return Ok((prof, mtime(p)));
     }
-    let prof = preset_profile(preset)?;
+    let prof = scheme_profile(scheme, preset)?;
     let mut t = None;
     if let Some(p) = path {
         t = Some(save_profile(p, &prof).map_err(|e| format!("{}: {e}", p.display()))?);
@@ -235,6 +255,8 @@ pub enum HintKey {
     Buttons(Vec<Button>),
     /// The left (true) or right stick.
     Stick(bool),
+    /// A keyboard key or mouse button, by name (Classic TA:K prompts).
+    Text(String),
 }
 
 /// One button hint: `[glyph] prefix text`.
@@ -291,9 +313,22 @@ fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<H
     })
 }
 
-/// Context button hints for the HUD, read from the profile's bindings (so
-/// rebinding updates them).
-pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
+/// What the HUD knows about the selection, for the prompts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HintCx {
+    /// Own units selected.
+    pub has_units: bool,
+    /// A builder among them.
+    pub has_builder: bool,
+    /// A spellcaster among them.
+    pub has_caster: bool,
+    /// More than one unit type among them (the sub-select cycle applies).
+    pub mixed: bool,
+}
+
+/// Context button prompts for the bottom bar, read from the profile's
+/// bindings (so rebinding updates them): the controller's buttons.
+pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     let p = m.profile();
     let mut v: Vec<Option<Hint>> = Vec::new();
     if let Some(w) = m.wheel() {
@@ -302,12 +337,14 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             prefix: "",
             text: "choose".into(),
         }));
-        if m.tuning().wheel_confirm_on_press {
+        let sticky = m.tuning().wheel_confirm_on_press || m.wheel_depth() > 0;
+        if sticky {
             v.push(hint_for(p, "confirm", |a| matches!(a, Action::Select)));
         } else {
             let want = match w.kind {
-                WheelKind::Command => Action::CommandWheel,
                 WheelKind::Build => Action::BuildWheel,
+                WheelKind::Spell => Action::SpellWheel,
+                _ => Action::CommandWheel,
             };
             let mut h = hint_for(p, "confirm", |a| *a == want);
             if let Some(h) = h.as_mut() {
@@ -315,7 +352,17 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             }
             v.push(h);
         }
-        v.push(hint_for(p, "cancel", |a| matches!(a, Action::Cancel)));
+        if w.pages > 1 {
+            v.push(hint_for(p, "next page", |a| {
+                matches!(a, Action::QueueModifier)
+            }));
+        }
+        let back = if m.wheel_depth() > 0 {
+            "back"
+        } else {
+            "cancel"
+        };
+        v.push(hint_for(p, back, |a| matches!(a, Action::Cancel)));
     } else if m.brush().is_some() {
         v.push(Some(Hint {
             key: HintKey::Stick(true),
@@ -334,22 +381,32 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             Mode::Patrol => "patrol here",
             Mode::Guard => "guard",
             Mode::CastSpell(_) => "cast",
+            Mode::Attack => "attack",
+            Mode::Move => "move here",
             Mode::None => "",
         };
         v.push(hint_for(p, what, |a| {
             matches!(a, Action::Context { append: false })
         }));
-        v.push(hint_for(p, "queue", |a| {
-            matches!(a, Action::Context { append: true })
+        v.push(hint_for(p, "+ queue", |a| {
+            matches!(a, Action::QueueModifier)
         }));
         v.push(hint_for(p, "cancel", |a| matches!(a, Action::Cancel)));
-    } else if has_units {
+    } else if cx.has_units {
         v.push(hint_for(p, "move / attack", |a| {
             matches!(a, Action::Context { append: false })
         }));
         v.push(hint_for(p, "orders", |a| matches!(a, Action::CommandWheel)));
-        if has_builder {
+        if cx.has_builder {
             v.push(hint_for(p, "build", |a| matches!(a, Action::BuildWheel)));
+        }
+        if cx.has_caster {
+            v.push(hint_for(p, "spell", |a| matches!(a, Action::CastSpellMode)));
+        }
+        if cx.mixed {
+            v.push(hint_for(p, "cycle type", |a| {
+                matches!(a, Action::SubSelectCycle)
+            }));
         }
         v.push(hint_for(p, "same type", |a| {
             matches!(
@@ -360,7 +417,6 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             )
         }));
         v.push(hint_for(p, "deselect", |a| matches!(a, Action::Cancel)));
-        v.push(hint_for(p, "precise", |a| matches!(a, Action::Precision)));
     } else {
         v.push(hint_for(p, "select", |a| matches!(a, Action::Select)));
         v.push(hint_for(p, "brush", |a| matches!(a, Action::Brush)));
@@ -372,12 +428,106 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
                 }
             )
         }));
-        v.push(hint_for(p, "menu", |a| matches!(a, Action::CommandWheel)));
-        v.push(hint_for(p, "tuning", |a| {
-            matches!(a, Action::ToggleOverlay)
+        v.push(hint_for(p, "idle builder", |a| {
+            matches!(a, Action::CycleIdleBuilder)
         }));
+        v.push(hint_for(p, "squads 5-9", |a| {
+            matches!(a, Action::CommandWheel)
+        }));
+        v.push(hint_for(p, "alert", |a| matches!(a, Action::JumpToAlert)));
+        v.push(hint_for(p, "menu", |a| matches!(a, Action::ToggleOverlay)));
     }
     v.into_iter().flatten().collect()
+}
+
+/// The keyboard key (with modifier) a profile binds to an action, e.g. `S`
+/// or `Ctrl+F1`.
+pub fn key_name_for(p: &Profile, want: impl Fn(&Action) -> bool) -> Option<String> {
+    p.bindings.iter().find_map(|b| {
+        if !want(&b.action) {
+            return None;
+        }
+        let name = |i: &Input| match i {
+            Input::Key(k) => {
+                let mut s = k.0.clone();
+                if let Some(c) = s.get_mut(..1) {
+                    c.make_ascii_uppercase();
+                }
+                Some(s)
+            }
+            Input::Button(Button::MouseLeft) => Some("LMB".into()),
+            Input::Button(Button::MouseRight) => Some("RMB".into()),
+            Input::Button(_) => None,
+        };
+        let k = name(&b.input)?;
+        Some(match b.with.as_ref().and_then(name) {
+            Some(m) => format!("{m}+{k}"),
+            None => k,
+        })
+    })
+}
+
+/// Classic TA:K prompts (keys and mouse) for the bottom bar.
+pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
+    let p = m.profile();
+    let mut v: Vec<(Option<String>, &str)> = Vec::new();
+    if m.mode() != Mode::None {
+        v.push((Some("LMB".into()), "confirm"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::QueueModifier)),
+            "+ click: queue",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::Cancel)), "cancel"));
+    } else if cx.has_units {
+        v.push((Some("RMB".into()), "order"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::AttackMode)),
+            "attack",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
+        v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::PatrolMode)),
+            "patrol",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::Stop)), "stop"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::AssignGroup { .. }))
+                .map(|k| k.trim_end_matches(|c: char| c.is_ascii_digit()).to_string() + "1-9"),
+            "squad",
+        ));
+    } else {
+        v.push((Some("LMB".into()), "select / drag"));
+        v.push((Some("2x LMB".into()), "same type"));
+        v.push((
+            key_name_for(p, |a| {
+                matches!(
+                    a,
+                    Action::SelectAll {
+                        scope: Scope::OnScreen
+                    }
+                )
+            }),
+            "all on screen",
+        ));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::SelectMonarch { track: true })),
+            "monarch",
+        ));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::ToggleCrystalBall)),
+            "Crystal Ball",
+        ));
+    }
+    v.into_iter()
+        .filter_map(|(k, t)| {
+            Some(Hint {
+                key: HintKey::Text(k?),
+                prefix: "",
+                text: t.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// A short label for a wheel slot (build options are named by the caller).
@@ -388,10 +538,11 @@ pub fn action_label(a: &Action) -> String {
         Action::GuardMode => "Guard".into(),
         Action::CastSpellMode => "Cast spell".into(),
         Action::CastSpell { index } => format!("Spell {}", index + 1),
+        // TA:K's names for the fire states.
         Action::SetFireState { state } => match state {
-            FireState::HoldFire => "Hold fire".into(),
-            FireState::ReturnFire => "Return fire".into(),
-            FireState::FireAtWill => "Fire at will".into(),
+            FireState::HoldFire => "Passive".into(),
+            FireState::ReturnFire => "Defensive".into(),
+            FireState::FireAtWill => "Offensive".into(),
         },
         Action::CycleIdleBuilder => "Idle builder".into(),
         Action::JumpToAlert => "Last alert".into(),
@@ -404,10 +555,39 @@ pub fn action_label(a: &Action) -> String {
             scope: Scope::OnScreen,
         } => "Same type".into(),
         Action::SelectSameType { scope: Scope::Map } => "Same type (map)".into(),
-        Action::FollowSelection => "Follow".into(),
+        Action::FollowSelection => "Track".into(),
         Action::BuildOption { index } => format!("Option {}", index + 1),
+        Action::AttackMode => "Attack".into(),
+        Action::MoveMode => "Move".into(),
+        Action::RecallGroup { group } => format!("Squad {}", squad_number(group.get())),
+        Action::AssignGroup { group } => format!("Set squad {}", squad_number(group.get())),
+        Action::JumpToGroup { group } => format!("Go to squad {}", squad_number(group.get())),
+        Action::OpenRing { ring } => match ring {
+            tak_input::Ring::Stance => "Stance >".into(),
+            tak_input::Ring::Unit => "Unit >".into(),
+            tak_input::Ring::Squads => "Squads >".into(),
+        },
+        Action::Reserved { order } => order.label().into(),
+        Action::SubSelectCycle => "Cycle type".into(),
+        Action::SelectMonarch { track: false } => "Select monarch".into(),
+        Action::SelectMonarch { track: true } => "Track monarch".into(),
+        Action::ResetZoom => "Reset zoom".into(),
+        Action::CrystalBall | Action::ToggleCrystalBall => "Crystal Ball".into(),
+        Action::SelectCategory { category } => format!("All {:?}", category),
+        Action::SetBookmark { slot } => format!("Set bookmark {slot}"),
+        Action::GoToBookmark { slot } => format!("Bookmark {slot}"),
+        Action::NextUnit => "Next unit".into(),
+        Action::ToggleDamageBars => "Damage bars".into(),
+        Action::GameSpeed { faster: true } => "Faster".into(),
+        Action::GameSpeed { faster: false } => "Slower".into(),
+        Action::TogglePause => "Pause".into(),
         other => format!("{other:?}"),
     }
+}
+
+/// TA numbers squads 1..10; squad 10 is group 0 (the `0` key).
+pub fn squad_number(group: u8) -> u8 {
+    if group == 0 { 10 } else { group }
 }
 
 // ---- recordings -------------------------------------------------------------
@@ -488,6 +668,22 @@ pub fn start_geom(s: &Session, zoom: f32, size: [f32; 2]) -> ViewGeom {
     }
 }
 
+/// Terrain height of the ground point drawn at the screen centre (the
+/// oblique view shows ground `z` at screen `z - SHEAR * h`), from the sim's
+/// height map; a few fixed-point steps of `z = target + SHEAR * h(z)`.
+pub fn centre_height(s: &Session, geom: &ViewGeom) -> f32 {
+    let w = s.sim.world();
+    let fx = |v: f32| tak_math::Fx::from_raw((v * 65536.0) as i32);
+    let mut h = 0.0;
+    for _ in 0..4 {
+        let z = geom.target[1] + crate::view::SHEAR * h;
+        h = f(w
+            .map()
+            .height_at(tak_math::Vec2::new(fx(geom.target[0]), fx(z))));
+    }
+    h
+}
+
 /// Drive a session headless with scripted device events through the real
 /// mapper (30 ticks per second, one input frame per tick), submitting its
 /// orders to the sim exactly as the client does, and record everything.
@@ -511,15 +707,12 @@ pub fn synth_recording(
     while s.tick().0 < ticks {
         let tick = s.tick();
         let t = t_base + tick.0 * 1000 / 30;
-        mapper.set_camera(geom.input_camera());
+        mapper.set_camera(geom.input_camera_at(centre_height(s, &geom)));
         let mut kinds = Vec::new();
         let mut outs = Vec::new();
         let mut submitted = Vec::new();
         {
-            let view = SimView {
-                world: s.sim.world(),
-                local: s.local,
-            };
+            let view = s.view();
             while next < events.len() && t_base + events[next].t <= t {
                 let e = &events[next];
                 kinds.push(e.kind.clone());
@@ -541,9 +734,15 @@ pub fn synth_recording(
                 Output::Client {
                     command: tak_commands::ClientCommand::CenterOnMonarch,
                 } => {
-                    let g = start_geom(s, geom.zoom, geom.size);
-                    let c = g.input_camera();
-                    mapper.glide_to(c.screen_to_world(c.center_screen()));
+                    let w = s.sim.world();
+                    if let Some(u) = w
+                        .players()
+                        .get(usize::from(s.local.0))
+                        .and_then(|p| p.monarch)
+                        .and_then(|id| w.unit(id))
+                    {
+                        mapper.glide_to(u.pos);
+                    }
                 }
                 _ => {}
             }
@@ -606,14 +805,38 @@ mod tests {
     #[test]
     fn hints_come_from_bindings() {
         let m = Mapper::new(preset_profile("console").unwrap());
-        let h = hints(&m, false, false);
+        let h = hints(&m, HintCx::default());
         assert_eq!(h[0].key, HintKey::Buttons(vec![Button::A]));
         assert_eq!(h[0].text, "select");
         assert!(h.iter().any(|h| h.prefix == "hold" && h.text == "brush"));
-        let h = hints(&m, true, true);
+        let h = hints(
+            &m,
+            HintCx {
+                has_units: true,
+                has_builder: true,
+                ..HintCx::default()
+            },
+        );
         assert!(
             h.iter()
                 .any(|h| h.key == HintKey::Buttons(vec![Button::Lb]) && h.text == "build")
+        );
+        let h = hints_classic(
+            &m,
+            HintCx {
+                has_units: true,
+                ..HintCx::default()
+            },
+        );
+        assert!(
+            h.iter()
+                .any(|h| h.key == HintKey::Text("S".into()) && h.text == "stop"),
+            "{h:?}"
+        );
+        assert!(
+            h.iter()
+                .any(|h| h.key == HintKey::Text("Ctrl+1-9".into()) && h.text == "squad"),
+            "{h:?}"
         );
     }
 
@@ -623,7 +846,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("p.json");
         let _ = std::fs::remove_file(&path);
-        let (p, mut t) = initial_profile("assisted", Some(&path)).unwrap();
+        let (p, mut t) = initial_profile("kingdoms", "assisted", Some(&path)).unwrap();
         assert_eq!(p.tuning, Tuning::assisted());
         assert!(path.exists());
         assert!(poll_profile(&path, &mut t).is_none());
@@ -638,7 +861,7 @@ mod tests {
         std::fs::write(&path, "{ nope").unwrap();
         t = Some(SystemTime::UNIX_EPOCH);
         assert!(poll_profile(&path, &mut t).unwrap().is_err());
-        assert!(initial_profile("console", Some(&path)).is_err());
+        assert!(initial_profile("kingdoms", "console", Some(&path)).is_err());
         assert!(preset_profile("bogus").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

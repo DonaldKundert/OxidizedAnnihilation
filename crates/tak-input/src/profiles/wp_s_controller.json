@@ -1,5 +1,9 @@
 {
-  "name": "Default controller",
+  "name": "WP-S controller",
+  "tuning": {
+    "reticle": false,
+    "right_stick_zoom": false
+  },
   "bindings": [
     {
       "input": {

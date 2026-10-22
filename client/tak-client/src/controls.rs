@@ -42,6 +42,15 @@ pub(super) struct Feel {
     last_own_health: Option<i64>,
     /// Screenshot mode has scripted pad events, so draw the stick cursor.
     pub shot_pad: bool,
+    /// Damage bars (TA ~): 0 all (selected, damaged, frames), 1 selected
+    /// only, 2 off.
+    pub damage_bars: u8,
+    /// `--hud`: auto, console or classic.
+    pub hud_choice: String,
+    /// A one-off bottom-bar message (e.g. the damage-bar mode).
+    pub toast: Option<String>,
+    /// Order acknowledgements to play this frame (`Sounds/*.WAV` names).
+    pub sounds: Vec<&'static str>,
 }
 
 impl Feel {
@@ -64,6 +73,10 @@ impl Feel {
             ghost_camera: args.ghost_camera,
             last_own_health: None,
             shot_pad: args.pad_events.is_some(),
+            damage_bars: 0,
+            hud_choice: args.hud.to_ascii_lowercase(),
+            toast: None,
+            sounds: Vec::new(),
         }
     }
 
@@ -252,7 +265,14 @@ fn adjust(feel: &mut Feel, input: &mut InputRes, row: usize, steps: i64) {
             .map_or(0, |i| {
                 (i as i64 + steps).rem_euclid(PRESETS.len() as i64) as usize
             });
-        let t = Tuning::preset(PRESETS[i]).unwrap_or_default();
+        // A preset sets the feel values; the cursor mode (reticle or free)
+        // and the right-stick role belong to the control scheme.
+        let cur = *input.mapper.tuning();
+        let t = Tuning {
+            reticle: cur.reticle,
+            right_stick_zoom: cur.right_stick_zoom,
+            ..Tuning::preset(PRESETS[i]).unwrap_or_default()
+        };
         input.mapper.set_tuning(t);
         feel.say(format!("preset {}", PRESETS[i]));
     } else if row <= n {
@@ -637,10 +657,7 @@ pub(super) fn cursor_system(
     mut q: Query<(&GameCursor, &mut Node, &mut ImageNode, &mut Visibility)>,
 ) {
     let Some(art) = art else { return };
-    let view = SimView {
-        world: sim.session.sim.world(),
-        local: sim.session.local,
-    };
+    let view = sim.view();
     let frame_tick = (time.elapsed_secs() * 30.0) as u32;
     for (gc, mut node, mut img, mut vis) in &mut q {
         let (pos, kind) = if gc.ghost {
@@ -829,15 +846,28 @@ pub(super) struct HintText(usize);
 
 pub(super) fn setup_hints(mut commands: Commands) {
     commands.init_resource::<GlyphArt>();
-    let bar = commands
+    // The bottom bar: a column (bottom up) of the button prompts, then the
+    // verb line and the message line `hud_view` adds.
+    let column = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(HUD_PANEL_W + 20.0),
-                bottom: Val::Px(8.0),
+                left: Val::Px(hud_view::BOTTOM_BAR_X),
+                bottom: Val::Px(4.0),
+                flex_direction: FlexDirection::ColumnReverse,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(3.0),
+                max_width: Val::Px(470.0),
+                ..default()
+            },
+            hud_view::BottomBar,
+        ))
+        .id();
+    let bar = commands
+        .spawn((
+            Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
-                max_width: Val::Px(600.0),
                 column_gap: Val::Px(10.0),
                 row_gap: Val::Px(4.0),
                 padding: UiRect::all(Val::Px(4.0)),
@@ -845,6 +875,7 @@ pub(super) fn setup_hints(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
             HintBar,
+            ChildOf(column),
         ))
         .id();
     for i in 0..HINTS {
@@ -893,6 +924,7 @@ pub(super) fn setup_hints(mut commands: Commands) {
 pub(super) fn hints_system(
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
+    mode: Res<hud_view::HudMode>,
     mut feel: ResMut<Feel>,
     pads: Query<(&Gamepad, Option<&Name>)>,
     mut art: ResMut<GlyphArt>,
@@ -925,15 +957,29 @@ pub(super) fn hints_system(
         .iter()
         .filter_map(|id| w.unit(*id).filter(|u| u.owner == me))
         .collect();
-    let has_builder = sel.iter().any(|u| {
-        w.defs()
-            .get(u.def)
-            .is_some_and(|d| d.build.builder && !d.build.canbuild.is_empty())
-    });
+    let cx = feel::HintCx {
+        has_units: !sel.is_empty(),
+        has_builder: sel.iter().any(|u| {
+            w.defs()
+                .get(u.def)
+                .is_some_and(|d| d.build.builder && !d.build.canbuild.is_empty())
+        }),
+        has_caster: sel.iter().any(|u| {
+            w.defs()
+                .get(u.def)
+                .is_some_and(|d| d.combat.weapons.iter().any(|x| x.is_spell()))
+        }),
+        mixed: input.mapper.sub_select().is_some()
+            || sel
+                .iter()
+                .any(|u| sel.first().is_some_and(|f| f.def != u.def)),
+    };
     let hints = if feel.ghost.is_some() || feel.overlay_open {
         Vec::new()
+    } else if mode.console {
+        feel::hints(&input.mapper, cx)
     } else {
-        feel::hints(&input.mapper, !sel.is_empty(), has_builder)
+        feel::hints_classic(&input.mapper, cx)
     };
     for mut v in &mut bar {
         *v = if hints.is_empty() {
@@ -948,6 +994,7 @@ pub(super) fn hints_system(
         .map(|h| match &h.key {
             HintKey::Buttons(bs) => bs.iter().filter_map(|b| feel::glyph(layout, *b)).collect(),
             HintKey::Stick(left) => vec![feel::stick_glyph(*left)],
+            HintKey::Text(_) => Vec::new(),
         })
         .collect();
     for (it, mut v) in &mut items {
@@ -978,10 +1025,14 @@ pub(super) fn hints_system(
     }
     for (h, mut t) in &mut texts {
         t.0 = hints.get(h.0).map_or(String::new(), |h| {
+            let key = match &h.key {
+                HintKey::Text(k) => format!("[{k}] "),
+                _ => String::new(),
+            };
             if h.prefix.is_empty() {
-                h.text.clone()
+                format!("{key}{}", h.text)
             } else {
-                format!("{} {}", h.prefix, h.text)
+                format!("{key}{} {}", h.prefix, h.text)
             }
         });
     }
@@ -997,6 +1048,7 @@ fn chip_image_size(g: &Glyph) -> (f32, f32) {
 
 // ---- radial wheel -------------------------------------------------------------
 
+/// Slot entities (rings and pages hold at most 8; older profiles up to 16).
 const WHEEL_SLOTS: usize = 24;
 
 /// Slot box padding and border (logical px).
@@ -1008,6 +1060,8 @@ const WHEEL_GAP: f32 = 6.0;
 const WHEEL_CLEAR: f32 = 26.0;
 /// Smallest wheel radius.
 const WHEEL_MIN_R: f32 = 64.0;
+/// Build portraits on wheel slots (`anims/buildpic` is 64x48).
+const SLOT_PIC: [f32; 2] = [48.0, 36.0];
 
 #[derive(Component)]
 pub(super) struct WheelRoot;
@@ -1015,11 +1069,53 @@ pub(super) struct WheelRoot;
 pub(super) struct WheelSlot(usize);
 #[derive(Component)]
 pub(super) struct WheelSlotText(usize);
+#[derive(Component)]
+pub(super) struct WheelSlotPic(usize);
 /// The wheel's title, above its top slot (never over the cursor).
 #[derive(Component)]
 pub(super) struct WheelCentre;
+/// The centre panel: what the highlighted slot is (portrait, name, cost,
+/// build time, mana shortfall).
+#[derive(Component)]
+pub(super) struct WheelInfo;
+#[derive(Component)]
+pub(super) struct WheelInfoPic;
+#[derive(Component)]
+pub(super) struct WheelInfoText;
+#[derive(Component)]
+pub(super) struct WheelInfoShort;
+
+/// Build portraits by unit name (`anims/buildpic/<name>.jpg`), decoded on
+/// first use; `None` when the install has none.
+#[derive(Resource, Default)]
+pub(super) struct Portraits(BTreeMap<String, Option<Handle<Image>>>);
+
+impl Portraits {
+    /// The portrait for a unit name, loading it on first use.
+    pub fn get(
+        &mut self,
+        content: &Content,
+        images: &mut Assets<Image>,
+        unitname: &str,
+    ) -> Option<Handle<Image>> {
+        let key = unitname.to_ascii_lowercase();
+        self.0
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let bytes = content
+                    .vfs
+                    .read(&format!("anims/buildpic/{key}.jpg"))
+                    .ok()?;
+                let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+                let (w, h) = img.dimensions();
+                Some(images.add(rgba_image(w, h, img.into_raw())))
+            })
+            .clone()
+    }
+}
 
 pub(super) fn setup_wheel(mut commands: Commands) {
+    commands.init_resource::<Portraits>();
     let root = commands
         .spawn((
             Node {
@@ -1035,21 +1131,69 @@ pub(super) fn setup_wheel(mut commands: Commands) {
         .id();
     commands.spawn((
         Text::new(""),
-        hud_text(13.0),
+        hud_text(14.0),
+        TextLayout::no_wrap(),
         Node {
             position_type: PositionType::Absolute,
-            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+            padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+            border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+        BorderColor::all(Color::srgb(0.75, 0.62, 0.3)),
         WheelCentre,
         ChildOf(root),
+    ));
+    let info = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                width: Val::Px(150.0),
+                padding: UiRect::all(Val::Px(5.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.03, 0.03, 0.02, 0.88)),
+            BorderColor::all(Color::srgb(0.55, 0.48, 0.3)),
+            Visibility::Hidden,
+            WheelInfo,
+            ChildOf(root),
+        ))
+        .id();
+    commands.spawn((
+        Node {
+            width: Val::Px(64.0),
+            height: Val::Px(48.0),
+            ..default()
+        },
+        ImageNode::default(),
+        WheelInfoPic,
+        ChildOf(info),
+    ));
+    commands.spawn((
+        Text::new(""),
+        hud_text(13.0),
+        TextLayout::justify(Justify::Center),
+        WheelInfoText,
+        ChildOf(info),
+    ));
+    commands.spawn((
+        Text::new(""),
+        hud_text(13.0).0,
+        TextColor(Color::srgb(1.0, 0.35, 0.3)),
+        WheelInfoShort,
+        ChildOf(info),
     ));
     for i in 0..WHEEL_SLOTS {
         let s = commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
                     padding: UiRect::axes(Val::Px(WHEEL_PAD[0]), Val::Px(WHEEL_PAD[1])),
                     border: UiRect::all(Val::Px(WHEEL_BORDER)),
                     ..default()
@@ -1061,57 +1205,148 @@ pub(super) fn setup_wheel(mut commands: Commands) {
                 ChildOf(root),
             ))
             .id();
-        commands.spawn((Text::new(""), hud_text(14.0), WheelSlotText(i), ChildOf(s)));
+        commands.spawn((
+            Node {
+                width: Val::Px(SLOT_PIC[0]),
+                height: Val::Px(SLOT_PIC[1]),
+                display: Display::None,
+                ..default()
+            },
+            ImageNode::default(),
+            WheelSlotPic(i),
+            ChildOf(s),
+        ));
+        commands.spawn((
+            Text::new(""),
+            hud_text(14.0),
+            TextLayout::no_wrap(),
+            WheelSlotText(i),
+            ChildOf(s),
+        ));
     }
 }
 
-/// A wheel slot's label and whether it can be used now (spells need the
-/// caster's mana).
-fn wheel_label(
+/// The first own builder of the selection (the one the build wheel and
+/// `BuildOption` use) and its definition.
+fn first_builder<'w>(
+    w: &'w tak_sim::World,
+    local: PlayerId,
+    sel: &tak_commands::UnitSet,
+) -> Option<&'w tak_sim::defs::UnitDef> {
+    sel.iter().filter_map(|id| w.unit(*id)).find_map(|u| {
+        w.defs()
+            .get(u.def)
+            .filter(|d| u.owner == local && d.build.builder && !d.build.canbuild.is_empty())
+    })
+}
+
+/// What a wheel slot shows.
+struct SlotView {
+    /// Short label on the slot.
+    label: String,
+    /// Usable now (spells need the caster's mana; builds are allowed short
+    /// of mana, TA:K builds drain mana as they go).
+    usable: bool,
+    /// Shown as greyed (short of mana).
+    short: bool,
+    /// A unit portrait (build options).
+    unit: Option<tak_commands::UnitDefId>,
+    /// Centre panel text for the highlighted slot.
+    info: String,
+    /// Centre panel shortfall line (red).
+    shortfall: String,
+}
+
+/// A wheel slot's label, state and centre-panel text.
+fn wheel_slot_view(
     a: &Action,
     s: &Session,
     w: &tak_sim::World,
     sel: &tak_commands::UnitSet,
-) -> (String, bool) {
+) -> SlotView {
+    let mut v = SlotView {
+        label: feel::action_label(a),
+        usable: true,
+        short: false,
+        unit: None,
+        info: String::new(),
+        shortfall: String::new(),
+    };
+    let mana = tak_sim::economy::player(w, s.local).map_or(0.0, |e| super::mana(e.mana));
     match a {
         Action::BuildOption { index } => {
-            let def = sel
-                .iter()
-                .filter_map(|id| w.unit(*id))
-                .find_map(|u| w.defs().get(u.def).filter(|d| d.build.builder))
-                .and_then(|d| d.build.canbuild.get(usize::from(*index)).copied());
-            let label = def.and_then(|o| {
-                let cost = w.defs().get(o).map_or(0, |d| d.build.buildcost);
-                s.def(o).map(|d| format!("{} ({cost})", d.display))
-            });
-            (label.unwrap_or_else(|| feel::action_label(a)), true)
-        }
-        Action::CastSpell { index } => {
-            match crate::view::caster_spells(w, s.local, sel)
-                .and_then(|(_, sp)| sp.get(usize::from(*index)).cloned())
-            {
-                Some(sp) => (format!("{} ({} mana)", sp.name, sp.cost), sp.ready),
-                None => (feel::action_label(a), false),
+            let builder = first_builder(w, s.local, sel);
+            let def = builder.and_then(|d| d.build.canbuild.get(usize::from(*index)).copied());
+            if let (Some(b), Some(o)) = (builder, def) {
+                let d = w.defs().get(o);
+                let cost = d.map_or(0, |d| d.build.buildcost);
+                let secs = d.map_or(0.0, |d| {
+                    f64::from(f(tak_math::Fx::from_raw(
+                        d.build.buildtime.clamp(0, i64::from(i32::MAX)) as i32,
+                    )))
+                }) / f64::from(b.build.workertime.max(1));
+                let name = s.def(o).map_or("?", |d| d.display.as_str()).to_string();
+                v.label = name.clone();
+                v.unit = Some(o);
+                v.short = (cost as f64) > mana;
+                v.info = format!("{name}\n{cost} mana   {secs:.0} s");
+                if v.short {
+                    v.shortfall = format!("short {:.0} mana", cost as f64 - mana);
+                }
             }
         }
-        Action::CastSpellMode => (
-            feel::action_label(a),
-            crate::view::caster_spells(w, s.local, sel)
-                .is_some_and(|(_, sp)| sp.first().is_some_and(|x| x.ready)),
-        ),
-        other => (feel::action_label(other), true),
+        Action::CastSpell { index } => {
+            if let Some(sp) = crate::view::caster_spells(w, s.local, sel)
+                .and_then(|(_, sp)| sp.get(usize::from(*index)).cloned())
+            {
+                v.label = format!("{} ({})", sp.name, sp.cost);
+                v.usable = sp.ready;
+                v.short = !sp.ready;
+                v.info = format!("{}\n{} mana", sp.name, sp.cost);
+                if !sp.ready {
+                    let own = crate::view::caster_spells(w, s.local, sel)
+                        .and_then(|(id, _)| tak_sim::economy::unit_mana(w, id))
+                        .map_or(0.0, |m| f(m.mana));
+                    v.shortfall = format!("short {:.0} mana", sp.cost as f32 - own);
+                }
+            } else {
+                v.usable = false;
+            }
+        }
+        Action::CastSpellMode => {
+            v.usable = crate::view::caster_spells(w, s.local, sel)
+                .is_some_and(|(_, sp)| sp.first().is_some_and(|x| x.ready));
+        }
+        Action::OpenRing { .. } => v.info = format!("{}\nconfirm to open", v.label),
+        Action::AttackMode => v.info = "Attack\nthen X on a target".into(),
+        Action::MoveMode => v.info = "Move\nthen X on the ground".into(),
+        Action::GuardMode => v.info = "Guard\nthen X on a friend".into(),
+        Action::PatrolMode => v.info = "Patrol\nthen X on the ground".into(),
+        other => v.info = feel::action_label(other),
     }
+    v
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn wheel_system(
     sim: NonSend<SimRes>,
+    content: NonSend<Content>,
     input: Res<InputRes>,
     feel: Res<Feel>,
     cam: Res<CamState>,
     ground: Res<Ground>,
+    mut portraits: ResMut<Portraits>,
+    mut images: ResMut<Assets<Image>>,
     mut root: Query<
         (&mut Node, &mut Visibility),
-        (With<WheelRoot>, Without<WheelSlot>, Without<WheelCentre>),
+        (
+            With<WheelRoot>,
+            Without<WheelSlot>,
+            Without<WheelCentre>,
+            Without<WheelInfo>,
+            Without<WheelSlotPic>,
+            Without<WheelInfoPic>,
+        ),
     >,
     mut centre: Query<
         (&mut Text, &mut Node, &ComputedNode),
@@ -1120,6 +1355,10 @@ pub(super) fn wheel_system(
             Without<WheelSlotText>,
             Without<WheelRoot>,
             Without<WheelSlot>,
+            Without<WheelInfo>,
+            Without<WheelInfoText>,
+            Without<WheelInfoShort>,
+            Without<WheelSlotPic>,
         ),
     >,
     mut slots: Query<
@@ -1131,9 +1370,62 @@ pub(super) fn wheel_system(
             &mut BorderColor,
             &ComputedNode,
         ),
-        (Without<WheelRoot>, Without<WheelCentre>),
+        (
+            Without<WheelRoot>,
+            Without<WheelCentre>,
+            Without<WheelInfo>,
+            Without<WheelSlotPic>,
+            Without<WheelInfoPic>,
+        ),
     >,
-    mut texts: Query<(&WheelSlotText, &mut Text, &mut TextColor), Without<WheelCentre>>,
+    mut pics: Query<
+        (&WheelSlotPic, &mut Node, &mut ImageNode),
+        (
+            Without<WheelSlot>,
+            Without<WheelRoot>,
+            Without<WheelCentre>,
+            Without<WheelInfo>,
+            Without<WheelInfoPic>,
+        ),
+    >,
+    mut texts: Query<
+        (&WheelSlotText, &mut Text, &mut TextColor),
+        (
+            Without<WheelCentre>,
+            Without<WheelInfoText>,
+            Without<WheelInfoShort>,
+        ),
+    >,
+    mut info: Query<
+        (&mut Node, &mut Visibility, &ComputedNode),
+        (
+            With<WheelInfo>,
+            Without<WheelSlot>,
+            Without<WheelRoot>,
+            Without<WheelCentre>,
+            Without<WheelSlotPic>,
+            Without<WheelInfoPic>,
+        ),
+    >,
+    mut info_pic: Query<
+        (&mut Node, &mut ImageNode),
+        (
+            With<WheelInfoPic>,
+            Without<WheelSlot>,
+            Without<WheelRoot>,
+            Without<WheelCentre>,
+            Without<WheelInfo>,
+            Without<WheelSlotPic>,
+        ),
+    >,
+    mut info_texts: Query<
+        (&mut Text, Has<WheelInfoShort>),
+        (
+            Or<(With<WheelInfoText>, With<WheelInfoShort>)>,
+            Without<WheelSlotText>,
+            Without<WheelCentre>,
+        ),
+    >,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
@@ -1156,13 +1448,23 @@ pub(super) fn wheel_system(
     rn.top = Val::Px(p[1]);
     let n = wh.slots.len().min(WHEEL_SLOTS);
     let sel = input.mapper.selection();
-    let labels: Vec<(String, bool)> = wh.slots[..n]
+    let views: Vec<SlotView> = wh.slots[..n]
         .iter()
-        .map(|a| wheel_label(a, s, w, sel))
+        .map(|a| wheel_slot_view(a, s, w, sel))
         .collect();
-    // Directions (screen +y down) and last frame's box sizes; the radius
-    // grows with slot count and label width so neighbours never touch and
-    // the cursor stays clear (`view::wheel_radius`).
+    // The centre panel (highlighted slot) and its size, so the ring clears
+    // it as it clears the cursor.
+    let hi_view = wh.highlighted.filter(|&h| h < n).map(|h| &views[h]);
+    let info_size = info
+        .single()
+        .map(|(_, _, cn)| [cn.size.x, cn.size.y])
+        .unwrap_or([0.0, 0.0]);
+    let show_info = hi_view.is_some_and(|v| !v.info.is_empty());
+    let clear = if show_info {
+        WHEEL_CLEAR.max(info_size[0].max(info_size[1]) / 2.0 + 4.0)
+    } else {
+        WHEEL_CLEAR
+    };
     let dirs: Vec<[f32; 2]> = (0..n)
         .map(|k| {
             let (sn, cs) = tak_input::slot_direction(k, n).sin_cos();
@@ -1172,27 +1474,32 @@ pub(super) fn wheel_system(
     let mut sizes = vec![[0.0f32, 0.0f32]; n];
     for (sl, _, _, _, _, cn) in &slots {
         if sl.0 < n {
-            // Before the first layout, estimate from the label (14-px font,
-            // about 8.4 px per character).
+            let chars = views[sl.0].label.chars().count() as f32;
+            let pic = if views[sl.0].unit.is_some() {
+                SLOT_PIC[1] + 2.0
+            } else {
+                0.0
+            };
             sizes[sl.0] = if cn.size.x > 0.0 {
                 [cn.size.x, cn.size.y]
             } else {
-                let chars = labels[sl.0].0.chars().count() as f32;
                 [
                     chars * 8.4 + 2.0 * (WHEEL_PAD[0] + WHEEL_BORDER),
-                    18.0 + 2.0 * (WHEEL_PAD[1] + WHEEL_BORDER),
+                    18.0 + pic + 2.0 * (WHEEL_PAD[1] + WHEEL_BORDER),
                 ]
             };
         }
     }
-    let radius = crate::view::wheel_radius(&dirs, &sizes, WHEEL_MIN_R, WHEEL_GAP, WHEEL_CLEAR);
+    let radius = crate::view::wheel_radius(&dirs, &sizes, WHEEL_MIN_R, WHEEL_GAP, clear);
     let mut top = 0.0f32;
     for (sl, mut node, mut v, mut bg, mut border, cn) in &mut slots {
-        if sl.0 >= n {
+        let blank = sl.0 >= n || tak_input::is_blank(&wh.slots[sl.0]);
+        if blank {
             *v = Visibility::Hidden;
             continue;
         }
         *v = Visibility::Inherited;
+        let reserved = !wh.slots[sl.0].is_supported();
         let [dx, dy] = [dirs[sl.0][0] * radius, dirs[sl.0][1] * radius];
         let [bw, bh] = if cn.size.x > 0.0 {
             [cn.size.x, cn.size.y]
@@ -1203,14 +1510,18 @@ pub(super) fn wheel_system(
         node.top = Val::Px(dy - bh / 2.0);
         top = top.min(dy - bh / 2.0);
         let hi = wh.highlighted == Some(sl.0);
-        let usable = labels[sl.0].1;
-        bg.0 = match (hi, usable) {
-            (true, true) => Color::srgba(0.95, 0.72, 0.2, 0.97),
-            (true, false) => Color::srgba(0.24, 0.23, 0.22, 0.97),
-            (false, _) => Color::srgba(0.06, 0.05, 0.04, 0.82),
+        let view = &views[sl.0];
+        // A reserved slot keeps its place as an empty, faint frame.
+        bg.0 = match (hi, view.usable && !view.short, reserved) {
+            (_, _, true) => Color::srgba(0.05, 0.05, 0.05, 0.35),
+            (true, true, _) => Color::srgba(0.95, 0.72, 0.2, 0.97),
+            (true, false, _) => Color::srgba(0.32, 0.3, 0.28, 0.97),
+            (false, _, _) => Color::srgba(0.06, 0.05, 0.04, 0.82),
         };
         *border = BorderColor::all(if hi {
             Color::srgb(1.0, 1.0, 0.9)
+        } else if reserved {
+            Color::srgba(0.45, 0.4, 0.28, 0.4)
         } else {
             Color::srgb(0.45, 0.4, 0.28)
         });
@@ -1218,14 +1529,43 @@ pub(super) fn wheel_system(
         let want = UiRect::all(bw);
         if node.border != want {
             node.border = want;
-            // Keep the box size steady when the border thickens.
             let pad = if hi { -1.0 } else { 0.0 };
             node.padding = UiRect::axes(Val::Px(WHEEL_PAD[0] + pad), Val::Px(WHEEL_PAD[1] + pad));
         }
     }
+    for (sp, mut node, mut img) in &mut pics {
+        let unit = (sp.0 < n).then(|| views[sp.0].unit).flatten();
+        let handle = unit.and_then(|u| {
+            s.def(u)
+                .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+        });
+        match handle {
+            Some(h) => {
+                img.image = h;
+                img.color = if views[sp.0].short {
+                    Color::srgb(0.45, 0.45, 0.45)
+                } else {
+                    Color::WHITE
+                };
+                if node.display != Display::Flex {
+                    node.display = Display::Flex;
+                }
+            }
+            None => {
+                if node.display != Display::None {
+                    node.display = Display::None;
+                }
+            }
+        }
+    }
     for (st, mut t, mut col) in &mut texts {
-        let (label, usable, hi) = match labels.get(st.0).filter(|_| st.0 < n) {
-            Some((l, u)) => (l.clone(), *u, wh.highlighted == Some(st.0)),
+        let (label, usable, hi) = match views.get(st.0).filter(|_| st.0 < n) {
+            Some(_) if !wh.slots[st.0].is_supported() => (String::new(), false, false),
+            Some(v) => (
+                v.label.clone(),
+                v.usable && !v.short,
+                wh.highlighted == Some(st.0),
+            ),
             None => (String::new(), true, false),
         };
         if t.0 != label {
@@ -1233,28 +1573,140 @@ pub(super) fn wheel_system(
         }
         col.0 = match (hi, usable) {
             (true, true) => Color::srgb(0.08, 0.05, 0.0),
-            (true, false) => Color::srgb(0.8, 0.78, 0.74),
+            (true, false) => Color::srgb(0.85, 0.82, 0.78),
             (false, false) => Color::srgb(0.55, 0.53, 0.5),
             (false, true) => Color::srgb(0.95, 0.92, 0.85),
         };
     }
-    // Title above the top slot; the confirm / cancel buttons are in the
-    // hint bar at the bottom.
-    if let Ok((mut t, mut node, cn)) = centre.single_mut() {
-        let kind = match wh.kind {
-            WheelKind::Command => "Orders",
-            WheelKind::Build => "Build",
-        };
-        let title = if ghost.is_some() {
-            format!("{kind} (ghost)")
+    // Centre panel.
+    if let Ok((mut node, mut v, cn)) = info.single_mut() {
+        *v = if show_info {
+            Visibility::Inherited
         } else {
-            kind.to_string()
+            Visibility::Hidden
         };
+        node.left = Val::Px(-cn.size.x / 2.0);
+        node.top = Val::Px(-cn.size.y / 2.0);
+    }
+    if let Some(view) = hi_view {
+        for (mut t, short) in &mut info_texts {
+            let want = if short { &view.shortfall } else { &view.info };
+            if t.0 != *want {
+                t.0 = want.clone();
+            }
+        }
+        if let Ok((mut node, mut img)) = info_pic.single_mut() {
+            let h = view.unit.and_then(|u| {
+                s.def(u)
+                    .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+            });
+            match h {
+                Some(h) => {
+                    img.image = h;
+                    img.color = if view.short {
+                        Color::srgb(0.5, 0.5, 0.5)
+                    } else {
+                        Color::WHITE
+                    };
+                    node.display = Display::Flex;
+                }
+                None => node.display = Display::None,
+            }
+        }
+    }
+    // Title above the top slot: the ring path and the page.
+    if let Ok((mut t, mut node, cn)) = centre.single_mut() {
+        let mut title = if input.mapper.wheel_depth() > 0 && ghost.is_none() {
+            format!("Orders > {}", wh.kind.title())
+        } else {
+            wh.kind.title().to_string()
+        };
+        if wh.pages > 1 {
+            title.push_str(&format!("   page {}/{}  (RB: next)", wh.page + 1, wh.pages));
+        }
+        if ghost.is_some() {
+            title.push_str(" (ghost)");
+        }
         if t.0 != title {
             t.0 = title;
         }
         node.left = Val::Px(-cn.size.x / 2.0);
         node.top = Val::Px(top - cn.size.y - 4.0);
+    }
+}
+
+// ---- order sounds -------------------------------------------------------------
+
+/// The order-acknowledge sounds the in-game GUI names (`Sounds/MOVE.WAV`,
+/// `ATTACK`, `GUARD`, `PATROL`, `STOP`), decoded by Bevy's WAV support.
+#[derive(Resource, Default)]
+pub(super) struct OrderSounds(BTreeMap<&'static str, Handle<AudioSource>>);
+
+/// The acknowledgement for an order (**Chosen** for orders without their
+/// own sound: build walks like a move, a spell attacks, a stance has none).
+pub(super) fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
+    use tak_commands::SimCommand as C;
+    Some(match c {
+        C::Move { .. } | C::Build { .. } => "MOVE",
+        C::Attack { .. } | C::CastSpell { .. } => "ATTACK",
+        C::Guard { .. } => "GUARD",
+        C::Patrol { .. } => "PATROL",
+        C::Stop { .. } => "STOP",
+        C::SetFireState { .. } => return None,
+    })
+}
+
+pub(super) fn setup_sounds(
+    mut commands: Commands,
+    content: NonSend<Content>,
+    mut sources: ResMut<Assets<AudioSource>>,
+) {
+    let mut s = OrderSounds::default();
+    for name in ["MOVE", "ATTACK", "GUARD", "PATROL", "STOP"] {
+        if let Ok(bytes) = content.vfs.read(&format!("Sounds/{name}.WAV")) {
+            s.0.insert(
+                name,
+                sources.add(AudioSource {
+                    bytes: bytes.into(),
+                }),
+            );
+        }
+    }
+    eprintln!("order sounds: {} of 5", s.0.len());
+    commands.insert_resource(s);
+}
+
+/// Seconds a sound entity lives (without an audio device nothing plays and
+/// Bevy never despawns it, so it is cleaned up here).
+#[derive(Component)]
+pub(super) struct SoundTtl(f32);
+
+pub(super) fn sound_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    plan: Option<Res<ShotPlan>>,
+    sounds: Option<Res<OrderSounds>>,
+    mut feel: ResMut<Feel>,
+    mut live: Query<(Entity, &mut SoundTtl)>,
+) {
+    for (e, mut ttl) in &mut live {
+        ttl.0 -= time.delta_secs();
+        if ttl.0 <= 0.0 {
+            commands.entity(e).despawn();
+        }
+    }
+    let pending = std::mem::take(&mut feel.sounds);
+    let (Some(sounds), None) = (sounds, plan) else {
+        return;
+    };
+    // One acknowledgement per frame is enough (a burst of orders would
+    // stack the same voice).
+    if let Some(h) = pending.last().and_then(|n| sounds.0.get(n)) {
+        commands.spawn((
+            AudioPlayer::new(h.clone()),
+            PlaybackSettings::DESPAWN,
+            SoundTtl(3.0),
+        ));
     }
 }
 
@@ -1290,6 +1742,7 @@ pub(super) fn rumble_system(
             Feedback::Snap => t.rumble_snap_pct,
             Feedback::Selection { .. } => t.rumble_select_pct,
             Feedback::Order => 0,
+            Feedback::Refused { .. } => t.rumble_snap_pct,
         });
     }
     if hurt {

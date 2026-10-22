@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId, WorldPos};
 use tak_math::{Fx, Vec2};
 
+use crate::binding::Category;
+
 /// Whether a unit builds by placing structures or by producing units.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +95,17 @@ pub trait WorldView {
     /// `true` if `unit` has no orders (for idle-builder cycling).
     fn is_idle(&self, unit: UnitId) -> bool {
         let _ = unit;
+        false
+    }
+
+    /// The local player's monarch, if alive.
+    fn monarch(&self) -> Option<UnitId> {
+        None
+    }
+
+    /// `true` if `unit` belongs to a TA select-category (Ctrl+letter keys).
+    fn in_category(&self, unit: UnitId, category: Category) -> bool {
+        let _ = (unit, category);
         false
     }
 }

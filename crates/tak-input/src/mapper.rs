@@ -9,7 +9,7 @@ use tak_commands::{
 };
 use tak_math::{Fx, Vec2};
 
-use crate::binding::{Action, Gesture, Profile};
+use crate::binding::{Action, Category, GRID_KEYS, Gesture, Profile, Ring};
 use crate::brush::{brush_radius, drag_circle, units_in_circle};
 use crate::context::{Mode, builders_for, own_units, pick_unit, resolve_context};
 use crate::cursor::{
@@ -18,7 +18,9 @@ use crate::cursor::{
 };
 use crate::event::{Axis, EventKind, Input, InputEvent};
 use crate::tuning::Tuning;
-use crate::wheel::{Wheel, WheelKind, context_slots, expand_spells};
+use crate::wheel::{
+    Wheel, WheelKind, context_slots, context_slots_fixed, expand_spells, ring_slots,
+};
 use crate::world::{BuilderKind, Camera, UnitInfo, WorldView, fx_int, units_sorted};
 
 /// One thing the mapper produced, in order.
@@ -49,6 +51,56 @@ pub enum Output {
     },
     /// Open or close the client's tuning overlay.
     ToggleOverlay,
+    /// Game speed up or down (client: ticks per wall second only).
+    GameSpeed {
+        /// Faster or slower.
+        faster: bool,
+    },
+    /// Pause or resume (client).
+    TogglePause,
+    /// Cycle the damage bars: all, selected only, off (client).
+    ToggleDamageBars,
+}
+
+/// Why an input did nothing (shown with a reason, design system section 7).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Refusal {
+    /// The order needs own units selected.
+    NothingSelected,
+    /// No selected unit can carry out the order.
+    CannotDo,
+    /// The caster's mana is short.
+    NoMana,
+    /// The order is reserved: the sim does not support it yet.
+    Unsupported,
+    /// Nothing to jump to (no squad, bookmark, idle builder, alert).
+    NothingThere,
+}
+
+impl Refusal {
+    /// Bottom-bar text.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Refusal::NothingSelected => "Nothing selected",
+            Refusal::CannotDo => "The selection cannot do that",
+            Refusal::NoMana => "Not enough mana",
+            Refusal::Unsupported => "Not available yet",
+            Refusal::NothingThere => "Nothing there",
+        }
+    }
+}
+
+/// The selection's sub-select cycle (Halo Wars RT): the full selection and
+/// the unit type currently narrowed to.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct SubSelect {
+    /// The selection before narrowing.
+    pub full: UnitSet,
+    /// The types in it, in order of first appearance by unit id.
+    pub types: Vec<UnitDefId>,
+    /// Index into `types` of the active type.
+    pub index: usize,
 }
 
 /// Something the player should feel or see (rumble, flashes). Drained with
@@ -65,6 +117,11 @@ pub enum Feedback {
     },
     /// An order went to the sim.
     Order,
+    /// An input was refused.
+    Refused {
+        /// Why.
+        reason: Refusal,
+    },
 }
 
 /// What the cursor would do here, for the game's context cursors.
@@ -92,6 +149,9 @@ pub enum CursorKind {
     /// The pending order cannot be given here.
     Invalid,
 }
+
+/// Bookmarks the mapper keeps (TA has four, F5..F8).
+pub const BOOKMARKS: usize = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CursorSource {
@@ -169,6 +229,17 @@ pub struct Mapper {
     wheel: Option<(Input, Wheel)>,
     /// The open wheel stays open after its button is released.
     wheel_sticky: bool,
+    /// Every item of a paged wheel (build, spell), for page turns.
+    wheel_items: Vec<Action>,
+    /// Parent rings of an open sub-ring (cancel goes back one level).
+    wheel_parents: Vec<Wheel>,
+    sub_select: Option<SubSelect>,
+    crystal_by: Vec<Input>,
+    crystal_toggled: bool,
+    bookmarks: [Option<WorldPos>; BOOKMARKS],
+    last_next_unit: Option<UnitId>,
+    /// Reticle-mode camera velocity (world units per second).
+    ret_vel: Vec2,
     brush: Option<BrushState>,
     drag: Option<DragState>,
     precision_by: Vec<Input>,
@@ -224,6 +295,14 @@ impl Mapper {
             last_idle: None,
             wheel: None,
             wheel_sticky: false,
+            wheel_items: Vec::new(),
+            wheel_parents: Vec::new(),
+            sub_select: None,
+            crystal_by: Vec::new(),
+            crystal_toggled: false,
+            bookmarks: [None; BOOKMARKS],
+            last_next_unit: None,
+            ret_vel: Vec2::ZERO,
             brush: None,
             drag: None,
             precision_by: Vec::new(),
@@ -263,11 +342,13 @@ impl Mapper {
         self.inputs.clear();
         self.wheel = None;
         self.wheel_sticky = false;
+        self.wheel_parents.clear();
         self.brush = None;
         self.drag = None;
         self.precision_by.clear();
         self.queue_by.clear();
         self.zoom_by.clear();
+        self.crystal_by.clear();
     }
 
     /// Change only the tuning (live tuning overlay, presets).
@@ -280,6 +361,12 @@ impl Mapper {
     /// After the mapper itself panned with the right stick or zoomed, the
     /// stick cursor keeps its ground point (`cursor_world_lock`).
     pub fn set_camera(&mut self, camera: Camera) {
+        if self.reticle_active() {
+            self.lock_world = false;
+            self.camera = camera;
+            self.cursor = camera.center_screen();
+            return;
+        }
         if self.lock_world
             && self.tuning.cursor_world_lock
             && self.source == CursorSource::Stick
@@ -316,9 +403,59 @@ impl Mapper {
         self.snap_target = None;
     }
 
-    /// Cursor on the ground.
+    /// Cursor on the ground. In reticle mode this is the point under the
+    /// screen centre, including camera motion not yet taken by the client.
     pub fn cursor_world(&self) -> WorldPos {
+        if self.reticle_active() {
+            return sat_add(
+                self.camera.screen_to_world(self.camera.center_screen()),
+                self.pan,
+            );
+        }
         self.camera.screen_to_world(self.cursor)
+    }
+
+    /// `true` while the reticle drives selection and orders: reticle mode
+    /// is on and the stick (not the mouse) moved last.
+    pub fn reticle_active(&self) -> bool {
+        self.tuning.reticle && self.source == CursorSource::Stick
+    }
+
+    /// The cursor in screen pixels including pending camera motion (reticle
+    /// mode: the centre, shifted by the pan not yet applied).
+    fn eff_cursor(&self) -> Vec2 {
+        if !self.reticle_active() {
+            return self.cursor;
+        }
+        let c = self.camera.center_screen();
+        let wpp = self.camera.world_per_px;
+        if wpp <= Fx::ZERO {
+            return c;
+        }
+        Vec2::new(
+            c.x.saturating_add(self.pan.x.saturating_div(wpp)),
+            c.y.saturating_add(self.pan.y.saturating_div(wpp)),
+        )
+    }
+
+    /// The sub-select cycle in progress, if any.
+    pub fn sub_select(&self) -> Option<&SubSelect> {
+        self.sub_select.as_ref()
+    }
+
+    /// `true` while the full-screen Crystal Ball is shown (held or toggled).
+    pub fn crystal_ball(&self) -> bool {
+        self.crystal_toggled || !self.crystal_by.is_empty()
+    }
+
+    /// Bookmark `slot` (camera centre), if set.
+    pub fn bookmark(&self, slot: u8) -> Option<WorldPos> {
+        self.bookmarks.get(usize::from(slot)).copied().flatten()
+    }
+
+    /// How many rings deep the open wheel is (0: a top-level wheel).
+    pub fn wheel_depth(&self) -> usize {
+        self.wheel_parents.len()
     }
 
     /// `true` when the stick (not the mouse) drives the cursor, so the
@@ -427,6 +564,8 @@ impl Mapper {
                 _ => CursorKind::Invalid,
             },
             Mode::CastSpell(_) => CursorKind::Cast,
+            Mode::Attack => CursorKind::Attack,
+            Mode::Move => CursorKind::Move,
             Mode::None if units.is_empty() => match hovered {
                 Some(h) if h.owner == me => CursorKind::Select,
                 _ => CursorKind::Normal,
@@ -473,6 +612,28 @@ impl Mapper {
         out
     }
 
+    /// Carry out one instant action as if its binding fired (HUD buttons:
+    /// every surface reaches the same action). Held actions are ignored.
+    pub fn perform<W: WorldView + ?Sized>(
+        &mut self,
+        action: Action,
+        world: &W,
+        tick: Tick,
+    ) -> Vec<Output> {
+        let mut out = Vec::new();
+        if action.is_held() {
+            return out;
+        }
+        self.targets = self.assist_targets(world);
+        let mut cx = Cx {
+            world,
+            tick,
+            out: &mut out,
+        };
+        self.instant(action, &mut cx);
+        out
+    }
+
     /// Feed many events at one tick (convenience for tests and replays).
     pub fn handle_all<W: WorldView + ?Sized>(
         &mut self,
@@ -511,7 +672,8 @@ impl Mapper {
                 Mode::Build(_) => u.owner == me && u.under_construction,
                 Mode::Patrol => false,
                 Mode::Guard => u.owner == me,
-                Mode::CastSpell(_) => true,
+                Mode::CastSpell(_) | Mode::Attack => true,
+                Mode::Move => false,
                 Mode::None if has_units => world.is_enemy(u.owner),
                 Mode::None => u.owner == me,
             }
@@ -600,7 +762,11 @@ impl Mapper {
     /// rules integrate exactly in one step.
     fn needs_substeps(&self) -> bool {
         let t = &self.tuning;
-        t.friction_pct < 100 || t.cursor_accel_pct > 0 || t.pan_smooth_ms > 0 || t.edge_pan_px > 0
+        t.friction_pct < 100
+            || t.cursor_accel_pct > 0
+            || t.pan_smooth_ms > 0
+            || t.edge_pan_px > 0
+            || (t.reticle && t.reticle_smooth_ms > 0)
     }
 
     /// Move the cursor and camera for the time since the last event, with
@@ -628,7 +794,12 @@ impl Mapper {
         self.now = self.now.saturating_add(dt);
         let t = self.tuning;
         let stick = self.left_stick();
-        // Cursor.
+        let reticle = self.reticle_active();
+        if reticle {
+            self.cursor = self.camera.center_screen();
+        }
+        // Cursor (free mode) or camera under the reticle (reticle mode).
+        let mut ret_target = Vec2::ZERO;
         if self.source == CursorSource::Stick && self.wheel.is_none() && stick != Vec2::ZERO {
             let threshold =
                 Fx::from_ratio(t.cursor_accel_threshold_pct.clamp(1, 100), 100).unwrap_or(Fx::ONE);
@@ -642,22 +813,53 @@ impl Mapper {
             let fr = if self.precision() || t.friction_pct >= 100 {
                 Fx::ONE
             } else {
-                friction(self.cursor, &self.target_points(), &t)
+                friction(self.eff_cursor(), &self.target_points(), &t)
             };
             let motion = Motion {
-                precision: self.precision(),
+                precision: self.precision() && !reticle,
                 world_per_px: self.camera.world_per_px,
                 accel,
                 friction: fr,
             };
-            let step = cursor_motion(stick, dt, &motion, &t);
-            self.cursor = self.camera.clamp_screen(sat_add(self.cursor, step));
+            if reticle {
+                // The camera moves under the fixed reticle: the same speed
+                // law as the free cursor, in ground units; precision is fast
+                // pan instead.
+                let fast = if self.precision() {
+                    Fx::from_ratio(t.fast_pan_pct.clamp(100, 1000), 100).unwrap_or(Fx::ONE)
+                } else {
+                    Fx::ONE
+                };
+                let wpp = self.camera.world_per_px;
+                if t.reticle_smooth_ms == 0 {
+                    let step = cursor_motion(stick, dt, &motion, &t);
+                    self.pan = sat_add(self.pan, step.scale(wpp.saturating_mul(fast)));
+                } else {
+                    let per_s = cursor_motion(stick, 1000, &motion, &t);
+                    ret_target = per_s.scale(wpp.saturating_mul(fast));
+                }
+                self.glide = None;
+                self.follow = false;
+            } else {
+                let step = cursor_motion(stick, dt, &motion, &t);
+                self.cursor = self.camera.clamp_screen(sat_add(self.cursor, step));
+            }
         } else {
             self.accel_since = None;
         }
+        if reticle && t.reticle_smooth_ms > 0 {
+            let k = approach_frac(dt, t.reticle_smooth_ms);
+            self.ret_vel = self.ret_vel + (ret_target - self.ret_vel).scale(k);
+            if ret_target == Vec2::ZERO && self.ret_vel.length() < Fx::ONE {
+                self.ret_vel = Vec2::ZERO;
+            }
+            self.pan = sat_add(self.pan, per_ms(self.ret_vel, dt));
+        } else {
+            self.ret_vel = Vec2::ZERO;
+        }
         // Edge pan push, per axis in -1..=1 (screen and world agree).
         let mut push = Vec2::ZERO;
-        if t.edge_pan_px > 0 {
+        if t.edge_pan_px > 0 && !reticle {
             let m = fx_int(t.edge_pan_px);
             let (w, h) = (fx_int(self.camera.width_px), fx_int(self.camera.height_px));
             let c = self.cursor;
@@ -697,7 +899,12 @@ impl Mapper {
         };
         // Right stick: zoom with the modifier, else pan.
         let rs = stick_vector(self.right.0, self.right.1, t.stick_deadzone);
-        let zoom_held = !self.zoom_by.is_empty();
+        let zoom_held =
+            !self.zoom_by.is_empty() || (t.right_stick_zoom && (reticle || self.queue_held()));
+        if zoom_held && rs != Vec2::ZERO && self.zoom_by.is_empty() && !reticle {
+            // RB + right stick zoomed: RB's own tap (select all) is spent.
+            self.consume_modifiers();
+        }
         if zoom_held && rs.y != Fx::ZERO {
             let rate = per_second(t.zoom_stick_pct_per_s, dt)
                 .checked_div_int(100)
@@ -847,8 +1054,16 @@ impl Mapper {
             let current = self
                 .snap_target
                 .and_then(|id| self.targets.iter().position(|&(u, _)| u == id));
-            let (c, hit) = soft_snap(self.cursor, &points, current, dt, &tune);
-            self.cursor = self.camera.clamp_screen(c);
+            let eff = self.eff_cursor();
+            let (c, hit) = soft_snap(eff, &points, current, dt, &tune);
+            if self.reticle_active() {
+                // Aim assist acts on the camera: it slides the target under
+                // the fixed reticle.
+                let d = c - eff;
+                self.pan = sat_add(self.pan, d.scale(self.camera.world_per_px));
+            } else {
+                self.cursor = self.camera.clamp_screen(c);
+            }
             let new = hit.map(|i| self.targets[i].0);
             if new.is_some() && new != self.snap_target {
                 self.feedback.push(Feedback::Snap);
@@ -894,21 +1109,26 @@ impl Mapper {
     }
 
     fn selection_centre<W: WorldView + ?Sized>(&self, world: &W) -> Option<WorldPos> {
-        let units = own_units(world, &self.selection);
-        let (mut x, mut y, mut n) = (0i64, 0i64, 0i64);
-        for id in units.iter() {
-            if let Some(u) = world.unit(*id) {
-                x += i64::from(u.pos.x.raw());
-                y += i64::from(u.pos.y.raw());
-                n += 1;
-            }
-        }
-        (n > 0).then(|| Vec2::new(Fx::from_raw((x / n) as i32), Fx::from_raw((y / n) as i32)))
+        centre_of(world, &own_units(world, &self.selection))
     }
 
     fn down<W: WorldView + ?Sized>(&mut self, input: Input, t: u32, cx: &mut Cx<'_, W>) {
         if self.inputs.get(&input).is_some_and(|s| s.press.is_some()) {
             return; // repeat
+        }
+        // Another input pressed while a held modifier (queue, zoom,
+        // precision) is down uses that modifier: its own tap is dropped.
+        self.consume_modifiers();
+        // Grid build keys (optional add-on) win while a builder is selected.
+        if let Some(index) = self.grid_index(&input, cx) {
+            self.inputs.entry(input).or_default().press = Some(Press {
+                at: t,
+                with: None,
+                consumed: true,
+                hold_fired: false,
+            });
+            self.instant(Action::BuildOption { index }, cx);
+            return;
         }
         // A different input decides any pending single taps and ends any
         // second-tap window.
@@ -942,6 +1162,9 @@ impl Mapper {
             p.consumed = true;
         }
         let mut consumed = false;
+        // A second press that completed a double or second tap does not
+        // also fire its press binding (a double click is not a new drag).
+        let mut second = false;
         let (pending, last_tap) = match self.inputs.get_mut(&input) {
             Some(s) => (s.pending.take(), s.last_tap.take()),
             None => (None, None),
@@ -953,6 +1176,7 @@ impl Mapper {
             match double {
                 Some(a) => {
                     consumed = true;
+                    second = true;
                     self.trigger(&input, a, t, cx);
                 }
                 None => self.fire_tap(&input, p.with.as_ref(), t, cx),
@@ -964,6 +1188,7 @@ impl Mapper {
             .find(&input, p.with.as_ref(), Gesture::SecondTap)
         {
             consumed = true;
+            second = true;
             self.trigger(&input, a, t, cx);
         }
         self.inputs.entry(input.clone()).or_default().press = Some(Press {
@@ -972,6 +1197,9 @@ impl Mapper {
             consumed,
             hold_fired: false,
         });
+        if second {
+            return;
+        }
         if let Some(a) = self.profile.find(&input, with.as_ref(), Gesture::Press) {
             self.trigger(&input, a, t, cx);
         }
@@ -987,6 +1215,16 @@ impl Mapper {
             self.trigger(&input, a, t, cx);
         }
         if press.consumed || press.hold_fired {
+            return;
+        }
+        // A long press of an input whose press binding is a held action
+        // (RB: queue modifier) is not also a tap.
+        if t.saturating_sub(press.at) >= self.tuning.hold_ms
+            && self
+                .profile
+                .find(&input, with, Gesture::Press)
+                .is_some_and(|a| a.is_held())
+        {
             return;
         }
         if self
@@ -1025,6 +1263,43 @@ impl Mapper {
         }
     }
 
+    /// Mark every pressed input whose press binding is a held modifier as
+    /// used, so releasing it fires no tap.
+    fn consume_modifiers(&mut self) {
+        let profile = &self.profile;
+        for (i, st) in self.inputs.iter_mut() {
+            if let Some(p) = st.press.as_mut()
+                && profile
+                    .find(i, p.with.as_ref(), Gesture::Press)
+                    .is_some_and(|a| a.is_modifier())
+            {
+                p.consumed = true;
+            }
+        }
+    }
+
+    /// The Grid add-on's build option for a key, when it applies: the
+    /// profile enables it, no Ctrl or Alt is held, no wheel or mode is
+    /// active and a builder is selected.
+    fn grid_index<W: WorldView + ?Sized>(&self, input: &Input, cx: &Cx<'_, W>) -> Option<u8> {
+        if !self.profile.grid_build_keys || self.wheel.is_some() {
+            return None;
+        }
+        let Input::Key(k) = input else { return None };
+        let index = GRID_KEYS.iter().position(|g| *g == k.0)?;
+        let held = |name: &str| {
+            self.inputs
+                .iter()
+                .any(|(i, s)| s.press.is_some() && matches!(i, Input::Key(x) if x.0 == name))
+        };
+        if held("ctrl") || held("alt") {
+            return None;
+        }
+        let units = own_units(cx.world, &self.selection);
+        first_builder(cx.world, &units)?;
+        u8::try_from(index).ok()
+    }
+
     // ---- actions -------------------------------------------------------
 
     fn trigger<W: WorldView + ?Sized>(
@@ -1034,8 +1309,25 @@ impl Mapper {
         at: u32,
         cx: &mut Cx<'_, W>,
     ) {
-        // A sticky wheel (confirm on press): select / context / brush
-        // confirm the highlighted slot instead.
+        // A paged wheel: the queue modifier (RB) turns to the next page, the
+        // idle-builder button (LB tap, sticky wheels) to the previous one.
+        if let Some((_, w)) = self.wheel.as_ref()
+            && w.pages > 1
+            && matches!(action, Action::QueueModifier | Action::CycleIdleBuilder)
+        {
+            let step = if action == Action::QueueModifier {
+                1
+            } else {
+                -1
+            };
+            self.turn_page(step);
+            if let Some(p) = self.inputs.get_mut(input).and_then(|s| s.press.as_mut()) {
+                p.consumed = true;
+            }
+            return;
+        }
+        // A sticky wheel (confirm on press, sub-rings): select / context /
+        // brush confirm the highlighted slot instead.
         if self.wheel_sticky
             && self.wheel.is_some()
             && matches!(
@@ -1043,11 +1335,9 @@ impl Mapper {
                 Action::Select | Action::Context { .. } | Action::Brush
             )
         {
-            if let Some((_, w)) = self.wheel.take() {
+            if let Some((i, w)) = self.wheel.take() {
                 self.wheel_sticky = false;
-                if let Some(a) = w.confirm() {
-                    self.instant(a, cx);
-                }
+                self.confirm_wheel(&i, w, cx);
             }
             return;
         }
@@ -1076,7 +1366,73 @@ impl Mapper {
         }
         self.wheel = Some((input.clone(), Wheel::open(kind, slots)));
         self.wheel_sticky = self.tuning.wheel_confirm_on_press;
+        self.wheel_parents.clear();
         self.steer_wheel();
+    }
+
+    /// Open a wheel of `items`, 8 per page (fixed positions).
+    fn open_paged(&mut self, input: &Input, kind: WheelKind, items: Vec<Action>) {
+        if items.is_empty() {
+            return;
+        }
+        let w = Wheel::paged(kind, &items, 0);
+        self.wheel_items = items;
+        self.wheel = Some((input.clone(), w));
+        self.wheel_sticky = self.tuning.wheel_confirm_on_press;
+        self.wheel_parents.clear();
+        self.steer_wheel();
+    }
+
+    /// Show the next (`step` 1) or previous (-1) page of a paged wheel.
+    fn turn_page(&mut self, step: i32) {
+        let items = self.wheel_items.clone();
+        if let Some((_, w)) = self.wheel.as_mut() {
+            let pages = i32::from(w.pages.max(1));
+            let page = (i32::from(w.page) + step).rem_euclid(pages);
+            let mut nw = Wheel::paged(w.kind, &items, usize::try_from(page).unwrap_or(0));
+            nw.highlighted = None;
+            *w = nw;
+        }
+        self.steer_wheel();
+    }
+
+    /// A wheel was confirmed (released, or A / X on a sticky one): open a
+    /// sub-ring, or carry out the slot.
+    fn confirm_wheel<W: WorldView + ?Sized>(
+        &mut self,
+        input: &Input,
+        w: Wheel,
+        cx: &mut Cx<'_, W>,
+    ) {
+        match w.clone().confirm() {
+            Some(Action::OpenRing { ring }) => {
+                self.wheel_parents.push(w);
+                self.open_ring(input, ring);
+            }
+            Some(Action::RecallGroup { group })
+                if w.kind == WheelKind::Squads && self.queue_held() =>
+            {
+                self.wheel_parents.clear();
+                self.instant(Action::AssignGroup { group }, cx);
+            }
+            Some(a) => {
+                self.wheel_parents.clear();
+                self.instant(a, cx);
+            }
+            None => self.wheel_parents.clear(),
+        }
+    }
+
+    /// Open a sub-ring. It stays open after the wheel button is released:
+    /// the stick chooses, A / X confirms, B goes back one ring.
+    fn open_ring(&mut self, input: &Input, ring: Ring) {
+        let slots = ring_slots(ring);
+        self.wheel = Some((input.clone(), Wheel::open(WheelKind::of_ring(ring), slots)));
+        self.wheel_sticky = true;
+    }
+
+    fn refuse(&mut self, reason: Refusal) {
+        self.feedback.push(Feedback::Refused { reason });
     }
 
     fn start_held<W: WorldView + ?Sized>(
@@ -1105,10 +1461,53 @@ impl Mapper {
                     start_screen: self.cursor,
                 });
             }
-            Action::CommandWheel | Action::BuildWheel if self.wheel.is_some() => {
+            Action::CrystalBall => self.crystal_by.push(input.clone()),
+            Action::CommandWheel | Action::BuildWheel | Action::SpellWheel
+                if self.wheel.is_some() =>
+            {
                 // Pressing a wheel button again closes a sticky wheel.
                 self.wheel = None;
                 self.wheel_sticky = false;
+                self.wheel_parents.clear();
+            }
+            Action::CommandWheel if self.profile.fixed_slots => {
+                let units = own_units(cx.world, &self.selection);
+                let spells = first_caster(cx.world, &units).map_or(0, |(_, s)| s.len());
+                let builders = first_builder(cx.world, &units).is_some();
+                let slots = context_slots_fixed(
+                    &self.profile.command_wheel,
+                    &self.profile.idle_wheel,
+                    !units.is_empty(),
+                    spells > 0,
+                    builders,
+                );
+                self.open_wheel(input, WheelKind::Command, slots);
+            }
+            Action::BuildWheel if self.profile.fixed_slots => {
+                let units = own_units(cx.world, &self.selection);
+                let Some(first) = first_builder(cx.world, &units) else {
+                    self.refuse(Refusal::CannotDo);
+                    return;
+                };
+                let items: Vec<Action> = (0..cx.world.build_options(first).len())
+                    .map(|i| Action::BuildOption {
+                        index: u8::try_from(i).unwrap_or(u8::MAX),
+                    })
+                    .collect();
+                self.open_paged(input, WheelKind::Build, items);
+            }
+            Action::SpellWheel => {
+                let units = own_units(cx.world, &self.selection);
+                let Some((_, spells)) = first_caster(cx.world, &units) else {
+                    self.refuse(Refusal::CannotDo);
+                    return;
+                };
+                let items: Vec<Action> = (0..spells.len())
+                    .map(|i| Action::CastSpell {
+                        index: u8::try_from(i).unwrap_or(u8::MAX),
+                    })
+                    .collect();
+                self.open_paged(input, WheelKind::Spell, items);
             }
             Action::CommandWheel => {
                 let slots = if self.tuning.wheel_context {
@@ -1156,11 +1555,11 @@ impl Mapper {
         self.queue_by.retain(|i| i != input);
         self.zoom_by.retain(|i| i != input);
         if !self.wheel_sticky
-            && let Some((_, w)) = self.wheel.take_if(|(i, _)| i == input)
-            && let Some(a) = w.confirm()
+            && let Some((i, w)) = self.wheel.take_if(|(i, _)| i == input)
         {
-            self.instant(a, cx);
+            self.confirm_wheel(&i, w, cx);
         }
+        self.crystal_by.retain(|i| i != input);
         if let Some(b) = self.brush.take_if(|b| &b.input == input) {
             let radius = brush_radius(self.now.saturating_sub(b.since), &self.tuning);
             let additive = b.last_stamp.is_some() || self.queue_held();
@@ -1275,13 +1674,163 @@ impl Mapper {
             Action::CastSpellMode => self.cast_spell_mode(0, cx),
             Action::CastSpell { index } => self.cast_spell_mode(usize::from(index), cx),
             Action::BuildOption { index } => self.build_option(usize::from(index), cx),
-            Action::Brush
+            Action::SubSelectCycle => self.sub_select_cycle(cx),
+            Action::SelectMonarch { track } => {
+                let me = cx.world.local_player();
+                match cx.world.monarch().and_then(|id| cx.world.unit(id)) {
+                    Some(u) if u.owner == me => {
+                        self.set_selection(UnitSet::single(u.id));
+                        if track {
+                            self.follow = true;
+                        }
+                    }
+                    _ => self.refuse(Refusal::NothingThere),
+                }
+            }
+            Action::ResetZoom => {
+                let z =
+                    Fx::from_ratio(self.tuning.zoom_default_milli.max(1), 1000).unwrap_or(Fx::HALF);
+                self.zoom_goal = Some(self.clamp_zoom(z));
+            }
+            Action::JumpToGroup { group } => {
+                let units = own_units(cx.world, &self.groups[usize::from(group.get())]);
+                match centre_of(cx.world, &units) {
+                    Some(c) => {
+                        self.follow = false;
+                        self.glide_to(c);
+                    }
+                    None => self.refuse(Refusal::NothingThere),
+                }
+            }
+            Action::ToggleCrystalBall => self.crystal_toggled = !self.crystal_toggled,
+            Action::AttackMode => self.set_mode_if_units(Mode::Attack, cx),
+            Action::MoveMode => self.set_mode_if_units(Mode::Move, cx),
+            Action::SelectCategory { category } => self.select_category(category, cx),
+            Action::SetBookmark { slot } => {
+                if let Some(b) = self.bookmarks.get_mut(usize::from(slot)) {
+                    *b = Some(sat_add(
+                        self.camera.screen_to_world(self.camera.center_screen()),
+                        self.pan,
+                    ));
+                }
+            }
+            Action::GoToBookmark { slot } => match self.bookmark(slot) {
+                Some(p) => {
+                    self.follow = false;
+                    self.glide_to(p);
+                }
+                None => self.refuse(Refusal::NothingThere),
+            },
+            Action::NextUnit => self.next_unit(cx),
+            Action::ToggleDamageBars => cx.out.push(Output::ToggleDamageBars),
+            Action::GameSpeed { faster } => cx.out.push(Output::GameSpeed { faster }),
+            Action::TogglePause => cx.out.push(Output::TogglePause),
+            Action::Reserved { .. } => self.refuse(Refusal::Unsupported),
+            Action::OpenRing { .. }
+            | Action::Brush
             | Action::DragSelect
             | Action::Precision
             | Action::QueueModifier
             | Action::ZoomModifier
             | Action::CommandWheel
-            | Action::BuildWheel => {}
+            | Action::BuildWheel
+            | Action::SpellWheel
+            | Action::CrystalBall => {}
+        }
+    }
+
+    /// Halo Wars RT: narrow to the next unit type in the selection; after
+    /// the last type, back to the full selection.
+    fn sub_select_cycle<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        let world = cx.world;
+        let by_type = |full: &UnitSet, def: UnitDefId| -> UnitSet {
+            full.iter()
+                .copied()
+                .filter(|&id| world.unit(id).is_some_and(|u| u.def == def))
+                .collect()
+        };
+        let current = own_units(world, &self.selection);
+        let next = match self.sub_select.take() {
+            Some(mut ss)
+                if ss.types.get(ss.index).map(|&d| by_type(&ss.full, d))
+                    == Some(current.clone()) =>
+            {
+                ss.full = own_units(world, &ss.full);
+                ss.index += 1;
+                if ss.index < ss.types.len() {
+                    Some(ss)
+                } else {
+                    self.set_selection(ss.full);
+                    None
+                }
+            }
+            _ => {
+                let mut types: Vec<UnitDefId> = Vec::new();
+                for id in current.iter() {
+                    if let Some(u) = world.unit(*id)
+                        && !types.contains(&u.def)
+                    {
+                        types.push(u.def);
+                    }
+                }
+                if types.len() < 2 {
+                    self.refuse(Refusal::NothingThere);
+                    return;
+                }
+                Some(SubSelect {
+                    full: current,
+                    types,
+                    index: 0,
+                })
+            }
+        };
+        if let Some(ss) = next {
+            let sub = by_type(&ss.full, ss.types[ss.index]);
+            self.set_selection(sub);
+            self.sub_select = Some(ss);
+        }
+    }
+
+    /// TA Ctrl+letter: every own unit of a category on the map (added to
+    /// the selection with the queue modifier).
+    fn select_category<W: WorldView + ?Sized>(&mut self, c: Category, cx: &mut Cx<'_, W>) {
+        let me = cx.world.local_player();
+        let mut v: Vec<UnitId> = if self.queue_held() {
+            self.selection.iter().copied().collect()
+        } else {
+            Vec::new()
+        };
+        for u in units_sorted(cx.world) {
+            if u.owner == me && u.selectable && cx.world.in_category(u.id, c) {
+                v.push(u.id);
+            }
+        }
+        let s = UnitSet::from(v);
+        if s.is_empty() {
+            self.refuse(Refusal::NothingThere);
+        }
+        self.set_selection(s);
+    }
+
+    /// TA N: camera to the next own unit that is off screen.
+    fn next_unit<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        let me = cx.world.local_player();
+        let off: Vec<UnitInfo> = units_sorted(cx.world)
+            .into_iter()
+            .filter(|u| u.owner == me && u.selectable && !self.camera.contains_world(u.pos))
+            .collect();
+        let next = self
+            .last_next_unit
+            .and_then(|last| off.iter().find(|u| u.id > last))
+            .or_else(|| off.first())
+            .copied();
+        match next {
+            Some(u) => {
+                self.last_next_unit = Some(u.id);
+                self.follow = false;
+                self.glide_to(u.pos);
+            }
+            None => self.refuse(Refusal::NothingThere),
         }
     }
 
@@ -1304,16 +1853,21 @@ impl Mapper {
     /// if it has that spell and can pay for it.
     fn cast_spell_mode<W: WorldView + ?Sized>(&mut self, index: usize, cx: &mut Cx<'_, W>) {
         let units = own_units(cx.world, &self.selection);
-        if let Some((caster, spells)) = first_caster(cx.world, &units)
-            && let Some(&s) = spells.get(index)
-            && cx.world.can_cast(caster, s)
-        {
-            self.mode = Mode::CastSpell(s);
+        match first_caster(cx.world, &units) {
+            Some((caster, spells)) => match spells.get(index) {
+                Some(&s) if cx.world.can_cast(caster, s) => self.mode = Mode::CastSpell(s),
+                Some(_) => self.refuse(Refusal::NoMana),
+                None => self.refuse(Refusal::CannotDo),
+            },
+            None if units.is_empty() => self.refuse(Refusal::NothingSelected),
+            None => self.refuse(Refusal::CannotDo),
         }
     }
 
     fn set_mode_if_units<W: WorldView + ?Sized>(&mut self, mode: Mode, cx: &mut Cx<'_, W>) {
-        if !own_units(cx.world, &self.selection).is_empty() {
+        if own_units(cx.world, &self.selection).is_empty() {
+            self.refuse(Refusal::NothingSelected);
+        } else {
             self.mode = mode;
         }
     }
@@ -1334,8 +1888,15 @@ impl Mapper {
     }
 
     fn cancel<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
-        if self.wheel.take().is_some() {
-            self.wheel_sticky = false;
+        if let Some((input, _)) = self.wheel.take() {
+            // A sub-ring goes back to its parent (still open, sticky).
+            if let Some(mut parent) = self.wheel_parents.pop() {
+                parent.highlighted = None;
+                self.wheel = Some((input, parent));
+                self.wheel_sticky = true;
+            } else {
+                self.wheel_sticky = false;
+            }
             return;
         }
         if self.brush.take().is_some() || self.drag.take().is_some() {
@@ -1407,6 +1968,7 @@ impl Mapper {
     }
 
     fn set_selection(&mut self, s: UnitSet) {
+        self.sub_select = None;
         if s != self.selection {
             self.selection = s;
             self.mode = Mode::None;
@@ -1504,6 +2066,19 @@ fn per_ms(v: Vec2, dt_ms: u32) -> Vec2 {
         Fx::from_raw(r.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
     };
     Vec2::new(f(v.x), f(v.y))
+}
+
+/// Mean position of the units that still exist.
+fn centre_of<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<WorldPos> {
+    let (mut x, mut y, mut n) = (0i64, 0i64, 0i64);
+    for id in units.iter() {
+        if let Some(u) = world.unit(*id) {
+            x += i64::from(u.pos.x.raw());
+            y += i64::from(u.pos.y.raw());
+            n += 1;
+        }
+    }
+    (n > 0).then(|| Vec2::new(Fx::from_raw((x / n) as i32), Fx::from_raw((y / n) as i32)))
 }
 
 /// The lowest-id builder among `units`.

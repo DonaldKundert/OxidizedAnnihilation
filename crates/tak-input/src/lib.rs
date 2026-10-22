@@ -30,6 +30,7 @@ mod brush;
 mod context;
 mod cursor;
 mod event;
+mod keys_tdf;
 pub mod lab;
 mod mapper;
 mod record;
@@ -37,7 +38,10 @@ mod tuning;
 mod wheel;
 mod world;
 
-pub use binding::{Action, Binding, Gesture, Profile, ProfileError};
+pub use binding::{
+    Action, Binding, CONTROL_SCHEMES, Category, GRID_KEYS, Gesture, Profile, ProfileError,
+    ReservedOrder, Ring,
+};
 pub use brush::{brush_radius, drag_circle, units_in_circle};
 pub use context::{Mode, builders_for, casters_for, own_units, pick_unit, resolve_context};
 pub use cursor::{
@@ -45,10 +49,14 @@ pub use cursor::{
     per_second, soft_snap, stick_vector, stick_vector_zones, zoom_factor,
 };
 pub use event::{Axis, Button, EventKind, Input, InputEvent, Key};
-pub use mapper::{CursorKind, Feedback, Mapper, Output};
+pub use keys_tdf::{KeyLine, KeysError, KeysImport, LineStatus, parse_keys_tdf};
+pub use mapper::{BOOKMARKS, CursorKind, Feedback, Mapper, Output, Refusal, SubSelect};
 pub use record::{
     FrameIo, Ghost, RECORDING_VERSION, RecFrame, Recorder, Recording, RecordingError, Summary,
 };
 pub use tuning::{PRESETS, TUNING_FIELDS, Tuning, TuningField, field as tuning_field};
-pub use wheel::{Wheel, WheelKind, context_slots, expand_spells, slot_direction, slot_for};
+pub use wheel::{
+    BLANK, PAGE, Wheel, WheelKind, context_slots, context_slots_fixed, expand_spells, is_blank,
+    ring_slots, ring_usable, slot_direction, slot_for,
+};
 pub use world::{BuilderKind, Camera, UnitInfo, WorldView, units_sorted};

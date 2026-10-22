@@ -43,6 +43,9 @@ pub struct DefInfo {
     pub object: String,
     /// Footprint in 16-px cells.
     pub footprint: (u8, u8),
+    /// FBI `category` words (e.g. `MELEE`, `FLY`), for TA's select-category
+    /// keys. Display/input only.
+    pub categories: Vec<String>,
 }
 
 /// A running match and its log.
@@ -214,6 +217,25 @@ pub fn open_vfs(data: &Path) -> Result<Vfs, SetupError> {
 }
 
 impl Session {
+    /// The input layer's read-only view of this match.
+    pub fn view(&self) -> crate::view::SimView<'_> {
+        crate::view::SimView {
+            world: self.sim.world(),
+            local: self.local,
+            defs: Some(&self.defs),
+            fog: None,
+        }
+    }
+
+    /// [`Session::view`] limited to what the local player can see through
+    /// `fog` (enemies outside current sight left out).
+    pub fn view_fogged<'a>(
+        &'a self,
+        fog: Option<&'a crate::fog::FogGrid>,
+    ) -> crate::view::SimView<'a> {
+        crate::view::SimView { fog, ..self.view() }
+    }
+
     /// Load a real map with every player's build tree (the
     /// `load_match_with_builds` path) and the given fixture log.
     pub fn load(
@@ -245,6 +267,7 @@ impl Session {
                         .unwrap_or_else(|| d.name.clone())
                         .to_ascii_lowercase(),
                     footprint: (d.footprintx.max(1), d.footprintz.max(1)),
+                    categories: fbi.map(|u| u.categories.clone()).unwrap_or_default(),
                 }
             })
             .collect();

@@ -72,6 +72,26 @@ pub struct Args {
     /// Ignored when `--input-profile` names an existing file.
     #[arg(long, default_value = "console")]
     pub input_preset: String,
+    /// Control scheme: kingdoms (Kingdoms Console pad + Classic TA:K keys,
+    /// the default), wp_s or wp_j (the earlier schemes, for comparison).
+    /// Ignored when `--input-profile` names an existing file.
+    #[arg(long, default_value = "kingdoms")]
+    pub controls: String,
+    /// Import this `Keys.TDF` (TA:K's key bindings file) into the keyboard
+    /// bindings. Default: the install's own `Keys.TDF` when present.
+    #[arg(long)]
+    pub keys_tdf: Option<PathBuf>,
+    /// Do not import the install's `Keys.TDF`.
+    #[arg(long)]
+    pub no_keys_tdf: bool,
+    /// Turn on the optional Grid build hotkeys (Q-R, A-F, Z-V with a builder
+    /// selected).
+    #[arg(long)]
+    pub grid_keys: bool,
+    /// HUD layout: auto (collapse the side panel while the pad is in use),
+    /// console (always collapsed, wheels and button prompts) or classic.
+    #[arg(long, default_value = "auto")]
+    pub hud: String,
     /// Input profile JSON (bindings + tuning). Watched while playing: edits
     /// apply on save. The tuning overlay saves here. Created from the preset
     /// if missing.

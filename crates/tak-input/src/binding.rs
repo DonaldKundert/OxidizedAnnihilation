@@ -137,6 +137,206 @@ pub enum Action {
     CommandWheel,
     /// *Held.* Build wheel for the selected builder.
     BuildWheel,
+    /// *Held.* Spell wheel: every spell of the selection's first caster
+    /// (Kingdoms Console: hold Y).
+    SpellWheel,
+    /// Narrow the selection to one unit type at a time, cycling through the
+    /// types in it; one more press after the last type restores the full
+    /// selection (Halo Wars RT).
+    SubSelectCycle,
+    /// Select the local monarch (TA Ctrl+M); with `track`, the camera also
+    /// follows it.
+    SelectMonarch {
+        /// Follow it with the camera.
+        #[serde(default)]
+        track: bool,
+    },
+    /// Zoom back to `zoom_default_milli` (Kingdoms Console: R3).
+    ResetZoom,
+    /// Camera to a squad's units without changing the selection.
+    JumpToGroup {
+        /// Squad.
+        group: ControlGroup,
+    },
+    /// *Held.* Full-screen Crystal Ball (radar) while held.
+    CrystalBall,
+    /// Toggle the full-screen Crystal Ball (TA Tab).
+    ToggleCrystalBall,
+    /// Next context order attacks the unit or ground under the cursor
+    /// (TA A, then click).
+    AttackMode,
+    /// Next context order moves, even over a unit (TA M, then click).
+    MoveMode,
+    /// Select every own unit of a category on the map (TA Ctrl+letter;
+    /// additive with the queue modifier, TA Ctrl+Shift+letter).
+    SelectCategory {
+        /// Which units.
+        category: Category,
+    },
+    /// Store the camera position as bookmark `slot` (TA Ctrl+F5..F8).
+    SetBookmark {
+        /// Bookmark, 1..=4 in the original.
+        slot: u8,
+    },
+    /// Camera to bookmark `slot` (TA F5..F8).
+    GoToBookmark {
+        /// Bookmark.
+        slot: u8,
+    },
+    /// Camera to the next own unit that is off screen (TA N).
+    NextUnit,
+    /// Damage bars: all, selected only, off (TA ~).
+    ToggleDamageBars,
+    /// Game speed up or down (TA + / -). Changes ticks per wall second only.
+    GameSpeed {
+        /// Faster (`+`) or slower (`-`).
+        faster: bool,
+    },
+    /// Pause or resume (TA Pause).
+    TogglePause,
+    /// Wheel slot: open a sub-ring (Stance, Unit, Squads).
+    OpenRing {
+        /// Which ring.
+        ring: Ring,
+    },
+    /// A reserved slot or key: an action the design keeps a place for but
+    /// the sim does not support yet (design system section 9). It does
+    /// nothing and is hidden in the interface, so adding it later changes
+    /// no layout.
+    Reserved {
+        /// What the slot is for.
+        order: ReservedOrder,
+    },
+}
+
+/// Unit categories for TA's select-category keys (`Keys.TDF`
+/// `SelectUnits <CATEGORY>`).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Category {
+    /// Mobile builders (TA Ctrl+B, `BUILDER`).
+    Builder,
+    /// Melee fighters (Ctrl+E, `MELEE`).
+    Melee,
+    /// Factories and other structures that produce units (Ctrl+F).
+    Factory,
+    /// Units with magic (Ctrl+G, `MAGIC`).
+    Magic,
+    /// The monarch (Ctrl+M).
+    Monarch,
+    /// Boats and sea monsters (Ctrl+N, `BOAT` / `NAVAL`).
+    Naval,
+    /// Ballistic weapons (Ctrl+R, `BALLISTIC`).
+    Ballistic,
+    /// Mobile armed units, not naval (Ctrl+T, `TROOPS`).
+    Troops,
+    /// Armed units except the monarch (Ctrl+W, `ATTACK`).
+    Armed,
+    /// Fliers (Ctrl+Y, `FLY`).
+    Fly,
+}
+
+impl Category {
+    /// The `Keys.TDF` category name.
+    pub fn tdf_name(self) -> &'static str {
+        match self {
+            Category::Builder => "BUILDER",
+            Category::Melee => "MELEE",
+            Category::Factory => "FACTORY",
+            Category::Magic => "MAGIC",
+            Category::Monarch => "MONARCH",
+            Category::Naval => "NAVAL",
+            Category::Ballistic => "BALLISTIC",
+            Category::Troops => "TROOPS",
+            Category::Armed => "ATTACK",
+            Category::Fly => "FLY",
+        }
+    }
+
+    /// Parse a `Keys.TDF` category name (case-insensitive; `BOAT` is
+    /// naval).
+    pub fn from_tdf(s: &str) -> Option<Category> {
+        Some(match s.trim().to_ascii_uppercase().as_str() {
+            "BUILDER" => Category::Builder,
+            "MELEE" => Category::Melee,
+            "FACTORY" => Category::Factory,
+            "MAGIC" => Category::Magic,
+            "MONARCH" => Category::Monarch,
+            "BOAT" | "NAVAL" => Category::Naval,
+            "BALLISTIC" => Category::Ballistic,
+            "TROOPS" => Category::Troops,
+            "ATTACK" => Category::Armed,
+            "FLY" => Category::Fly,
+            _ => return None,
+        })
+    }
+}
+
+/// Sub-rings of the orders wheel.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ring {
+    /// Offensive / Defensive / Passive.
+    Stance,
+    /// Unit-specific orders (Heal, Load, Unload, Cloak, Activate) and the
+    /// squads ring.
+    Unit,
+    /// Squads 5..9 (recall; assign with the queue modifier held).
+    Squads,
+}
+
+/// Orders the design reserves a place for but the sim cannot carry out yet
+/// (design system section 9, plus TA's Clear).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReservedOrder {
+    /// Cancel queued orders (TA C).
+    Clear,
+    /// Heal / repair (TA H).
+    Heal,
+    /// Load into a transport (TA L).
+    Load,
+    /// Unload a transport (TA U).
+    Unload,
+    /// Pick up (transport button).
+    Pickup,
+    /// Drop (transport button).
+    Drop,
+    /// Cloak on / off (TA K).
+    Cloak,
+    /// Open / activate (TA O).
+    Activate,
+    /// Explicit attack-move.
+    AttackMove,
+    /// Formations (TA Alt+1..9).
+    Formation,
+    /// Dismiss / self-destruct (TA Ctrl+D).
+    Dismiss,
+    /// Persistent weapon select (Primary / Secondary / Special).
+    WeaponSelect,
+    /// Not an order: an empty position on a wheel page.
+    Blank,
+}
+
+impl ReservedOrder {
+    /// The order's TA:K name.
+    pub fn label(self) -> &'static str {
+        match self {
+            ReservedOrder::Clear => "Clear",
+            ReservedOrder::Heal => "Heal",
+            ReservedOrder::Load => "Load",
+            ReservedOrder::Unload => "Unload",
+            ReservedOrder::Pickup => "Pickup",
+            ReservedOrder::Drop => "Drop",
+            ReservedOrder::Cloak => "Cloak",
+            ReservedOrder::Activate => "Activate",
+            ReservedOrder::AttackMove => "Attack-move",
+            ReservedOrder::Formation => "Formation",
+            ReservedOrder::Dismiss => "Dismiss",
+            ReservedOrder::WeaponSelect => "Weapon select",
+            ReservedOrder::Blank => "",
+        }
+    }
 }
 
 impl Action {
@@ -150,8 +350,24 @@ impl Action {
                 | Action::QueueModifier
                 | Action::CommandWheel
                 | Action::BuildWheel
+                | Action::SpellWheel
                 | Action::ZoomModifier
+                | Action::CrystalBall
         )
+    }
+
+    /// `true` for the held modifiers (queue, zoom, precision): pressing
+    /// another input while one is down uses it, so its own tap is dropped.
+    pub fn is_modifier(self) -> bool {
+        matches!(
+            self,
+            Action::QueueModifier | Action::ZoomModifier | Action::Precision
+        )
+    }
+
+    /// `false` for [`Action::Reserved`]: the interface hides it.
+    pub fn is_supported(self) -> bool {
+        !matches!(self, Action::Reserved { .. })
     }
 }
 
@@ -222,7 +438,24 @@ pub struct Profile {
     /// on.
     #[serde(default = "default_idle_wheel")]
     pub idle_wheel: Vec<Action>,
+    /// Wheel slots keep fixed positions: a slot the selection cannot use
+    /// stays in place, empty, instead of closing the gap (design system
+    /// "spatial memory"). Build and spell wheels show 8 per page.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fixed_slots: bool,
+    /// Optional "Grid" build hotkeys: with a builder selected, Q W E R /
+    /// A S D F / Z X C V (no modifier) pick build options 1..12 instead of
+    /// their normal bindings. Off by default (TA:K had none).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub grid_build_keys: bool,
 }
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// The Grid add-on's keys, in build-option order.
+pub const GRID_KEYS: [&str; 12] = ["q", "w", "e", "r", "a", "s", "d", "f", "z", "x", "c", "v"];
 
 fn default_idle_wheel() -> Vec<Action> {
     vec![
@@ -236,9 +469,14 @@ fn default_idle_wheel() -> Vec<Action> {
     ]
 }
 
-const CONTROLLER_JSON: &str = include_str!("profiles/controller.json");
+const KINGDOMS_CONSOLE_JSON: &str = include_str!("profiles/kingdoms_console.json");
+const CLASSIC_TAK_JSON: &str = include_str!("profiles/classic_tak.json");
+const WP_S_CONTROLLER_JSON: &str = include_str!("profiles/wp_s_controller.json");
 const WP_J_CONTROLLER_JSON: &str = include_str!("profiles/wp_j_controller.json");
-const MOUSE_KEYBOARD_JSON: &str = include_str!("profiles/mouse_keyboard.json");
+const WP_S_MOUSE_KEYBOARD_JSON: &str = include_str!("profiles/wp_s_mouse_keyboard.json");
+
+/// Names accepted by [`Profile::named`] (control schemes), default first.
+pub const CONTROL_SCHEMES: [&str; 3] = ["kingdoms", "wp_s", "wp_j"];
 
 impl Profile {
     /// Parse and validate.
@@ -298,9 +536,21 @@ impl Profile {
         Ok(())
     }
 
-    /// The default gamepad profile (`src/profiles/controller.json`).
+    /// The default gamepad profile: "Kingdoms Console" (design system
+    /// section 4, `src/profiles/kingdoms_console.json`), reticle mode.
     pub fn default_controller() -> Profile {
-        Profile::from_json(CONTROLLER_JSON).expect("embedded controller profile is valid")
+        Profile::kingdoms_console()
+    }
+
+    /// "Kingdoms Console": Halo Wars' controller scheme on TA:K's orders.
+    pub fn kingdoms_console() -> Profile {
+        Profile::from_json(KINGDOMS_CONSOLE_JSON).expect("embedded Kingdoms Console profile")
+    }
+
+    /// The WP-S controller profile (free cursor, Y local/global select, RB
+    /// zoom modifier), kept selectable for comparison.
+    pub fn wp_s_controller() -> Profile {
+        Profile::from_json(WP_S_CONTROLLER_JSON).expect("embedded WP-S profile is valid")
     }
 
     /// The WP-J controller profile and tuning, unchanged (Y / double Y for
@@ -314,19 +564,66 @@ impl Profile {
     }
 
     /// The default controller and mouse/keyboard profiles merged into one
-    /// (what the client uses: both devices drive one mapper).
+    /// (what the client uses: both devices drive one mapper): Kingdoms
+    /// Console plus Classic TA:K.
     pub fn default_combined() -> Profile {
-        let mut p = Profile::default_controller();
-        p.name = "controller+mouse_keyboard".into();
-        p.bindings
-            .extend(Profile::default_mouse_keyboard().bindings);
+        Profile::combine(
+            Profile::kingdoms_console(),
+            Profile::classic_tak(),
+            "Kingdoms Console + Classic TA:K",
+        )
+    }
+
+    /// The WP-S controller and mouse/keyboard profiles merged (the previous
+    /// default).
+    pub fn wp_s_combined() -> Profile {
+        Profile::combine(
+            Profile::wp_s_controller(),
+            Profile::wp_s_mouse_keyboard(),
+            "controller+mouse_keyboard",
+        )
+    }
+
+    /// `pad`'s tuning and wheels with `keys`' bindings appended.
+    pub fn combine(pad: Profile, keys: Profile, name: &str) -> Profile {
+        let mut p = pad;
+        p.name = name.into();
+        p.grid_build_keys |= keys.grid_build_keys;
+        p.bindings.extend(keys.bindings);
         p
     }
 
-    /// The default mouse and keyboard profile
-    /// (`src/profiles/mouse_keyboard.json`).
+    /// A control scheme by name ([`CONTROL_SCHEMES`]), controller and
+    /// keyboard merged: `kingdoms` (default), `wp_s`, `wp_j` (the WP-J pad
+    /// with the WP-S keyboard).
+    pub fn named(name: &str) -> Option<Profile> {
+        match name.to_ascii_lowercase().replace('-', "_").as_str() {
+            "kingdoms" | "kingdoms_console" | "default" => Some(Profile::default_combined()),
+            "wp_s" | "wps" => Some(Profile::wp_s_combined()),
+            "wp_j" | "wpj" => Some(Profile::combine(
+                Profile::wp_j_controller(),
+                Profile::wp_s_mouse_keyboard(),
+                "wp_j+mouse_keyboard",
+            )),
+            _ => None,
+        }
+    }
+
+    /// The default mouse and keyboard profile: "Classic TA:K" (the
+    /// original's default keys, `src/profiles/classic_tak.json`).
     pub fn default_mouse_keyboard() -> Profile {
-        Profile::from_json(MOUSE_KEYBOARD_JSON).expect("embedded mouse/keyboard profile is valid")
+        Profile::classic_tak()
+    }
+
+    /// "Classic TA:K": TA:K's own default keys and mouse model.
+    pub fn classic_tak() -> Profile {
+        Profile::from_json(CLASSIC_TAK_JSON).expect("embedded Classic TA:K profile is valid")
+    }
+
+    /// The WP-S mouse and keyboard profile, kept selectable.
+    pub fn wp_s_mouse_keyboard() -> Profile {
+        Profile::from_json(WP_S_MOUSE_KEYBOARD_JSON)
+            .expect("embedded WP-S mouse/keyboard profile is valid")
     }
 
     /// The binding for `input` + `with` + `gesture`, if any.

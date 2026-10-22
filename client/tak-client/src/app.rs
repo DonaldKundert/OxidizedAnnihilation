@@ -25,7 +25,7 @@ use bevy::window::{PrimaryWindow, WindowResolution};
 use tak_commands::{ClientCommand, PlayerId, UnitId};
 use tak_input::{
     Action, Axis as InAxis, Button as InButton, EventKind, InputEvent, Key, Mapper, Mode, Output,
-    Profile, WheelKind,
+    Profile,
 };
 use tak_vfs::Vfs;
 
@@ -33,12 +33,14 @@ use crate::cli::{Args, Focus, parse_focus};
 
 #[path = "controls.rs"]
 mod controls;
+#[path = "hud_view.rs"]
+mod hud_view;
 use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
 use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
-use crate::view::{MinimapGeom, SimView, ViewGeom, f, pick_radius};
+use crate::view::{MinimapGeom, ViewGeom, f, pick_radius};
 use controls::Feel;
 
 /// Seconds per sim tick.
@@ -69,6 +71,14 @@ pub struct SimRes {
     fog: crate::fog::FogGrid,
     /// Fog changed since the overlay was last painted.
     fog_changed: bool,
+    /// Alerts for the local player, checked after every tick (display
+    /// only).
+    alerts: crate::alerts::AlertTracker,
+    /// Alerts raised since the HUD last took them (bottom bar).
+    new_alerts: Vec<crate::alerts::Alert>,
+    /// The fog of war is on (F9): the input view then hides enemies
+    /// outside current sight.
+    fog_on: bool,
 }
 
 impl SimRes {
@@ -86,6 +96,14 @@ impl SimRes {
             })
             .collect();
         self.fog_changed |= self.fog.update(&eyes);
+        let input = alert_input(&self.session);
+        let new = self.alerts.update(&input);
+        self.new_alerts.extend(new);
+    }
+
+    /// The input layer's view: what the local player can see.
+    fn view(&self) -> crate::view::SimView<'_> {
+        self.session.view_fogged(self.fog_on.then_some(&self.fog))
     }
 
     fn alpha(&self) -> f32 {
@@ -93,10 +111,59 @@ impl SimRes {
     }
 }
 
+/// What the alert tracker needs from the match: the local player's units,
+/// mana and storage.
+fn alert_input(s: &Session) -> crate::alerts::AlertInput {
+    let w = s.sim.world();
+    let me = s.local;
+    let monarch = w
+        .players()
+        .iter()
+        .find(|p| p.id == me)
+        .and_then(|p| p.monarch);
+    let units = w
+        .units()
+        .filter(|(_, u)| u.owner == me)
+        .map(|(id, u)| crate::alerts::AlertUnit {
+            id,
+            name: s.def(u.def).map_or("?".to_string(), |d| d.display.clone()),
+            pos: u.pos,
+            health: u.combat.health,
+            max_health: u.combat.max_health,
+            complete: u.build.is_complete(),
+            mobile: w
+                .defs()
+                .get(u.def)
+                .is_some_and(|d| d.maxvelocity > tak_math::Fx::ZERO),
+            monarch: Some(id) == monarch,
+        })
+        .collect();
+    let e = tak_sim::economy::player(w, me);
+    crate::alerts::AlertInput {
+        tick: s.tick().0,
+        units,
+        mana: e.map_or(0, |e| e.mana >> 16),
+        storage: e.map_or(0, |e| e.storage >> 16),
+        home: monarch
+            .and_then(|id| w.unit(id))
+            .map_or(tak_math::Vec2::ZERO, |u| u.pos),
+    }
+}
+
 /// Camera state.
 #[derive(Resource, Clone, Copy)]
 struct CamState {
     geom: ViewGeom,
+    /// Terrain height under the screen centre: `tak-input`'s camera maps
+    /// the plane at this height ([`ViewGeom::input_camera_at`]), so the
+    /// reticle picks exactly what is drawn under it.
+    input_h: f32,
+}
+
+impl CamState {
+    fn input_camera(&self) -> tak_input::Camera {
+        self.geom.input_camera_at(self.input_h)
+    }
 }
 
 /// Terrain heights for picking and placement.
@@ -167,14 +234,9 @@ struct FeatureEntities(BTreeMap<tak_sim::features::FeatureId, Entity>);
 
 #[derive(Component)]
 struct HudTop;
+/// Marks HUD panels: clicks there never select or order behind them.
 #[derive(Component)]
 struct HudPanel;
-#[derive(Component)]
-struct HudInfo;
-#[derive(Component)]
-struct HudStatus;
-#[derive(Component)]
-struct HudAlert;
 /// The match-end banner ("Victory" / "Defeat" / "Draw") and its subtitle.
 #[derive(Component)]
 struct HudBanner;
@@ -188,142 +250,55 @@ struct HudBannerText;
 /// death animations play out first; **Believed** for TA:K, display only).
 const BANNER_DELAY_TICKS: u32 = 150;
 
-/// Width of the bottom-left panel.
-const HUD_PANEL_W: f32 = 400.0;
-
-/// A bar in the selection panel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BarKind {
-    Health,
-    Mana,
-    Build,
-}
-
-impl BarKind {
-    fn label(self) -> &'static str {
-        match self {
-            BarKind::Health => "Health",
-            BarKind::Mana => "Mana",
-            BarKind::Build => "Built",
-        }
-    }
-
-    fn color(self) -> Color {
-        match self {
-            BarKind::Health => Color::srgb(0.2, 0.85, 0.2),
-            BarKind::Mana => Color::srgb(0.3, 0.5, 1.0),
-            BarKind::Build => Color::srgb(0.95, 0.75, 0.25),
-        }
-    }
-}
-
-#[derive(Component)]
-struct HudBar(BarKind);
-#[derive(Component)]
-struct HudBarFill(BarKind);
-/// Under the health fill: what a frame's progress has earned.
-#[derive(Component)]
-struct HudBarEarned;
-#[derive(Component)]
-struct HudBarText(BarKind);
-
-/// A clickable HUD button: it presses the same key as the keyboard
-/// binding, so it does exactly what the key (or wheel slot) does.
+/// A clickable HUD button: it carries out the same action as its key or
+/// wheel slot.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonKind {
-    /// `ORDER_BUTTONS[i]`.
-    Order(usize),
-    /// Spell `i` of the selection's caster (Ctrl+F<i+1>).
-    Spell(usize),
-    /// Build option `i` (F1-F8, then Shift+F1-F8).
+    /// `hud_view::PANEL_ACTIONS[i]` (orders, stances, spells).
+    Panel(usize),
+    /// Build option `i`.
     Build(usize),
 }
 
-#[derive(Component)]
-struct HudButtonLabel;
-
-/// Order buttons: label and the mouse/keyboard profile's key.
-const ORDER_BUTTONS: [(&str, &str); 6] = [
-    ("Stop", "s"),
-    ("Patrol", "p"),
-    ("Guard", "g"),
-    ("Hold", "h"),
-    ("Return", "r"),
-    ("Fire", "f"),
-];
-
-/// Spell buttons (the profile binds Ctrl+F1-F3; no retail unit has more
-/// than three spells).
-const SPELL_BUTTONS: usize = 3;
-
-/// Build buttons: the profile binds F1-F8 and Shift+F1-F8 (retail menus
-/// have at most 9 entries; the build wheel shows up to 16).
-const BUILD_BUTTONS: usize = 16;
-
 impl ButtonKind {
-    /// The key (and modifier held with it) the mouse/keyboard profile
-    /// binds to this button's action.
-    fn key(self) -> (Option<&'static str>, String) {
+    /// What the button does.
+    fn action(self) -> Action {
         match self {
-            ButtonKind::Order(i) => (None, ORDER_BUTTONS[i].1.to_string()),
-            ButtonKind::Spell(i) => (Some("ctrl"), format!("f{}", i + 1)),
-            ButtonKind::Build(i) if i < 8 => (None, format!("f{}", i + 1)),
-            ButtonKind::Build(i) => (Some("shift"), format!("f{}", i - 7)),
+            ButtonKind::Panel(i) => hud_view::PANEL_ACTIONS[i],
+            ButtonKind::Build(i) => Action::BuildOption { index: i as u8 },
         }
     }
-
-    /// The key as shown on the button.
-    fn key_label(self) -> String {
-        let (m, k) = self.key();
-        let k = k.to_ascii_uppercase();
-        match m {
-            Some("ctrl") => format!("^{k}"),
-            Some("shift") => format!("S-{k}"),
-            _ => k,
-        }
-    }
-}
-
-/// A HUD button's key press: modifier down, key down and up, modifier up.
-fn key_events((m, k): (Option<&'static str>, String)) -> Vec<EventKind> {
-    let mut v = Vec::new();
-    if let Some(m) = m {
-        v.push(EventKind::KeyDown { key: Key(m.into()) });
-    }
-    v.push(EventKind::KeyDown {
-        key: Key(k.clone()),
-    });
-    v.push(EventKind::KeyUp { key: Key(k) });
-    if let Some(m) = m {
-        v.push(EventKind::KeyUp { key: Key(m.into()) });
-    }
-    v
-}
-
-fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
-    let b = commands
-        .spawn((
-            Node {
-                width: Val::Px(width),
-                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.16, 0.14, 0.11)),
-            BorderColor::all(Color::srgb(0.55, 0.48, 0.3)),
-            Visibility::Hidden,
-            kind,
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((Text::new(""), hud_text(13.0), HudButtonLabel, ChildOf(b)));
 }
 
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = crate::game::open_vfs(&args.data)?;
-    let (profile, profile_mtime) =
-        crate::feel::initial_profile(&args.input_preset, args.input_profile.as_deref())?;
+    let from_file = args.input_profile.as_ref().is_some_and(|p| p.exists());
+    let (mut profile, profile_mtime) = crate::feel::initial_profile(
+        &args.controls,
+        &args.input_preset,
+        args.input_profile.as_deref(),
+    )?;
+    // The player's own Keys.TDF (TA:K's key file) carries over onto the
+    // Classic TA:K keys, unless a saved profile already says otherwise.
+    if !from_file && !args.no_keys_tdf && args.controls.eq_ignore_ascii_case("kingdoms") {
+        let path = args
+            .keys_tdf
+            .clone()
+            .unwrap_or_else(|| args.data.join("Keys.TDF"));
+        if let Ok(data) = std::fs::read(&path) {
+            match tak_input::parse_keys_tdf(&data) {
+                Ok(imp) => {
+                    profile = profile.with_keys_tdf(&imp);
+                    eprintln!("{}: {}", path.display(), imp.summary());
+                }
+                Err(e) => eprintln!("{}: not imported: {e}", path.display()),
+            }
+        }
+    }
+    if args.grid_keys {
+        profile.grid_build_keys = true;
+    }
     if let Some(ev_path) = &args.synth_events {
         return synth(&args, &vfs, profile, ev_path);
     }
@@ -425,6 +400,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             paused: false,
             fog: crate::fog::FogGrid::new(fog_cells.0, fog_cells.1),
             fog_changed: true,
+            alerts: crate::alerts::AlertTracker::default(),
+            new_alerts: Vec::new(),
+            fog_on: !args.no_fog,
         })
         .insert_resource(Ground(Arc::new(ground)))
         .insert_resource(CamState {
@@ -433,6 +411,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 zoom: args.zoom,
                 size: [w as f32, h as f32],
             },
+            input_h: 0.0,
         })
         .insert_resource(InputRes {
             mapper,
@@ -464,6 +443,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 controls::setup_cursors,
                 controls::setup_hints,
                 controls::setup_wheel,
+                controls::setup_sounds,
+                hud_view::setup_hud_art,
+                hud_view::setup_hud_view,
             )
                 .chain(),
         )
@@ -486,7 +468,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 ),
                 (
                     hud_system,
-                    hud_widgets_system,
+                    hud_view::hud_mode_system,
+                    hud_view::panel_system,
+                    hud_view::build_grid_system,
+                    hud_view::unit_card_system,
+                    hud_view::strip_system,
+                    hud_view::bottom_bar_system,
                     banner_system,
                     minimap_system,
                     gizmo_system,
@@ -494,6 +481,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     controls::hints_system,
                     controls::wheel_system,
                     controls::overlay_draw_system,
+                    controls::sound_system,
                     controls::rumble_system,
                     fps_report,
                 ),
@@ -756,112 +744,6 @@ fn setup_hud(mut commands: Commands) {
         },
         HudTop,
     ));
-    let panel = commands
-        .spawn((
-            bg,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(8.0),
-                bottom: Val::Px(8.0),
-                width: Val::Px(HUD_PANEL_W),
-                padding: UiRect::all(Val::Px(6.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },
-            HudPanel,
-        ))
-        .id();
-    commands.spawn((Text::new(""), hud_text(15.0), HudInfo, ChildOf(panel)));
-    for kind in [BarKind::Health, BarKind::Mana, BarKind::Build] {
-        let row = commands
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                },
-                HudBar(kind),
-                ChildOf(panel),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(kind.label()),
-            hud_text(13.0),
-            Node {
-                width: Val::Px(44.0),
-                ..default()
-            },
-            ChildOf(row),
-        ));
-        let track = commands
-            .spawn((
-                Node {
-                    width: Val::Px(180.0),
-                    height: Val::Px(9.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.18, 0.05, 0.05)),
-                ChildOf(row),
-            ))
-            .id();
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(0.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(kind.color().with_alpha(0.45)),
-            HudBarEarned,
-            ChildOf(track),
-        ));
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(0.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(kind.color()),
-            HudBarFill(kind),
-            ChildOf(track),
-        ));
-        commands.spawn((
-            Text::new(""),
-            hud_text(13.0),
-            HudBarText(kind),
-            ChildOf(row),
-        ));
-    }
-    let grid = |commands: &mut Commands, panel: Entity| {
-        commands
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-                ChildOf(panel),
-            ))
-            .id()
-    };
-    let orders = grid(&mut commands, panel);
-    for i in 0..ORDER_BUTTONS.len() {
-        spawn_button(&mut commands, orders, ButtonKind::Order(i), 92.0);
-    }
-    let spells = grid(&mut commands, panel);
-    for i in 0..SPELL_BUTTONS {
-        spawn_button(&mut commands, spells, ButtonKind::Spell(i), 190.0);
-    }
-    let builds = grid(&mut commands, panel);
-    for i in 0..BUILD_BUTTONS {
-        spawn_button(&mut commands, builds, ButtonKind::Build(i), 190.0);
-    }
-    commands.spawn((Text::new(""), hud_text(13.0), HudStatus, ChildOf(panel)));
     // Match-end banner, centred near the top; display only (input still
     // works behind it).
     let banner = commands
@@ -902,21 +784,6 @@ fn setup_hud(mut commands: Commands) {
         ChildOf(plate),
     ));
     commands.spawn((Text::new(""), hud_text(16.0), HudBannerText, ChildOf(plate)));
-    commands.spawn((
-        Text::new(""),
-        hud_text(16.0).0,
-        TextColor(Color::srgb(1.0, 0.45, 0.35)),
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(40.0),
-            left: Val::Px(8.0),
-            padding: UiRect::all(Val::Px(4.0)),
-            ..default()
-        },
-        Visibility::Hidden,
-        HudAlert,
-    ));
 }
 
 /// Screenshot mode: run the sim to each requested tick, let the frame
@@ -927,6 +794,8 @@ fn shot_driver(
     mut sim: NonSendMut<SimRes>,
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
+    ground: Res<Ground>,
+    mut feel: ResMut<Feel>,
     mut exit: MessageWriter<AppExit>,
     hud_buttons: Query<(
         &ButtonKind,
@@ -961,8 +830,9 @@ fn shot_driver(
         if let Some(p) = focus_point(&sim.session, plan.focus) {
             cam.geom.target = p;
         }
+        cam.input_h = centre_height(&cam.geom, &ground.0);
+        input.mapper.set_camera(cam.input_camera());
         if !plan.select.is_empty() {
-            input.mapper.set_camera(cam.geom.input_camera());
             select_units(&mut input.mapper, &sim, &plan.select);
         }
         for (id, u) in sim.session.sim.world().units() {
@@ -1009,13 +879,12 @@ fn shot_driver(
     // `--click`: HUD clicks once the layout exists, through the same hit
     // test and key path as a real click.
     if plan.wait == 10 && !plan.pad_events.is_empty() {
-        let tick = sim.session.tick();
-        let view = SimView {
-            world: sim.session.sim.world(),
-            local: sim.session.local,
-        };
+        let simr: &mut SimRes = &mut sim;
+        let tick = simr.session.tick();
+        let view = simr.session.view_fogged(simr.fog_on.then_some(&simr.fog));
         let base = 3_000_000 + plan.next as u32 * 100_000;
         let mut last = base;
+        let mut jump = false;
         for e in &plan.pad_events {
             last = base + e.t;
             let outs = input
@@ -1024,13 +893,44 @@ fn shot_driver(
             if !outs.is_empty() {
                 eprintln!("  pad {:?} -> {outs:?}", e.kind);
             }
+            jump |= outs.iter().any(|o| {
+                matches!(
+                    o,
+                    Output::Client {
+                        command: ClientCommand::JumpToAlert
+                    }
+                )
+            });
         }
         let _ = input
             .mapper
             .handle(&InputEvent::new(last + 1, EventKind::Frame), &view, tick);
+        if jump {
+            for a in &simr.alerts.alerts {
+                eprintln!("  alert at tick {}: {}", a.tick, a.text);
+            }
+            if let Some(a) = simr.alerts.next_jump() {
+                eprintln!("  alert jump: {} at {:?}", a.text, a.pos);
+                feel.toast = Some(a.text.clone());
+                input.mapper.glide_to(a.pos);
+            }
+        }
+        // Let glides (jumps, recentring) settle: 1.5 s of frames.
+        for k in 0..90 {
+            let _ = input.mapper.handle(
+                &InputEvent::new(last + 2 + k * 16, EventKind::Frame),
+                &view,
+                tick,
+            );
+        }
         let pan = input.mapper.take_camera_pan();
         cam.geom.target[0] += f(pan.x);
         cam.geom.target[1] += f(pan.y);
+        if let Some(z) = input.mapper.take_camera_zoom() {
+            cam.geom.zoom = f(z);
+        }
+        cam.input_h = centre_height(&cam.geom, &ground.0);
+        input.mapper.set_camera(cam.input_camera());
         eprintln!(
             "  pad cursor {:?} kind {:?} wheel {:?}",
             input.mapper.cursor_screen(),
@@ -1048,16 +948,9 @@ fn shot_driver(
             eprintln!("  click ({x}, {y}): {hit:?}");
             if let Some(Some(k)) = hit {
                 let tick = sim.session.tick();
-                let view = SimView {
-                    world: sim.session.sim.world(),
-                    local: sim.session.local,
-                };
-                for kind in key_events(k.key()) {
-                    let outs = input
-                        .mapper
-                        .handle(&InputEvent::new(2_000_000, kind), &view, tick);
-                    eprintln!("    -> {outs:?}");
-                }
+                let view = sim.view();
+                let outs = input.mapper.perform(k.action(), &view, tick);
+                eprintln!("    -> {outs:?}");
             }
         }
     }
@@ -1082,10 +975,7 @@ fn shot_driver(
 /// mapper's state exactly as in play.
 fn select_units(mapper: &mut Mapper, sim: &SimRes, slots: &[u32]) {
     let world = sim.session.sim.world();
-    let view = SimView {
-        world,
-        local: sim.session.local,
-    };
+    let view = sim.view();
     let tick = sim.session.tick();
     let units: Vec<_> = world
         .units()
@@ -1145,6 +1035,13 @@ fn key_name(k: KeyCode) -> Option<String> {
         Period => "period",
         Enter => "enter",
         Tab => "tab",
+        Pause => "pause",
+        Backspace => "backspace",
+        Backquote => "grave",
+        Equal => "equal",
+        Minus => "minus",
+        NumpadAdd => "equal",
+        NumpadSubtract => "minus",
         F1 => "f1",
         F2 => "f2",
         F3 => "f3",
@@ -1261,8 +1158,10 @@ fn input_system(
             f(c.origin.y) + c.height_px as f32 / 2.0 * z,
         ];
     }
+    cam.input_h = centre_height(&cam.geom, &ground.0);
     let geom = cam.geom;
-    input.mapper.set_camera(geom.input_camera());
+    let input_h = cam.input_h;
+    input.mapper.set_camera(cam.input_camera());
     if plan.is_some() {
         return;
     }
@@ -1275,7 +1174,7 @@ fn input_system(
     if let Some(pos) = windows.single().ok().and_then(|w| w.cursor_position()) {
         let (o, d) = geom.ray(pos.x, pos.y);
         if let Some(hit) = ground.0.raycast(o, d) {
-            let v = geom.virtual_px(hit[0], hit[2]);
+            let v = geom.virtual_px_at(hit[0], hit[2], input_h);
             if input.last_pointer != Some(v) {
                 input.last_pointer = Some(v);
                 events.push(EventKind::PointerMove { x: v.0, y: v.1 });
@@ -1302,7 +1201,7 @@ fn input_system(
     }
     // HUD panel and buttons: a click there presses the button's key (the
     // same action as the keyboard) and never reaches the world.
-    let mut pressed_keys: Vec<(Option<&'static str>, String)> = Vec::new();
+    let mut pressed: Vec<Action> = Vec::new();
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
@@ -1310,7 +1209,7 @@ fn input_system(
     {
         minimap.ui_held = true;
         if let Some(k) = hit {
-            pressed_keys.push(k.key());
+            pressed.push(k.action());
         }
     }
     let swallow_left = minimap.mouse_drag
@@ -1367,7 +1266,7 @@ fn input_system(
         {
             minimap.pad_swallow = true;
             if let Some(k) = hit {
-                pressed_keys.push(k.key());
+                pressed.push(k.action());
             }
         }
         if minimap.pad_swallow {
@@ -1402,9 +1301,7 @@ fn input_system(
             }
         }
     }
-    for k in pressed_keys {
-        events.extend(key_events(k));
-    }
+
     for ev in wheel.read() {
         let steps = match ev.unit {
             MouseScrollUnit::Line => ev.y,
@@ -1424,16 +1321,17 @@ fn input_system(
     let tick = sim.session.tick();
     let mut outs = Vec::new();
     {
-        let view = SimView {
-            world: sim.session.sim.world(),
-            local: sim.session.local,
-        };
+        let view = sim.view();
         for kind in &events {
             outs.extend(
                 input
                     .mapper
                     .handle(&InputEvent::new(t, kind.clone()), &view, tick),
             );
+        }
+        // HUD buttons carry out their action directly.
+        for a in pressed {
+            outs.extend(input.mapper.perform(a, &view, tick));
         }
     }
     let mut submitted = Vec::new();
@@ -1442,6 +1340,7 @@ fn input_system(
             Output::Sim { command, .. } => {
                 let at = sim.session.submit(command.clone());
                 submitted.push((at.0, command.clone()));
+                feel.sounds.extend(controls::order_sound(command));
                 debug!("order for tick {}", at.0);
             }
             Output::ToggleOverlay => {
@@ -1452,24 +1351,46 @@ fn input_system(
                 }
             }
             Output::Client { command } => match command {
+                // The mapper's camera maps the ground under the screen
+                // centre, so glides go to true ground positions.
                 ClientCommand::CenterOnMonarch => {
-                    if let Some(p) = focus_point(&sim.session, Focus::Monarch(sim.session.local.0))
+                    let w = sim.session.sim.world();
+                    if let Some(p) = w
+                        .players()
+                        .get(usize::from(sim.session.local.0))
+                        .and_then(|p| p.monarch)
+                        .and_then(|id| w.unit(id))
                     {
-                        input.mapper.glide_to(fx_pos(p));
+                        input.mapper.glide_to(p.pos);
                     }
                 }
                 ClientCommand::CycleIdleBuilder => {
                     if let Some(id) = input.mapper.selection().iter().next()
                         && let Some(u) = sim.session.sim.world().unit(*id)
                     {
-                        let h = f(sim.session.sim.world().map().height_at(u.pos));
-                        let p = [f(u.pos.x), f(u.pos.y) - crate::view::SHEAR * h];
-                        input.mapper.glide_to(fx_pos(p));
+                        input.mapper.glide_to(u.pos);
                     }
                 }
+                ClientCommand::JumpToAlert => jump_to_alert(&mut sim, &mut input, &mut feel),
                 _ => {}
             },
             Output::SelectAll { .. } => {}
+            Output::GameSpeed { faster } => {
+                sim.speed = if *faster {
+                    (sim.speed * 2.0).min(8.0)
+                } else {
+                    (sim.speed / 2.0).max(0.25)
+                };
+            }
+            Output::TogglePause => sim.paused = !sim.paused,
+            Output::ToggleDamageBars => {
+                feel.damage_bars = (feel.damage_bars + 1) % 3;
+                feel.toast = Some(
+                    crate::hud::DamageBars::from_cycle(feel.damage_bars)
+                        .label()
+                        .into(),
+                );
+            }
         }
     }
     let fb = input.mapper.take_feedback();
@@ -1495,6 +1416,10 @@ fn input_system(
     if let Some(z) = input.mapper.take_camera_zoom() {
         cam.geom.zoom = f(z);
     }
+    // Hand the moved camera back at once, so the cursor and reticle drawn
+    // this frame already ride with it.
+    cam.input_h = centre_height(&cam.geom, &ground.0);
+    input.mapper.set_camera(cam.input_camera());
     let dt = time.delta_secs();
     let speed = if overlay {
         0.0
@@ -1513,26 +1438,27 @@ fn input_system(
     if keys.pressed(KeyCode::ArrowDown) {
         cam.geom.target[1] += speed;
     }
-    // Game speed and pause (client only: changes ticks per wall second).
-    if keys.just_pressed(KeyCode::Pause)
-        || keys.just_pressed(KeyCode::KeyP) && keys.pressed(KeyCode::ControlLeft)
-    {
-        sim.paused = !sim.paused;
-    }
-    if keys.just_pressed(KeyCode::Equal) {
-        sim.speed = (sim.speed * 2.0).min(8.0);
-    }
-    if keys.just_pressed(KeyCode::Minus) {
-        sim.speed = (sim.speed / 2.0).max(0.25);
+    // Game speed and pause come from the profile (TA Pause, + / -) as
+    // mapper outputs above: client only, ticks per wall second.
+}
+
+/// Alert jump (View / F3): the camera glides to the newest alert, then
+/// older ones on each press.
+fn jump_to_alert(sim: &mut SimRes, input: &mut InputRes, feel: &mut Feel) {
+    match sim.alerts.next_jump() {
+        Some(a) => {
+            let (pos, text) = (a.pos, a.text.clone());
+            input.mapper.glide_to(pos);
+            feel.toast = Some(text);
+        }
+        None => feel.toast = Some("No alerts".into()),
     }
 }
 
-/// A camera-target point as a `tak-input` ground position.
-fn fx_pos(p: [f32; 2]) -> tak_math::Vec2 {
-    tak_math::Vec2::new(
-        tak_math::Fx::from_raw((p[0] * 65536.0) as i32),
-        tak_math::Fx::from_raw((p[1] * 65536.0) as i32),
-    )
+/// Terrain height under the screen centre (0 off the map).
+fn centre_height(geom: &ViewGeom, ground: &TerrainData) -> f32 {
+    let (o, d) = geom.ray(geom.size[0] / 2.0, geom.size[1] / 2.0);
+    ground.raycast(o, d).map_or(0.0, |p| p[1])
 }
 
 /// Fixed 30 Hz stepping on an accumulator.
@@ -2922,6 +2848,7 @@ fn fog_system(
         fog.enabled = !fog.enabled;
     }
     let enabled = fog.enabled;
+    sim.fog_on = enabled;
     if fog.applied != Some(enabled) {
         fog.applied = Some(enabled);
         for mut v in &mut vis {
@@ -3020,13 +2947,24 @@ struct MinimapState {
     pad_swallow: bool,
     /// The left button went down on the HUD panel.
     ui_held: bool,
+    /// Full-screen Crystal Ball (TA Tab, hold View).
+    big: bool,
+    /// Height kept free at the bottom right (the Classic TA:K side panel):
+    /// the minimap sits above it.
+    reserve: f32,
 }
 
 impl MinimapState {
     /// Where the minimap is for a viewport (bottom-right corner, fitted
     /// to the window keeping the image's aspect: [`MinimapGeom::fit`]).
     fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
-        Some(MinimapGeom::fit(view, self.image?, self.map))
+        Some(if self.big {
+            MinimapGeom::full(view, self.image?, self.map)
+        } else if self.reserve > 0.0 {
+            MinimapGeom::fit_above(view, self.image?, self.map, self.reserve)
+        } else {
+            MinimapGeom::fit(view, self.image?, self.map)
+        })
     }
 }
 
@@ -3041,6 +2979,10 @@ struct MinimapRoot;
 struct MinimapView;
 #[derive(Component)]
 struct MinimapDot(usize);
+/// An alert ping on the minimap: an expanding, fading ring.
+#[derive(Component)]
+struct MinimapPing(usize);
+const MINIMAP_PINGS: usize = 8;
 
 /// Team colours for minimap dots (**Chosen**: TA's player order blue, red,
 /// white, green, yellow, purple, cyan, orange).
@@ -3113,6 +3055,21 @@ fn setup_minimap(
         MinimapView,
         ChildOf(root),
     ));
+    for i in 0..MINIMAP_PINGS {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::MAX,
+                ..default()
+            },
+            BorderColor::all(Color::WHITE),
+            Visibility::Hidden,
+            ZIndex(3),
+            MinimapPing(i),
+            ChildOf(root),
+        ));
+    }
 }
 
 /// Unit dots in team colours and the camera rectangle.
@@ -3120,9 +3077,11 @@ fn minimap_system(
     mut commands: Commands,
     sim: NonSend<SimRes>,
     cam: Res<CamState>,
-    mm: Res<MinimapState>,
+    input: Res<InputRes>,
+    hud_mode: Option<Res<hud_view::HudMode>>,
+    mut mm: ResMut<MinimapState>,
     fog: Res<FogRes>,
-    mut root: Query<(Entity, &mut Node), With<MinimapRoot>>,
+    mut root: Query<(Entity, &mut Node), (With<MinimapRoot>, Without<MinimapPing>)>,
     mut panel: Query<
         &mut Node,
         (
@@ -3130,9 +3089,18 @@ fn minimap_system(
             Without<MinimapRoot>,
             Without<MinimapView>,
             Without<MinimapDot>,
+            Without<MinimapPing>,
         ),
     >,
-    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>, Without<MinimapRoot>)>,
+    mut view: Query<
+        &mut Node,
+        (
+            With<MinimapView>,
+            Without<MinimapDot>,
+            Without<MinimapRoot>,
+            Without<MinimapPing>,
+        ),
+    >,
     mut dots: Query<
         (
             &MinimapDot,
@@ -3140,12 +3108,37 @@ fn minimap_system(
             &mut BackgroundColor,
             &mut Visibility,
         ),
-        (Without<MinimapView>, Without<MinimapRoot>),
+        (
+            Without<MinimapView>,
+            Without<MinimapRoot>,
+            Without<MinimapPing>,
+        ),
+    >,
+    mut pings: Query<
+        (&MinimapPing, &mut Node, &mut BorderColor, &mut Visibility),
+        (
+            Without<MinimapView>,
+            Without<MinimapRoot>,
+            Without<MinimapDot>,
+            Without<MinimapPanel>,
+        ),
     >,
 ) {
     let Ok((root, mut root_node)) = root.single_mut() else {
         return;
     };
+    let big = input.mapper.crystal_ball();
+    if mm.big != big {
+        mm.big = big;
+    }
+    let reserve = if hud_mode.is_some_and(|m| !m.console) {
+        hud_view::SIDE_PANEL_H
+    } else {
+        0.0
+    };
+    if mm.reserve != reserve {
+        mm.reserve = reserve;
+    }
     let Some(g) = mm.geom(cam.geom.size) else {
         return;
     };
@@ -3165,6 +3158,34 @@ fn minimap_system(
         n.top = Val::Px(r[1]);
         n.width = Val::Px(r[2].max(2.0));
         n.height = Val::Px(r[3].max(2.0));
+    }
+    // Alert pings: rings that grow and fade over three seconds.
+    let tick = sim.session.tick().0;
+    let w = sim.session.sim.world();
+    let live: Vec<_> = sim.alerts.pings(tick).collect();
+    for (pg, mut n, mut bc, mut v) in &mut pings {
+        match live.iter().rev().nth(pg.0) {
+            Some((a, age)) => {
+                let h = f(w.map().height_at(a.pos));
+                let p = g.to_mini(f(a.pos.x), f(a.pos.y) - crate::view::SHEAR * h);
+                let k = *age as f32 / crate::alerts::PING_TICKS as f32;
+                let size = 8.0 + 34.0 * k;
+                n.left = Val::Px(p[0] - size / 2.0);
+                n.top = Val::Px(p[1] - size / 2.0);
+                n.width = Val::Px(size);
+                n.height = Val::Px(size);
+                let [r, gg, b] = a.kind.rgb();
+                *bc = BorderColor::all(Color::srgba(r, gg, b, 1.0 - 0.8 * k));
+                if *v != Visibility::Inherited {
+                    *v = Visibility::Inherited;
+                }
+            }
+            None => {
+                if *v != Visibility::Hidden {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
     }
     let units = &sim.curr.units;
     let mut have = 0;
@@ -3243,8 +3264,7 @@ fn hud_system(
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
     feel: Res<Feel>,
-    mut top: Query<&mut Text, (With<HudTop>, Without<HudPanel>)>,
-    mut panel: Query<&mut Text, (With<HudInfo>, Without<HudTop>)>,
+    mut top: Query<&mut Text, With<HudTop>>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
@@ -3290,36 +3310,6 @@ fn hud_system(
             input.mapper.tuning().preset_name().unwrap_or("custom")
         ));
         t.0 = line;
-    }
-    if let Ok(mut t) = panel.single_mut() {
-        let sel: Vec<UnitId> = input
-            .mapper
-            .selection()
-            .iter()
-            .copied()
-            .filter(|id| w.unit(*id).is_some())
-            .collect();
-        t.0 = match sel.first().and_then(|&id| w.unit(id)) {
-            Some(u) => {
-                let d = s.def(u.def);
-                format!(
-                    "{} ({})   {}{}",
-                    d.map_or("?", |d| d.display.as_str()),
-                    d.map_or("?", |d| d.unitname.as_str()),
-                    if u.orders.is_empty() {
-                        "idle".to_string()
-                    } else {
-                        format!("{} orders", u.orders.len())
-                    },
-                    if sel.len() > 1 {
-                        format!("   (+{} more)", sel.len() - 1)
-                    } else {
-                        String::new()
-                    }
-                )
-            }
-            None => "Nothing selected. LMB / A: select   RMB / X: order\narrows / right stick: pan   wheel: zoom".to_string(),
-        };
     }
 }
 
@@ -3400,251 +3390,6 @@ fn banner_system(
         && st.0 != sub
     {
         st.0 = sub;
-    }
-}
-
-/// Selection bars, buttons, the status line and the build-rejection alert.
-fn hud_widgets_system(
-    sim: NonSend<SimRes>,
-    input: Res<InputRes>,
-    mut bars: Query<
-        (&HudBar, &mut Node),
-        (
-            Without<HudBarFill>,
-            Without<HudBarEarned>,
-            Without<ButtonKind>,
-        ),
-    >,
-    mut fills: Query<
-        (&HudBarFill, &mut Node),
-        (Without<HudBar>, Without<HudBarEarned>, Without<ButtonKind>),
-    >,
-    mut earned: Query<
-        &mut Node,
-        (
-            With<HudBarEarned>,
-            Without<HudBar>,
-            Without<HudBarFill>,
-            Without<ButtonKind>,
-        ),
-    >,
-    mut texts: Query<
-        (&mut Text, Option<&HudBarText>, Option<&HudStatus>),
-        (Without<HudButtonLabel>, Without<HudAlert>),
-    >,
-    mut buttons: Query<
-        (
-            &ButtonKind,
-            &mut Visibility,
-            &mut Node,
-            &mut BackgroundColor,
-            &Children,
-        ),
-        Without<HudAlert>,
-    >,
-    mut labels: Query<(&mut Text, &mut TextColor), (With<HudButtonLabel>, Without<HudAlert>)>,
-    mut alert: Query<(&mut Text, &mut Visibility), (With<HudAlert>, Without<ButtonKind>)>,
-) {
-    let s = &sim.session;
-    let w = s.sim.world();
-    let unit = input
-        .mapper
-        .selection()
-        .iter()
-        .copied()
-        .find_map(|id| w.unit(id).map(|u| (id, u)));
-    // Bars: (fraction, earned fraction, text) per kind, None = hidden.
-    let bar = |k: BarKind| -> Option<(f32, f32, String)> {
-        let (id, u) = unit?;
-        match k {
-            BarKind::Health => {
-                let max = u.combat.max_health.max(1);
-                let (d, t) = u.build.built_fraction();
-                let earned = max - tak_sim::combat::frame_health(max, t - d, t);
-                Some((
-                    u.combat.health as f32 / max as f32,
-                    earned as f32 / max as f32,
-                    format!("{}/{}", u.combat.health, u.combat.max_health),
-                ))
-            }
-            BarKind::Mana => {
-                let m = tak_sim::economy::unit_mana(w, id)?;
-                let (a, b) = (f(m.mana), f(m.max).max(1.0));
-                Some((a / b, 0.0, format!("{a:.0}/{b:.0}")))
-            }
-            BarKind::Build => {
-                let left = u.build.percent_left();
-                (left > 0).then(|| ((100 - left) as f32 / 100.0, 0.0, format!("{}%", 100 - left)))
-            }
-        }
-    };
-    let vals: Vec<(BarKind, Option<(f32, f32, String)>)> =
-        [BarKind::Health, BarKind::Mana, BarKind::Build]
-            .into_iter()
-            .map(|k| (k, bar(k)))
-            .collect();
-    let get = |k: BarKind| {
-        vals.iter()
-            .find(|(x, _)| *x == k)
-            .and_then(|(_, v)| v.clone())
-    };
-    for (b, mut n) in &mut bars {
-        let want = if get(b.0).is_some() {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if n.display != want {
-            n.display = want;
-        }
-    }
-    for (b, mut n) in &mut fills {
-        if let Some((frac, _, _)) = get(b.0) {
-            n.width = Val::Percent(frac.clamp(0.0, 1.0) * 100.0);
-        }
-    }
-    if let Some((_, e, _)) = get(BarKind::Health) {
-        for mut n in &mut earned {
-            n.width = Val::Percent(e.clamp(0.0, 1.0) * 100.0);
-        }
-    }
-    let mode = input.mapper.mode();
-    for (mut t, bt, st) in &mut texts {
-        if let Some(bt) = bt {
-            t.0 = get(bt.0).map(|v| v.2).unwrap_or_default();
-        } else if st.is_some() {
-            t.0 = match mode {
-                Mode::None => String::new(),
-                Mode::Build(d) => format!(
-                    "Place {}: RMB / X on the map, Esc / B cancels",
-                    s.def(d).map_or("?", |d| d.display.as_str())
-                ),
-                Mode::CastSpell(sp) => {
-                    let info = crate::view::caster_spells(w, s.local, input.mapper.selection())
-                        .and_then(|(_, v)| v.into_iter().find(|x| x.id == sp));
-                    match info {
-                        Some(i) => format!(
-                            "Cast {} ({} mana): RMB / X on the target, Esc / B cancels",
-                            i.name, i.cost
-                        ),
-                        None => "Cast: RMB / X on the target, Esc / B cancels".into(),
-                    }
-                }
-                m => format!("mode: {m:?}"),
-            };
-        }
-    }
-    // Buttons: orders for own units, build options for own builders.
-    let own = unit.filter(|(_, u)| u.owner == s.local);
-    let opts: Vec<tak_commands::UnitDefId> = own
-        .and_then(|(_, u)| w.defs().get(u.def))
-        .map(|d| d.build.canbuild.clone())
-        .unwrap_or_default();
-    let spells = own
-        .and_then(|_| crate::view::caster_spells(w, s.local, input.mapper.selection()))
-        .map(|(_, sp)| sp)
-        .unwrap_or_default();
-    for (kind, mut vis, mut node, mut bg, children) in &mut buttons {
-        let mut usable = true;
-        let (label, shown, active) = match *kind {
-            ButtonKind::Order(i) => {
-                let fs = own.map(|(_, u)| u.fire_state);
-                let active = match i {
-                    1 => mode == Mode::Patrol,
-                    2 => mode == Mode::Guard,
-                    3 => fs == Some(tak_commands::FireState::HoldFire),
-                    4 => fs == Some(tak_commands::FireState::ReturnFire),
-                    5 => fs == Some(tak_commands::FireState::FireAtWill),
-                    _ => false,
-                };
-                (
-                    format!(
-                        "{} [{}]",
-                        ORDER_BUTTONS[i].0,
-                        ORDER_BUTTONS[i].1.to_ascii_uppercase()
-                    ),
-                    own.is_some(),
-                    active,
-                )
-            }
-            ButtonKind::Spell(i) => match spells.get(i) {
-                Some(sp) => {
-                    usable = sp.ready;
-                    (
-                        format!("{} {} ({})", kind.key_label(), sp.name, sp.cost),
-                        true,
-                        mode == Mode::CastSpell(sp.id),
-                    )
-                }
-                None => (String::new(), false, false),
-            },
-            ButtonKind::Build(i) => match opts.get(i) {
-                Some(&o) => (
-                    format!(
-                        "{} {} ({})",
-                        kind.key_label(),
-                        s.def(o).map_or("?", |d| d.display.as_str()),
-                        w.defs().get(o).map_or(0, |d| d.build.buildcost)
-                    ),
-                    true,
-                    mode == Mode::Build(o),
-                ),
-                None => (String::new(), false, false),
-            },
-        };
-        let want = if shown {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        if *vis != want {
-            *vis = want;
-        }
-        // Hidden buttons take no room either.
-        let disp = if shown { Display::Flex } else { Display::None };
-        if node.display != disp {
-            node.display = disp;
-        }
-        bg.0 = if active {
-            Color::srgb(0.45, 0.36, 0.12)
-        } else if !usable {
-            Color::srgb(0.1, 0.1, 0.1)
-        } else {
-            Color::srgb(0.16, 0.14, 0.11)
-        };
-        for c in children.iter() {
-            if let Ok((mut t, mut col)) = labels.get_mut(c) {
-                if t.0 != label {
-                    t.0 = label.clone();
-                }
-                col.0 = if usable {
-                    Color::srgb(0.95, 0.92, 0.85)
-                } else {
-                    Color::srgb(0.5, 0.48, 0.45)
-                };
-            }
-        }
-    }
-    // The local player's latest refused build, for 5 s.
-    if let Ok((mut t, mut v)) = alert.single_mut() {
-        let now = w.tick().0;
-        let r = w
-            .construction
-            .rejections
-            .iter()
-            .rev()
-            .find(|r| r.player == s.local && now.saturating_sub(r.tick.0) < 150);
-        match r {
-            Some(r) => {
-                t.0 = format!(
-                    "Cannot build {}: {}",
-                    s.def(r.def).map_or("?", |d| d.display.as_str()),
-                    r.reason.reason()
-                );
-                *v = Visibility::Inherited;
-            }
-            None => *v = Visibility::Hidden,
-        }
     }
 }
 
@@ -3771,7 +3516,8 @@ fn gizmo_system(
         if ghost_sel.contains(u.id) {
             ground_circle(&mut g, t, x, y, r + 6.0, Color::srgb(1.0, 0.4, 1.0));
         }
-        if selected || u.health_percent < 100 || u.build_percent_left > 0 {
+        let bars = crate::hud::DamageBars::from_cycle(feel.damage_bars);
+        if bars.show(selected, u.health_percent < 100, u.build_percent_left > 0) {
             let top = tops.0.get(&u.id).copied().unwrap_or(60.0);
             let h = u.ground + top + 12.0;
             let left = Vec3::new(x - 16.0, h, y);
@@ -3945,6 +3691,15 @@ fn gizmo_system(
     if let Mode::Build(def) = input.mapper.mode()
         && let Some(d) = sim.session.def(def)
     {
+        let ok = w.defs().get(def).is_some_and(|dd| {
+            use tak_sim::construction::placement::{check_site, site_center};
+            check_site(w, def, site_center(dd, c), None).is_ok()
+        });
+        let ghost = if ok {
+            Color::srgb(0.3, 1.0, 0.35)
+        } else {
+            Color::srgb(1.0, 0.25, 0.2)
+        };
         let (w2, d2) = (
             f32::from(d.footprint.0) * 8.0,
             f32::from(d.footprint.1) * 8.0,
@@ -3956,7 +3711,7 @@ fn gizmo_system(
             g.line(
                 Vec3::new(ax, t.height_at(ax, az) + 2.0, az),
                 Vec3::new(bx, t.height_at(bx, bz) + 2.0, bz),
-                Color::WHITE,
+                ghost,
             );
         }
     }

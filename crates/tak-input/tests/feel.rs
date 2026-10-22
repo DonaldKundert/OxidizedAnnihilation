@@ -43,7 +43,7 @@ fn world() -> TestWorld {
 }
 
 fn console() -> Profile {
-    Profile::default_controller()
+    Profile::wp_s_controller()
 }
 
 // ---- tuning and presets -----------------------------------------------------
@@ -104,6 +104,8 @@ fn default_profiles_round_trip() {
     for p in [
         Profile::default_controller(),
         Profile::default_combined(),
+        Profile::classic_tak(),
+        Profile::wp_s_combined(),
         Profile::wp_j_controller(),
     ] {
         p.validate().unwrap();
@@ -215,7 +217,7 @@ fn cursor_motion_is_frame_rate_independent() {
 #[test]
 fn acceleration_ramps_at_full_deflection() {
     let w = world();
-    let mut t = Tuning::console();
+    let mut t = console().tuning;
     t.cursor_accel_pct = 100;
     t.cursor_accel_ms = 200;
     t.friction_pct = 100;
@@ -454,7 +456,7 @@ fn every_spell_has_a_wheel_slot_and_key_and_mana_gates_cast_mode() {
     )
     .unwrap();
     let w = TestWorld::new(spec);
-    let mut m = Mapper::new(Profile::default_combined());
+    let mut m = Mapper::new(Profile::wp_s_combined());
     m.warp_cursor(pos(640, 480));
     run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
     assert_eq!(m.selection().len(), 1);
@@ -500,7 +502,7 @@ fn shift_f_keys_reach_build_options_past_f8() {
     )
     .unwrap();
     let w = TestWorld::new(spec);
-    let mut m = Mapper::new(Profile::default_combined());
+    let mut m = Mapper::new(Profile::wp_s_combined());
     m.warp_cursor(pos(640, 480));
     run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
     run(&mut m, &w, &[key(500, "f8", true), key(510, "f8", false)]);
@@ -844,6 +846,32 @@ fn feel_lab_console_beats_wp_j() {
     // No brush regression (allow 1 point of noise at this trial count).
     assert!(
         con.brush_f1_permille + 10 >= wpj.brush_f1_permille,
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn feel_lab_reticle_matches_near_aim_and_wins_far() {
+    let cfg = LabConfig {
+        trials: 24,
+        ..LabConfig::default()
+    };
+    let presets: Vec<_> = default_presets()
+        .into_iter()
+        .filter(|(n, _)| n == "console" || n == "console reticle")
+        .collect();
+    let rows = run_lab(&presets, &cfg);
+    let (free, ret) = (&rows[0], &rows[1]);
+    // Same speed law and assist: on-screen aiming is a wash.
+    assert!(ret.acquire_ms <= free.acquire_ms + 10, "{rows:?}");
+    assert!(
+        ret.wrong_permille + ret.miss_permille <= free.wrong_permille + free.miss_permille + 10,
+        "{rows:?}"
+    );
+    // Off-screen targets: no edge-pan ramp, no cursor stuck at the edge.
+    assert!(ret.far_ms < free.far_ms, "{rows:?}");
+    assert!(
+        ret.far_errors_permille <= free.far_errors_permille,
         "{rows:?}"
     );
 }

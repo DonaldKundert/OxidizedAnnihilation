@@ -8,11 +8,13 @@
 //! - [`terrain`], [`models`]: install data to mesh/texture arrays. No Bevy.
 //! - [`app`]: the Bevy app (rendering, camera, input, HUD, screenshots).
 
+pub mod alerts;
 pub mod app;
 pub mod cli;
 pub mod feel;
 pub mod fog;
 pub mod game;
+pub mod hud;
 pub mod models;
 pub mod sprites;
 pub mod terrain;

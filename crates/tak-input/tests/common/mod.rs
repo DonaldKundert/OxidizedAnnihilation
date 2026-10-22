@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 use tak_commands::{PlayerId, SpellId, Tick, UnitDefId, UnitId};
-use tak_input::{BuilderKind, InputEvent, Mapper, Output, UnitInfo, WorldView};
+use tak_input::{BuilderKind, Category, InputEvent, Mapper, Output, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 
 fn twelve() -> i32 {
@@ -40,6 +40,12 @@ pub struct UnitSpec {
     pub idle: bool,
     #[serde(default = "yes")]
     pub selectable: bool,
+    /// The local player's monarch.
+    #[serde(default)]
+    pub monarch: bool,
+    /// TA select-categories (`Keys.TDF` names, e.g. "MELEE").
+    #[serde(default)]
+    pub categories: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -111,6 +117,20 @@ impl WorldView for TestWorld {
     fn is_idle(&self, unit: UnitId) -> bool {
         self.find(unit).is_some_and(|u| u.idle)
     }
+    fn monarch(&self) -> Option<UnitId> {
+        self.spec
+            .units
+            .iter()
+            .find(|u| u.monarch && u.owner == self.spec.local_player)
+            .map(|u| u.id())
+    }
+    fn in_category(&self, unit: UnitId, category: Category) -> bool {
+        self.find(unit).is_some_and(|u| {
+            u.categories
+                .iter()
+                .any(|c| Category::from_tdf(c) == Some(category))
+        })
+    }
 }
 
 /// Tick for a millisecond timestamp at 30 ticks per second.
@@ -137,7 +157,41 @@ pub fn pos(x: i32, y: i32) -> Vec2 {
 /// The default mouse/keyboard profile with the WP-J tuning (the WP-J tests
 /// pin the original feel values).
 pub fn wp_j_mk() -> tak_input::Profile {
-    let mut p = tak_input::Profile::default_mouse_keyboard();
+    let mut p = tak_input::Profile::wp_s_mouse_keyboard();
     p.tuning = tak_input::Tuning::wp_j();
     p
+}
+
+/// A mapper plus the camera a client keeps: after every event the
+/// requested pan and zoom (about the screen centre) are applied and handed
+/// back, so glides and the reticle move over the world.
+pub struct CamRig {
+    pub m: Mapper,
+    pub cam: tak_input::Camera,
+}
+
+impl CamRig {
+    pub fn new(p: tak_input::Profile) -> CamRig {
+        let cam = tak_input::Camera::default();
+        let mut m = Mapper::new(p);
+        m.set_camera(cam);
+        CamRig { m, cam }
+    }
+
+    pub fn run(&mut self, world: &TestWorld, events: &[InputEvent]) -> Vec<Output> {
+        let mut out = Vec::new();
+        for e in events {
+            out.extend(self.m.handle(e, world, tick_at(e.t)));
+            let pan = self.m.take_camera_pan();
+            self.cam.origin += pan;
+            if let Some(z) = self.m.take_camera_zoom() {
+                let c = self.cam.screen_to_world(self.cam.center_screen());
+                self.cam.world_per_px = z;
+                let half = self.cam.center_screen().scale(z);
+                self.cam.origin = c - half;
+            }
+            self.m.set_camera(self.cam);
+        }
+        out
+    }
 }

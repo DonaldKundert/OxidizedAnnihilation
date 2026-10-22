@@ -178,13 +178,16 @@ Additions where the original had nothing, chosen so they don't collide with it:
 
 ## 6. HUD
 
-**Layout** follows the original's regions:
-- left panel: unit card, order buttons and stances, build menu with portraits;
+**Layout** follows the original's regions, on the original's side. Evidence (**Known**, `guis/<race>ingame.gui`, gadget rectangles on the 640×480 desktop): `UnitMenu` (the race's `ButtonPanel`, 128×352) is at x 512, y 128, against the **right** edge with its bottom on the screen's bottom; the `CrystalBall` (561, 434, 36×36) and `HelpText` (526, 397) sit inside it; `BottomBar` (the race's `InfoPanel`, 512×49) runs along the bottom from x 0 with `BottomEnd` (the end cap) at its left and `UnitInfo1` (portrait, name, health and mana bars, kills, experience) on it.
+- side panel (right, bottom-aligned): order buttons, stances and weapon/spell buttons on the race's button panel; the build menu with portraits beside it;
+- unit card: the bottom-left info bar (portrait, name, bars, stance, current order);
 - top bar: player mana, income and storage, game time;
-- bottom bar: help and action text (what the cursor will do, refusal reasons, alerts);
-- Crystal Ball: bottom right.
+- bottom bar: help and action text (what the cursor will do, refusal reasons, alerts), between the unit card and the side panel;
+- Crystal Ball: the minimap, above the side panel (bottom right when the panel is collapsed); full screen on Tab.
 
-On controller profiles the left panel collapses to the unit card. Orders and building live in the wheels, and the bottom bar shows button prompts for the current context (Halo Wars style).
+The spec first said "left panel"; TA:K fidelity wins (`CLAUDE.md`), so the panel is on the right as in the original.
+
+On controller profiles the side panel collapses to the unit card and the minimap returns to the bottom right. Orders and building live in the wheels, and the bottom bar shows button prompts for the current context (Halo Wars style).
 
 **Visual tokens:**
 - **Art:** the original race skins (`<race>ig.gaf`, `IGCommonButtons.gaf`) and build portraits (`anims/buildpic/*.jpg`) where they decode cleanly. Plain panels are a fallback only.

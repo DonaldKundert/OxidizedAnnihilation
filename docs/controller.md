@@ -1,15 +1,50 @@
-# Controller play (WP-S)
+# Controller and keyboard play (WP-S, WP-V)
 
 The headline goal of Oxidized Annihilation is that a game controller is a
 first-class way to play TA:K. This page is the reference for how the
-controller works, every feel value and what it does, how the defaults were
-chosen, and how to record a play session and send it back.
+controller and the keyboard work, every feel value and what it does, how
+the defaults were chosen, and how to record a play session and send it
+back. The design behind it is [`ux/design-system.md`](ux/design-system.md)
+(TA:K decides what the game does and what things are called; Halo Wars
+decides how a controller does it).
 
-Where things live: all feel logic and every tuning value are in
+Where things live: all feel logic, bindings and every tuning value are in
 `tak-input` (core, integer-only, deterministic, tested headless). The
-client (`client/`) adapts devices, draws the cursor, wheels and hints,
-and hosts the tuning overlay. Tags as elsewhere: **Known**, **Believed**,
-**Chosen**, **Unknown**.
+client (`client/`) adapts devices, draws the cursor, wheels, HUD and
+prompts, plays the order sounds and hosts the tuning overlay. Tags as
+elsewhere: **Known**, **Believed**, **Chosen**, **Unknown**.
+
+## What changed in WP-V (Tyler)
+
+- **New default pad scheme, "Kingdoms Console"** (design system section 4):
+  the cursor is a **reticle fixed at the screen centre** and the left stick
+  moves the camera under it (Halo Wars; Microsoft's patent US 8,882,594).
+  Aim assist now slows and nudges the camera instead of the cursor. A is
+  select, X is the context order, Y casts the first spell (hold: all
+  spells), B cancels (hold: Stop), RB is "all on screen" (double: all;
+  hold: queue / add), LB is the next idle builder (hold: build wheel), LT
+  is the orders wheel, RT cycles the unit types in the selection (hold:
+  fast pan), the D-pad is squads 1-4, View is the last alert (hold: the
+  Crystal Ball), L3 the monarch, R3 resets the zoom (hold: track). The
+  right stick zooms.
+- **New default keyboard, "Classic TA:K"**: exactly TA:K's own default keys
+  and mouse model (section 5). Your install's `Keys.TDF` is imported at
+  start, so customised keys carry over.
+- **Wheels keep their shape**: Stop is always at 12 o'clock; Stance and Unit
+  open sub-rings; build and spell wheels have pages of 8 (RB turns the
+  page) with the game's build portraits.
+- **HUD in the game's own art**: your race's button panel and info panel
+  with TA:K's order buttons, build portraits, a unit card, a strip for
+  mixed selections, and a bottom bar that says what X (or right click)
+  does here. The button panel sits at the right edge as in the original
+  TA:K; on the pad it folds away.
+- **Order sounds, alerts and the Crystal Ball**: the original
+  MOVE/ATTACK/GUARD/PATROL/STOP acknowledgements; alerts (attacked,
+  construction complete, unit trained, mana full, monarch in danger) ping
+  the minimap and View / F3 jumps to them, newest first.
+- The previous schemes are still there for comparison: `--controls wp_s`
+  (WP-S: free cursor, Y local/global, RB zoom modifier) and
+  `--controls wp_j`.
 
 ## Try this first (Tyler)
 
@@ -17,93 +52,177 @@ and hosts the tuning overlay. Tags as elsewhere: **Known**, **Believed**,
 cd client
 export TAK_DATA_DIR="$HOME/Games/Total Annihilation Kingdoms"
 cargo run --release -- --demo --input-profile ~/tak-input.json \
-    --record-session ~/tak-session-1.json
+    --record-session ~/tak-session-2.json
 ```
 
-1. Plug in the pad before starting. The hint bar (bottom centre) shows
-   Xbox or PlayStation glyphs depending on the pad (`--glyphs xbox` or
-   `--glyphs playstation` forces one).
-2. Play for 5–10 minutes with the default `console` preset. Select the
-   monarch (A / Cross), move (X / Square), open the orders wheel (LT / L2),
-   build (LB / L1), brush-select (hold A), select everything on screen
-   (Y / Triangle), zoom (RB + right stick), pan (right stick, or push the
-   cursor into the screen edge).
-3. Press **Menu / Options** (or F11) for the tuning overlay. Try the other
-   presets on its first row (`assisted`, `precise`), nudge anything that
-   feels off, and press **Y / Triangle** (or Enter) to save. The file is
-   `~/tak-input.json`; editing it in a text editor also applies at once.
-4. Quit normally (close the window). `~/tak-session-1.json` now holds the
-   whole session. Send it back together with `~/tak-input.json` and a line
-   or two on what felt wrong.
+1. Plug in the pad before starting. Push the left stick: the map slides
+   under the reticle. Put the reticle on Elsin, tap **A**; push toward an
+   enemy, tap **X**.
+2. Hold **LB**: the build wheel. Flick toward Wall and let go of LB; the
+   footprint is green or red with the reason in the bottom bar; **X**
+   places it.
+3. Hold **LT**, flick to the lower right (Stance) and let go: the Stance
+   ring stays open; pick Passive and press **A**. **B** backs out.
+4. Select two kinds of units (hold **A** to brush), tap **RT** to step
+   through the types (the strip lights the active one), once more for all.
+5. Hold **View** for the Crystal Ball; tap it after an alert to jump there.
+6. Try the keyboard: `A` then click to attack, `Ctrl+M` for the monarch,
+   `Ctrl+1` / `1` squads, `Ctrl+F5` / `F5` bookmarks, `Tab`, `~`.
+7. Quit normally. Send back `~/tak-session-2.json` and `~/tak-input.json`
+   with a line or two on what felt wrong. If the reticle is not for you,
+   switch `reticle` off in the overlay (Menu / F11) and compare.
 
-## Control reference
+## Kingdoms Console (pad)
 
-The default profile merges the controller and the mouse/keyboard bindings
-(`Profile::default_combined`), so both devices drive one cursor and one
-selection.
+`Profile::kingdoms_console()`, `crates/tak-input/src/profiles/kingdoms_console.json`.
+Merged with Classic TA:K into one mapper (`Profile::default_combined`), so
+the pad, mouse and keyboard drive one selection.
 
-| Intent | Xbox | PlayStation | Mouse / keyboard |
-|---|---|---|---|
-| Move the cursor | Left stick (aim assist, see below) | Left stick | Mouse |
-| Precision cursor (slower, no assist) | hold RT | hold R2 | |
-| Select one unit | A tap | Cross tap | LMB click |
-| Same type on screen | A A (second tap) | Cross Cross | Z |
-| Same type on the whole map | LS click | L3 | Ctrl+Z |
-| Brush select (grows while held) | hold A, paint with the stick | hold Cross | LMB drag (circle) |
-| All own units on screen ("local") | Y tap | Triangle tap | Q |
-| All own units on the map ("global") | Y Y (second tap) | Triangle Triangle | Ctrl+Q |
-| Context order: move, attack enemy, guard friend, place building | X | Square | RMB |
-| Queue the order | RB + X | R1 + Square | Shift + RMB |
-| Orders wheel (stop, patrol, guard, fire states, each spell, idle builder) | hold LT, stick to a slot, release | hold L2 | S, P, G, H, R, F |
-| Spells of the selection's first caster (then target with X / RMB) | orders wheel, one slot per spell | orders wheel | C (first spell), Ctrl+F1–F3 (spells 1–3) |
-| Build wheel (selected builder, up to 16 entries) | hold LB, stick to a slot, release | hold L1 | F1–F8, Shift+F1–F8 (options 9–16), then RMB to place |
-| Cancel wheel / brush / order mode, then deselect | B | Circle | Esc |
-| Control groups 1–4: recall / store | D-pad / RB + D-pad | D-pad / R1 + D-pad | 0–9 / Ctrl+0–9 |
-| Pan | Right stick, or push the cursor into the screen edge | Right stick | Arrow keys |
-| Zoom | RB + right stick up/down | R1 + right stick | Mouse wheel |
-| Centre on monarch (glides) | RS click tap | R3 tap | Home |
-| Follow the selection (toggle; panning stops it) | hold RS click | hold R3 | V |
-| Last alert / next idle builder | View tap / hold View | Share tap / hold Share | Space / Period |
-| Tuning overlay | Menu | Options | F11 |
-| Pause, game speed | | | Pause or Ctrl+P, `=` / `-` |
+| Xbox | PlayStation | Tap | Double tap | Hold |
+|---|---|---|---|---|
+| Left stick | Left stick | Reticle: move the camera (free mode: move the cursor) | | |
+| Right stick | Right stick | Up/down: zoom (free mode: pan; zoom with RB held) | | |
+| L3 | L3 | Camera to the monarch | Select the monarch | Select and track the monarch |
+| R3 | R3 | Reset zoom | | Track the selection (toggle) |
+| A | Cross | Select under the reticle (adds with RB held) | Same type on screen | Brush select (grows while held) |
+| X | Square | Context order (queued with RB held) | | Attack-move: **reserved**, sim lacks it |
+| Y | Triangle | Cast the first spell, then X on the target | | Spell wheel (every spell) |
+| B | Circle | Cancel wheel / mode, then deselect | | Stop |
+| RB | R1 | All own units on screen | All own units on the map | Queue / add modifier |
+| LB | L1 | Next idle builder | | Build wheel (selected builder or factory) |
+| LT | L2 | | | Orders wheel (nothing selected: squads 5-9, monarch, idle builder, all) |
+| RT | R2 | Sub-select cycle: next unit type in the selection, then all | | Fast pan (free mode: precision cursor) |
+| D-pad up / right / down / left | same | Recall squad 1 / 2 / 3 / 4 | Camera to that squad | Assign squad |
+| View | Share | Jump to the last alert (cycles, newest first) | | Crystal Ball (full-screen minimap) |
+| Menu | Options | Game menu (the tuning overlay) | | |
 
-With nothing selected the orders wheel shows the *idle wheel* instead
-(idle builder, last alert, monarch, all on screen, all units). With units
-selected it shows only what they can do (no spells without a caster),
-AoE IV style (`wheel_context`), and one slot per spell of the first caster
-in the selection (WP-T, `tak_input::expand_spells`) labelled with the
-spell's name and mana cost, e.g. "Meteor (200 mana)". A spell the caster
-cannot pay for is greyed and does nothing (`WorldView::can_cast`, the
-caster's own mana against `manapershot`); the same holds for C, Ctrl+F1–F3
-and the HUD's spell buttons. Ctrl+F1–F3 follow the TA:K readme's "Select
-weapon 1..3" keys (**Chosen**: here they pick spells 1–3 of the caster, in
-weapon-slot order). Retail casters have at most three spells and retail
-build menus at most nine entries (Aramon Castle, Taros Hell Gate, Veruna
-Liege, Zhon Beast Tamer), so Shift+F1 is the most a retail menu needs.
+Gesture details (`tak_input::Gesture`): a *tap* is shorter than `hold_ms`
+(250 ms); a *second tap* within `double_tap_ms` (300 ms) does not delay the
+first tap (tap A selects at once, the second tap widens it). Pressing
+another button while RB is down uses RB as the modifier, so its own tap
+(all on screen) does not fire; a long RB press is never a tap either.
+Inside a paged wheel RB turns the page. Squads 5-9 are on the idle orders
+wheel (nothing selected) and in the Unit > Squads sub-ring (confirm
+recalls, confirm with RB held assigns).
 
-**Halo Wars comparison (Chosen).** WP-J put same-type select on Y /
-double Y. Halo Wars puts it on a double tap of A and has separate "local"
-and "global" select buttons. The default now follows Halo Wars: a second
-tap of A widens the selection to that type on screen *without* delaying
-the first tap (new gesture `second_tap`: the first tap selects at once, a
-WP-J-style `double_tap` would hold every A tap back by 300 ms), and Y /
-second Y are local / global select, the most-used Halo Wars shortcut.
-Halo Wars puts local/global on the bumpers; ours are taken by the build
-wheel and the queue/chord modifier, so they moved to Y. The WP-J mapping is
-still available as `Profile::wp_j_controller()` (its JSON is
-`crates/tak-input/src/profiles/wp_j_controller.json`) and can be saved as
-a profile file.
+### Wheels
+
+```
+Orders wheel (LT)              Build / spell wheel (LB / hold Y)
+          Stop                 the builder's menu in TA:K order,
+   Clear       Attack          8 per page, RB for the next page;
+Patrol           Move          centre: portrait, name, cost and
+   Guard    Stance >           build time, greyed with the mana
+       Unit >                  shortfall in red when short
+Stance >: Offensive / Defensive / Passive
+Unit >:   Squads > (5-9), Heal, Load, Unload, Cloak, Activate
+          (all reserved until the sim has them)
+```
+
+- Slots never move (`Profile::fixed_slots`): a slot the selection cannot
+  use stays where it is, empty (a reserved order is a faint frame, a page's
+  unused positions are not drawn).
+- Flick and release confirms; releasing without having pointed anywhere
+  (the dead centre) cancels. With `wheel_confirm_on_press` the wheel stays
+  open and A / X confirms.
+- A ring slot (Stance >, Unit >) opens its sub-ring when confirmed. The
+  sub-ring stays open after LT is released: the stick chooses, A / X
+  confirms, B goes back one ring, LT closes. The title says where you are
+  ("Orders > Stance").
+- Build options and spells come from the selection's first builder and
+  caster (lowest unit id). A spell the caster cannot pay for is greyed and
+  refused with "Not enough mana"; a build short of mana is allowed (TA:K
+  drains mana while building) but greyed with the shortfall.
 
 ### Glyphs
 
-The hint bar and the overlay use Xbox (A B X Y, LB RB LT RT, View, Menu)
-or PlayStation (Cross Circle Square Triangle, L1 R1 L2 R2, Share,
-Options) glyphs, chosen from the connected pad: Sony's USB vendor id
-(`0x054c`) or a name containing DualSense / DualShock / PlayStation /
-PS4 / PS5 (or exactly "Wireless Controller") gives PlayStation, anything
-else Xbox (`--glyphs auto`, the default). The chips are drawn in code (no
-art). The hints are read from the profile's bindings, so they stay right
-after rebinding.
+The prompts use Xbox (A B X Y, LB RB LT RT, View, Menu) or PlayStation
+(Cross Circle Square Triangle, L1 R1 L2 R2, Share, Options) glyphs, chosen
+from the connected pad: Sony's USB vendor id (`0x054c`) or a name
+containing DualSense / DualShock / PlayStation / PS4 / PS5 (or exactly
+"Wireless Controller") gives PlayStation, anything else Xbox (`--glyphs
+auto`, the default). The chips are drawn in code (no art) and read from the
+profile's bindings, so they stay right after rebinding.
+
+## Classic TA:K (keyboard and mouse)
+
+`Profile::classic_tak()`, `crates/tak-input/src/profiles/classic_tak.json`:
+TA:K's defaults from the install's readme and `Keys.TDF`.
+
+| Keys | Action |
+|---|---|
+| Left click / drag | Select / select everything in the dragged circle (adds with Shift) |
+| Double click | Same type on screen |
+| Right click | Context order (Shift queues) |
+| A, M, G, P then left click | Attack (unit or ground), Move (even over a unit), Guard, Patrol |
+| S | Stop |
+| C, H, K, L, U, O | Clear, Heal, Cloak, Load, Unload, Open: **reserved** (sim lacks them) |
+| Ctrl+A / Ctrl+U | All units / all on screen |
+| Ctrl+B / E / F / G / N / R / T / W / Y | Builders / melee / factories / magic / naval / ballistic / troops / armed / fliers (Ctrl+Shift adds) |
+| Ctrl+Z | All of the selected types on the map |
+| Ctrl+M | Select and track the monarch |
+| Ctrl+D | Dismiss: **reserved** |
+| Ctrl+0-9 / 0-9 | Create / retrieve squad (0 is squad 10) |
+| Alt+0-9 | Formation: **reserved** |
+| Ctrl+F5-F8 / F5-F8 | Set / go to bookmark |
+| N / T / F3 | Next unit off screen / track the selection / last alert |
+| Tab | Crystal Ball (full-screen minimap) |
+| Ctrl+F1-F3 | Spells 1-3 of the selection's caster (TA's "select weapon"; **Chosen**) |
+| `+` (`=`) / `-` / Pause | Game speed / pause (client only: ticks per wall second) |
+| `~` | Damage bars: all, selected, off |
+| F1 / F11 | Game menu / tuning overlay |
+| Esc | Cancel mode, then deselect |
+| Arrow keys, mouse wheel | Pan, zoom (client) |
+
+- **No build hotkeys by default**, as in TA:K. `--grid-keys` (or
+  `"grid_build_keys": true` in a profile) turns on the "Grid" add-on: with
+  a builder selected, Q W E R / A S D F / Z X C V pick build options 1-12
+  ahead of their normal meaning; with anything else selected they keep it.
+- **`Keys.TDF` import** (`tak_input::parse_keys_tdf`, `Profile::with_keys_tdf`):
+  at start the client reads `$TAK_DATA_DIR/Keys.TDF` (or `--keys-tdf FILE`;
+  `--no-keys-tdf` skips it; a saved `--input-profile` wins) and replaces
+  every key the file binds or unbinds. On the retail file (344 lines):
+  **68 mapped**, **23 reserved** (Clear, Heal, Cloak, Load, Unload, Open,
+  formations, self-destruct: bound but inert), 54 explicitly empty, 16
+  unsupported (diplomacy, briefing, scorecard, save/load, chat, the debug
+  and clipboard keys: no such screens yet; the profile keeps its own
+  binding there, e.g. F11), 173 skipped (Ctrl+Shift and Alt+Shift lines:
+  our chords take one modifier and TA's Ctrl+Shift lines are the additive
+  versions of the Ctrl lines, which Shift already does; the `XCHAR_` keys
+  of other layouts; symbols listed "for French / German keyboards").
+  **Known**: importing the retail file reproduces Classic TA:K exactly
+  (`tests/keys_tdf.rs`, data-gated; counts only).
+
+## Reserved actions (design system section 9)
+
+The interface offers only what the sim does. These keep their key, wheel
+slot or panel well but do nothing and are hidden (empty well, faint wheel
+frame, no prompt); pressing their key says "Not available yet" in the
+bottom bar: Clear, Heal / repair, Load / Unload / Pickup / Drop, Cloak,
+Open / Activate, attack-move, formations, dismiss, persistent weapon
+select, veterancy and kill count (not on the unit card). Adding one to the
+sim is a change of `Action::Reserved { .. }` to the real action; no layout
+moves.
+
+## Feedback and information
+
+| Event | What you see / hear |
+|---|---|
+| Selection change | Ring flash, unit card and strip update, rumble tick (opt-in) |
+| Order | Order line, the original acknowledgement (`Sounds/MOVE`, `ATTACK`, `GUARD`, `PATROL`, `STOP.WAV`; build sounds like a move, a spell like an attack, a stance has none: **Chosen**) |
+| Refusal | Bottom-bar reason in red (no mana, nothing selected, not available yet, nothing there) |
+| Placement | Footprint green, or red with the sim's reason ("must be built on a free sacred site") |
+| Alert | Minimap ping (an expanding ring for 3 s), bottom-bar line; View / F3 jumps newest first |
+
+Alerts (`client/tak-client/src/alerts.rs`, display only, checked after
+every tick): an own unit or structure losing health (once per unit per
+10 s; frames gaining health do not count), construction complete, unit
+trained, mana storage full, monarch below a third of its health. No
+dedicated alert sound was found in the data (**Unknown**), so alerts are
+silent.
+
+Audio is Bevy's (WAV only, `bevy_audio` + `wav`); with no audio device
+nothing plays and nothing fails (headless runs, CI).
 
 ### Cursors
 
@@ -116,105 +235,109 @@ the sequence names):
 |---|---|
 | nothing to do | `cursornormal` |
 | over an own unit that a click selects | `cursorselect` |
-| order would move | `CursorMove` |
-| order would attack | `CursorAttack` |
+| order would move (or Move mode) | `CursorMove` |
+| order would attack (or Attack mode) | `CursorAttack` |
 | order would guard | `CursorDefend` |
 | patrol mode | `CursorPatrol` |
 | build mode, placeable / blocked (the sim's site check) | `cursorgrn` / `cursorred` |
 | spell mode | `Cursorresurrect` |
 | pending order not possible here | `cursortoofar` |
 
-Animated sequences play at 30 ticks per second with each frame's duration
-word as ticks (as other GAF animations, **Believed**). The current snap
-target gets a thin yellow ring; selection rings flash when the selection
-changes (`select_flash_ms`).
+In reticle mode the cursor sprite sits on the reticle at the screen
+centre. The mapper's camera maps the ground plane at the height of the
+terrain under the screen centre (`ViewGeom::input_camera_at`), so the
+reticle picks exactly what is drawn under it on hills too.
 
 ### Rumble
 
 Off by default (`rumble`). When on, a short pulse on snapping to a target,
-on a selection change and when own units lose health, through Bevy's
-`GamepadRumbleRequest` (gilrs force feedback; strengths and length in
+on a selection change, on a refusal and when own units lose health,
+through Bevy's `GamepadRumbleRequest` (strengths and length in
 `rumble_*`).
 
 ## Feel model
 
-### Cursor
+### Reticle mode (default) and free cursor
+
+With `reticle` on and the stick in use, the cursor stays at the screen
+centre and the left stick moves the camera at exactly the speed law of the
+free cursor (curve, zoom scaling, acceleration, friction), turned into
+ground units; precision (hold RT) becomes fast pan (`fast_pan_pct`). Aim
+assist acts on the camera: friction slows it near a target and the soft
+snap slides the target under the reticle. `reticle_smooth_ms` adds camera
+inertia (0 by default: the feel lab says it costs time and accuracy). The
+mouse always moves a free cursor; moving the stick again returns to the
+reticle. With `reticle` off the left stick moves a free cursor with edge
+pan, as in WP-S. The right stick zooms (`right_stick_zoom`); in free mode
+it pans and zooms with RB held.
+
+### Cursor speed
 
 The stick goes through an inner radial deadzone and an outer deadzone
 (`stick_deadzone`, `stick_outer_deadzone`), then a response curve
 (`cursor_curve_pct`: exponent × 100; non-integer exponents blend the
 neighbouring integer powers, which keeps it integer-only and monotonic).
 Speed is `cursor_speed` at full deflection, scaled by the zoom
-(`cursor_zoom_pct` 100 = the cursor covers the same ground per second at
-any zoom, relative to `zoom_ref_milli`), by an optional acceleration ramp
-after holding near-full deflection (`cursor_accel_*`), by friction, and by
-the precision multiplier (`precision_pct`, RT): one code path, every
-modifier a multiplier. Motion is integrated in 16 ms substeps from event
-timestamps, so it does not depend on the frame rate (tested: 20 and 50 ms
-frames end within a pixel).
+(`cursor_zoom_pct` 100 = the same ground per second at any zoom, relative
+to `zoom_ref_milli`), by an optional acceleration ramp after holding
+near-full deflection (`cursor_accel_*`), by friction, and by the precision
+multiplier: one code path, every modifier a multiplier. Motion is
+integrated in 16 ms substeps from event timestamps, so it does not depend
+on the frame rate.
 
 ### Aim assist
 
-- **Friction**: near a target the cursor slows to `friction_pct` at its
-  centre, rising linearly to full speed at `friction_radius_px`.
+- **Friction**: near a target the cursor (or camera) slows to
+  `friction_pct` at its centre, rising linearly to full speed at
+  `friction_radius_px`.
 - **Soft snap**: while the stick is near idle (`snap_idle_pct`), the
-  nearest target within `magnet_radius_px` pulls the cursor with a
-  half-life of `snap_half_life_ms` (frame-rate independent exponential;
-  `0` keeps WP-J's linear per-frame pull) and locks on within
-  `magnet_snap_px`. **Hysteresis**: the current target is kept until
-  another is `snap_hysteresis_px` nearer, so it never flickers between
-  neighbours.
+  nearest target within `magnet_radius_px` pulls with a half-life of
+  `snap_half_life_ms` and locks on within `magnet_snap_px`.
+  **Hysteresis**: the current target is kept until another is
+  `snap_hysteresis_px` nearer.
 - **Target priority** (`assist_priority`): with own units selected only
-  enemies are targets (orders aim at them); with nothing selected only own
-  units (you are selecting); in build mode only own frames under
-  construction (help-build), otherwise free placement; patrol has none.
-- Assist is off in precision mode and while brushing (the brush centre
-  should be where you aim).
+  enemies are targets; with nothing selected only own units; in build mode
+  only own frames under construction; Attack mode any unit; Move and
+  Patrol modes none.
+- Assist is off in precision / fast-pan mode and while brushing.
+- **Fog of war**: the input layer sees only what the local player sees.
+  The client's `WorldView` (`SimView` with the fog grid) leaves out enemy
+  units outside current sight, so they are never picked, snapped to,
+  brushed, counted by same-type select or attacked by a context order (an
+  order onto the ground where one stands is a move). Own and allied units
+  are always visible. With the fog off (F9, `--no-fog`) everything is
+  (`client/tak-client/tests/fog_view.rs`).
 
 ### Camera
 
-Right-stick pan with smoothing (`pan_smooth_ms`) at a speed that follows
-the zoom (`pan_zoom_pct`). Edge pan when the stick cursor pushes into the
-outer `edge_pan_px` of the screen, ramping up over `edge_pan_ramp_ms`
-(mouse edge pan only with `edge_pan_mouse`). Zoom with the mouse wheel or
-RB + right stick, smoothed (`zoom_smooth_ms`) and clamped
-(`zoom_min_milli` .. `zoom_max_milli`). Recentre (monarch, idle builder)
-and follow-selection glide with half-life `glide_ms`. With
-`cursor_world_lock` the stick cursor keeps its ground point while the
-right stick pans or the zoom changes, so it stays on its target.
-
-### Wheels
-
-Slot from stick angle (slot 0 at the top, clockwise), a deadzone
-(`wheel_deadzone`), angle hysteresis (`wheel_hysteresis_deg`), flick and
-release keeps the last slot unless `wheel_recentre_clears`. Confirm on
-release (default) or, with `wheel_confirm_on_press`, the wheel stays open
-after its button is released and A / X confirms, B or the wheel button
-cancels. Labels are drawn around the cursor on a radius that grows with
-the slot count and the label widths (WP-T, `view::wheel_radius`): the
-smallest radius at which no two slot boxes come within 6 px and no box
-comes within 26 px of the cursor. The wheel's title ("Orders", "Build")
-sits above the top slot, never over the cursor; how to confirm and cancel
-is in the hint bar. The highlighted slot is gold with dark text and a
-thicker light border; unusable slots (spells without mana) are greyed.
+Pan smoothing (`pan_smooth_ms`), zoom smoothing (`zoom_smooth_ms`) and
+limits (`zoom_min_milli` .. `zoom_max_milli`); R3 returns to
+`zoom_default_milli`. Recentre, alert and bookmark jumps glide with
+half-life `glide_ms`; an explicit jump (squad, bookmark, next unit) stops
+tracking. In free mode the stick cursor pushing the screen edge pans
+(`edge_pan_*`) and `cursor_world_lock` keeps it on its ground point while
+the camera moves.
 
 ### Brush
 
 Starts at `brush_min` after `hold_ms`, grows to `brush_max` at an average
-`brush_growth_per_s` along a curve (`brush_curve_pct` below 100 grows
-fast first and slows down near the end, which helps let go at the right
-size). Moving the cursor while holding paints additional circles.
+`brush_growth_per_s` along a curve (`brush_curve_pct`). Moving while
+holding (in reticle mode: panning) paints additional circles.
 
 ## All tuning values
 
 Every value lives in `tak_input::Tuning`; `TUNING_FIELDS` carries the
 step, range and help text the overlay shows. A profile's `"tuning"`
 object may set any subset; missing values take the `console` default.
-Regenerate this table with
+The presets set the feel values; the control scheme keeps its own cursor
+mode (`reticle`) and right-stick role. Regenerate this table with
 `cargo run -p tak-input --example tuning_table`.
 
 | Group | Value | Unit | console | assisted | precise | wp_j | What it does |
 |---|---|---|---:|---:|---:|---:|---|
+| Cursor | `reticle` |  | on | on | on | off | Reticle mode: cursor fixed at screen centre, stick moves the camera |
+| Cursor | `reticle_smooth_ms` | ms | 0 | 0 | 0 | 0 | Reticle camera smoothing half-life (0: instant) |
+| Cursor | `fast_pan_pct` | % | 200 | 200 | 200 | 200 | Reticle mode: precision button pans this much faster |
 | Cursor | `cursor_speed` | px/s | 1100 | 900 | 1400 | 900 | Cursor speed at full stick |
 | Cursor | `cursor_curve_pct` | % | 110 | 110 | 100 | 100 | Response curve exponent x100 (100 linear) |
 | Cursor | `stick_deadzone` | raw | 7000 | 7000 | 7000 | 8000 | Inner stick deadzone |
@@ -260,6 +383,8 @@ Regenerate this table with
 | Camera | `zoom_smooth_ms` | ms | 70 | 70 | 70 | 0 | Zoom smoothing half-life (0: instant) |
 | Camera | `glide_ms` | ms | 90 | 90 | 90 | 0 | Recentre / follow glide half-life (0: jump) |
 | Camera | `cursor_world_lock` |  | on | on | on | off | Panning and zooming keep the cursor on its ground point |
+| Camera | `right_stick_zoom` |  | on | on | on | off | Right stick up/down zooms (free mode: pans; zooms with RB held) |
+| Camera | `zoom_default_milli` | /1000 | 500 | 500 | 500 | 500 | Zoom that reset zoom (R3) returns to |
 | Camera | `zoom_ref_milli` | /1000 | 500 | 500 | 500 | 500 | Reference zoom for the zoom-scaled speeds |
 | Feedback | `select_flash_ms` | ms | 250 | 250 | 250 | 0 | Selection ring flash length |
 | Feedback | `rumble` |  | off | off | off | off | Controller rumble on snap, selection and damage |
@@ -273,190 +398,150 @@ Regenerate this table with
 | Preset | For | Character |
 |---|---|---|
 | `console` (default) | everyone first | Halo Wars-like: near-linear stick, strong friction, context snap, smooth camera |
-| `assisted` | relaxed play, small screens, couch distance | slower cursor, strongest friction and snap |
-| `precise` | players who find `console` sticky | faster linear cursor, light friction and snap |
-| `wp_j` | comparison only | the WP-J values: linear, no friction, idle-only linear pull to any unit, instant camera |
+| `assisted` | relaxed play, small screens, couch distance | slower, strongest friction and snap |
+| `precise` | players who find `console` sticky | faster linear stick, light friction and snap |
+| `wp_j` | comparison only | the WP-J values: linear, no friction, idle-only linear pull, instant camera, free cursor |
 
 `--input-preset NAME` picks one at start; the overlay's first row switches
-at runtime.
+at runtime. `--controls kingdoms|wp_s|wp_j` picks the scheme.
 
 ### How the defaults were chosen
 
 `tak_input::lab` is a headless harness with a simulated player (all
-integer, seeded, the same trials for every preset). The player reacts
-after 180–280 ms, sees the cursor 100 ms late, wants to close the gap in
-about 170 ms, plans sub-movements every 90–150 ms with ±18 % gain and ±7°
-direction errors, has ±500 raw units of thumb tremor, and knows the stick
-curve and base speed (a practised player) but not friction, snap or
-acceleration. Half the aim trials are played carefully (let go, confirm,
-press) and half "on the fly" (press as soon as it looks close, 40–90 ms
-motor latency with the stick still held). Worlds are dense (70 units at
-least 36 px apart, mixed owners) or sparse (14 units, 160 px apart) at the
-reference zoom.
+integer, seeded, the same trials for every preset and mode). The player
+reacts after 180-280 ms, sees the cursor 100 ms late, wants to close the
+gap in about 170 ms, plans sub-movements every 90-150 ms with ±18 % gain
+and ±7° direction errors, has ±500 raw units of thumb tremor, and knows
+the stick curve and base speed but not friction, snap or acceleration.
+Half the aim trials are careful (let go, confirm, press), half on the fly.
+In reticle mode the player aims the ground point under the reticle the
+same way (the camera moves instead of the cursor).
 
-- **Acquire**: select a given own unit (nothing selected) or attack a
-  given enemy (own unit selected), from 150–600 px away. Time from the
-  target appearing to the press that issued the right command.
-- **Overshoot**: how far past the target the cursor went along the
-  approach.
-- **Wrong target**: another unit selected or attacked/guarded. **Miss**:
-  the press hit nothing (no selection, or a move order). **Errors** =
-  both.
-- **Brush**: aim at the centre of a cluster of 5–10 own units with other
-  own units around it, hold A and let go 150–260 ms after the brush covers
-  the cluster. F1 of the selection against the cluster; time from start to
-  release.
+- **Acquire**: select a given own unit or attack a given enemy, 150-600 px
+  away (on screen). Time to the press that issued the right command.
+- **Overshoot**, **Wrong target**, **Miss**, **Errors** as in WP-S.
+- **Brush**: F1 of a brushed cluster of 5-10 units among others.
+- **Far** (new): attack an enemy 700-1,400 px away, off screen, with 60
+  other units spread over a large area. The free cursor has to reach the
+  edge and edge-pan; the reticle just pushes.
 
 Results, 300 trials per task and density (`cargo run --release -p tak-input
 --example feel_lab -- --trials 300`):
 
-| Preset | Acquire ms | Acquire ms (dense) | Overshoot px | Wrong target | Miss | Errors | Brush F1 | Brush ms |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| wp_j | 1071 | 1083 | 24.0 | 0.5% | 16.1% | 16.6% | 67.7% | 1698 |
-| console | 910 | 921 | 8.4 | 0.0% | 0.0% | 0.0% | 68.4% | 1590 |
-| assisted | 983 | 1006 | 0.8 | 0.0% | 0.0% | 0.0% | 63.4% | 2119 |
-| precise | 977 | 982 | 24.5 | 0.3% | 16.5% | 16.8% | 66.9% | 1483 |
+| Preset | Acquire ms | Acquire ms (dense) | Overshoot px | Wrong target | Miss | Errors | Brush F1 | Brush ms | Far ms | Far errors |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| wp_j | 1071 | 1083 | 24.0 | 0.5% | 16.1% | 16.6% | 67.7% | 1698 | 1694 | 99.0% |
+| console | 910 | 921 | 8.4 | 0.0% | 0.0% | 0.0% | 68.4% | 1590 | 1957 | 10.6% |
+| console reticle | 910 | 921 | 8.4 | 0.0% | 0.0% | 0.0% | 68.4% | 1590 | 1581 | 0.3% |
+| assisted | 983 | 1006 | 0.8 | 0.0% | 0.0% | 0.0% | 63.4% | 2119 | 2115 | 9.3% |
+| assisted reticle | 983 | 1006 | 0.8 | 0.0% | 0.0% | 0.0% | 63.4% | 2119 | 1793 | 0.0% |
+| precise | 977 | 982 | 24.5 | 0.3% | 16.5% | 16.8% | 66.9% | 1483 | 1841 | 17.6% |
+| precise reticle | 976 | 981 | 24.5 | 0.3% | 16.5% | 16.8% | 66.9% | 1483 | 1510 | 16.3% |
 
-`console` beats the WP-J defaults on acquisition time (−15 %, −15 % on
-dense worlds), wrong targets (0.5 % → 0.0 %) and total errors (16.6 % →
-0.0 %), with no brush regression (F1 67.7 % → 68.4 %, and 6 % faster).
-`tests/feel.rs` (`feel_lab_console_beats_wp_j`) keeps checking this on a
-smaller run.
+**Reticle vs free cursor.** On screen the two are the same to the
+millisecond: the reticle moves the camera with the cursor's speed law, and
+the assist acts on the same relative motion. Off screen the reticle wins
+on every preset: `console` 1,581 ms and 0.3 % errors against 1,957 ms and
+10.6 % (no edge-pan ramp, no cursor parked at the edge while the camera
+catches up). Robustness, 150 trials: a slower player (150 ms perception,
+220 ms closing) far task 1,754 ms / 0 % reticle vs 2,221 ms / 11.3 % free;
+a faster player (70 ms, 140 ms, 80 % on the fly) 1,520 ms / 0 % vs
+1,870 ms / 20.6 %.
 
-Robustness, 150 trials each:
+**Default: reticle mode with the WP-S `console` assist values.** Sweeps
+under the reticle (100 trials): friction 20 / 30 / 45 % and snap radius
+30 / 44 / 56 px change nothing beyond noise, so WP-S's values stay; camera
+smoothing hurts (`reticle_smooth_ms` 30: +200 ms and 11.7 % errors; 60:
++500 ms, 30.7 %), so it is 0. The simulated player has no model of the
+camera's own momentum, which real players may like a little of: one
+overlay row to try (**Believed**, to be checked with Tyler's sessions).
+`tests/feel.rs` keeps checking both verdicts on smaller runs
+(`feel_lab_console_beats_wp_j`, `feel_lab_reticle_matches_near_aim_and_wins_far`).
 
-- Slower player (perceives 150 ms late, wants 220 ms closing time):
-  WP-J 1,416 ms / 35.3 % errors; console 1,079 ms / 1.9 %; assisted
-  1,058 ms / 0.0 %; precise 1,298 ms / 28.5 %. Brush F1: WP-J 66.0 %,
-  console 65.0 % (a point lower here).
-- Faster player (70 ms, 140 ms, 80 % on the fly): WP-J 945 ms / 27.4 %;
-  console 852 ms / 0.1 %; assisted 934 ms / 0.0 %; precise 885 ms /
-  31.6 %.
-
-What the sweeps showed (around `console`, 100 trials):
-
-- **Friction is the biggest win**: 100 % (off) → 30 % cut errors from
-  25.7 % to 12.9 % and time by 90 ms on its own; below 30 % it starts to
-  slow brushing.
-- **Curves and acceleration hurt in this model**: exponent 2.0 vs 1.0 cost
-  +90 ms and doubled errors, acceleration +40 % cost +35 ms and doubled
-  the misses. The simulated player's motor noise is proportional to thumb
-  deflection, so a curve multiplies the speed error. Real thumbs may like
-  a curve for slow fine motion, which is why `console` keeps a slight one
-  (1.1) and the overlay makes it a one-press experiment. **Believed**, to
-  be checked with Tyler's sessions.
-- Snap radius 30 → 44 px cut misses by a quarter; hysteresis makes no
-  difference to these numbers (it prevents flicker, which the lab does not
-  score); `snap_idle_pct` 15 is a little faster than 0, 40 hurts the brush.
-- Cursor speed: 1,100 px/s is the fastest without new errors (1,300 is
-  40 ms faster with 0.7 % errors).
-- Brush: slower growth is more accurate (120: 70.9 %, 160: 67.5 %); 140
-  with a fast-start curve (80) keeps WP-J's accuracy and is about 100 ms
-  faster.
-
-`precise` is fast but error-prone for this simulated player; it is there
-for players whose aim beats the model. The lab measures proxies, not
-feel: Tyler's recordings are the real test.
-
-Run your own: `--sweep name=a,b,c` around a preset, `--profile FILE` for
-a saved profile, `--perceive-ms`, `--tau-ms`, `--fly-permille` for a
-different player.
+Earlier WP-S findings still hold (curves and acceleration hurt this
+player; friction is the biggest single win; 1,100 px/s is the fastest
+cursor without new errors). Run your own: `--sweep name=a,b,c` around
+`--base PRESET` (on the Kingdoms Console profile), `--profile FILE`,
+`--perceive-ms`, `--tau-ms`, `--fly-permille`.
 
 ## Live tuning
 
 - `--input-profile FILE`: the profile (bindings and tuning) is read from
-  it, created from the preset if missing, polled twice a second and
-  re-applied on every save (a broken file is reported and ignored).
-- The overlay (Menu / Options / F11) lists the preset and every value.
+  it, created from the scheme and preset if missing (with your `Keys.TDF`
+  applied), polled twice a second and re-applied on every save.
+- The overlay (Menu / Options / F1 / F11) lists the preset and every value.
   Pad: D-pad up/down to choose, left/right to adjust, LB/RB ×10, A to
   toggle or advance, Y to save, B or Menu to close. Keyboard: arrows
-  (Shift ×10), PgUp/PgDn, Enter to save, F11/Esc to close. Mouse: the − / +
-  buttons. While it is open the pad and keyboard do not reach the game.
-- Saving writes the full profile to the `--input-profile` file, or
-  `tak-input-profile.json` in the working directory without one.
+  (Shift ×10), PgUp/PgDn, Enter to save, F11/Esc to close. Mouse: the − /
+  + buttons. While it is open the pad and keyboard do not reach the game.
 
 ## Recording a session and sending it back
 
-`--record-session FILE` writes, on exit:
-
-- every raw device event fed to the input layer, with the client clock
-  (ms) and the sim tick;
-- the cursor (screen and ground), whether the stick or mouse drives it,
-  the camera, the selection when it changes, the open wheel, the brush,
-  the snap target;
-- every output (client and sim commands), the sim orders as submitted
-  with the tick they run on, feedback events, and tuning changes;
-- the profile at the start, and the match: map, players, seed, the full
-  command log, tick count and final hash.
-
-Only frames in which something changed are stored (about 50 KB for a
-15-second scripted session). Send the file back as is.
+`--record-session FILE` writes, on exit: every raw device event with the
+client clock and the sim tick; the cursor (screen and ground), the camera,
+the selection, the open wheel, the brush, the snap target; every output
+(client and sim commands), the orders as submitted with the tick they run
+on, feedback events and tuning changes; the profile at the start; and the
+match (map, players, seed, full command log, final hash). HUD buttons
+carry out their action directly (`Mapper::perform`), so their orders are in
+the outputs and the log rather than as device events.
 
 ### Watching one (ghost playback)
 
 ```sh
-cargo run --release -- --ghost ~/tak-session-1.json [--ghost-camera]
-cargo run --release -- --ghost s.json --screenshot g_{tick}.png --at-tick 300
+cargo run --release -- --ghost ~/tak-session-2.json [--ghost-camera]
 ```
 
-The recorded match is replayed from its own command log (map, players and
-seed come from the file), with the player's cursor as a magenta
-crosshair plus a tinted game cursor, their brush, their wheel, and their
-selection as magenta rings. `--ghost-camera` follows the recorded camera.
-The sim is deterministic, so this is the match exactly as it was played
-(`tests/recording.rs` replays a recorded session through `tak-headless`
-and compares every tick's hash).
-
-`Recording::summary()` gives a quick look (orders by type, selections,
-snaps, stick time and speed); the exit message prints it.
+The recorded match is replayed from its own command log, with the player's
+cursor as a magenta crosshair, their brush, wheel and selection. The sim
+is deterministic, so this is the match exactly as played
+(`tests/recording.rs`).
 
 ### Scripted sessions
 
 `--synth-events EVENTS.json --record-session OUT.json [--synth-ticks N]`
-drives the match headless with scripted `tak-input` events through the
-real mapper (no window) and writes a recording, e.g.
-`client/fixtures/pad_session.json`. In screenshot mode, `--pad-events
-EVENTS.json` feeds events to the mapper before each capture so wheels,
-cursors and hints can be checked headless.
+drives the match headless with scripted `tak-input` events through the real
+mapper and writes a recording (`client/fixtures/pad_session.json`, now a
+Kingdoms Console script). In screenshot mode `--pad-events EVENTS.json`
+feeds events to the mapper before each capture (then 1.5 s of frames so
+glides settle).
 
 ## Testing checklist (Tyler)
 
-1. Pad detected: hint bar shows your pad's glyphs.
-2. Cursor: small corrections near a unit are easy; full stick crosses the
-   screen in about a second; the cursor is equally fast in ground terms at
-   any zoom; RT slows it and disables the pull.
-3. Select a unit with A; tap A again quickly: all of that type on screen.
-   Y: everything on screen; Y Y: everything.
-4. With the monarch selected, cursor over an enemy: the swords cursor,
-   the cursor slows and settles on it; X attacks. Over a friend: shield
-   cursor, X guards. Over ground: move cursor.
-5. Hold A and paint a group; let go when the circle covers it.
-6. LT wheel: flick to a slot and release; does the highlight ever jump
-   between neighbouring slots? Try `wheel_confirm_on_press` in the
-   overlay.
-7. LB build wheel, pick a building, the cursor turns green/red, X places.
-8. Push the cursor into a screen edge: the camera starts slowly and
-   speeds up. Right stick pan is smooth; the cursor stays on the unit it
-   was on. RB + right stick zooms smoothly. R3 glides to the monarch; hold
-   R3 to follow the selection.
-9. Try `assisted` and `precise` in the overlay; note which feels best and
-   any value you changed.
-10. Optional: turn `rumble` on.
-11. Quit, send back the session recording and the profile file.
+1. Pad detected: the prompts show your pad's glyphs.
+2. Reticle: the map slides under it; small corrections near a unit are
+   easy; full stick crosses the screen in about a second; RT pans faster.
+3. A selects, A A same type, hold A brushes, RB all on screen, RB RB all.
+4. Units selected, reticle on an enemy: the swords cursor, X attacks; the
+   bottom bar says "X: Attack <name>". RB + X queues.
+5. LT: Stop at 12; Stance > opens the ring; B goes back. Does a flick ever
+   land on the neighbouring slot?
+6. Hold LB: portraits, cost and build time; RB turns the page on long
+   menus; the footprint turns red with the reason off a valid site.
+7. RT with a mixed selection: the strip lights each type in turn.
+8. D-pad: hold to assign, tap to recall, double tap to jump.
+9. View after a fight starts: the ping, the jump; hold View: Crystal Ball.
+10. Keyboard: your own `Keys.TDF` keys work; `~` cycles damage bars.
+11. Try `reticle` off in the overlay, and `assisted` / `precise`; note
+    which feels best. Quit, send back the session and the profile.
 
 ## Tests
 
-- `crates/tak-input/tests/feel.rs`: presets, field metadata, curve and
-  approach properties, zoom/precision/acceleration, frame-rate
-  independence, friction, snap hysteresis, context targets, second tap,
-  local/global select, context wheel, wheel hysteresis, sticky wheel,
-  smoothed zoom, edge pan, cursor world lock, glide, follow, cursor kinds,
-  recording round trip and ghosts, the WP-J cursor kept under `wp_j`, and
-  the feel-lab verdict.
-- The WP-J tests (`pieces.rs`, `gamepad_fixture.rs`, `equivalence.rs`)
-  now pin `Profile::wp_j_controller()` and `Tuning::wp_j()`: they keep
-  checking the gesture recogniser and the original mapping exactly, while
-  the new default's behaviour is covered by `feel.rs`.
-- `client/tak-client/tests/recording.rs` (data-gated): scripted pad
-  session → recording → identical headless replay; `replay.rs` unchanged
-  and passing.
+- `crates/tak-input/tests/kingdoms_console.rs`: a recorded Kingdoms Console
+  session (`tests/fixtures/kingdoms_console_session.json`) exercising every
+  section-4 binding produces the expected commands and state, segment by
+  segment; build-wheel pages; old schemes stay selectable.
+- `tests/classic_tak.rs`: the same for Classic TA:K
+  (`tests/fixtures/classic_tak_session.json`) and the Grid add-on.
+- `tests/keys_tdf.rs`: a synthetic `Keys.TDF` (mapping, reserved,
+  unbinding, skipped chords, bad input), and the install's file giving
+  exactly Classic TA:K (data-gated).
+- `tests/feel.rs`: presets, field metadata, curves, frame-rate
+  independence, friction, snap, context targets, wheels, camera, recording
+  round trip, and both feel-lab verdicts (on the WP-S profile, kept for
+  comparison).
+- The WP-J tests (`pieces.rs`, `gamepad_fixture.rs`, `equivalence.rs`) pin
+  `Profile::wp_j_controller()` and the WP-S keyboard.
+- `client/tak-client/tests/recording.rs` (data-gated): scripted Kingdoms
+  Console session → recording → identical headless replay; `replay.rs`
+  unchanged.
