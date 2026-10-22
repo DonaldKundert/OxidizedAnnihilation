@@ -71,6 +71,11 @@ pub struct SimRes {
     fog: crate::fog::FogGrid,
     /// Fog changed since the overlay was last painted.
     fog_changed: bool,
+    /// Alerts for the local player, checked after every tick (display
+    /// only).
+    alerts: crate::alerts::AlertTracker,
+    /// Alerts raised since the HUD last took them (bottom bar).
+    new_alerts: Vec<crate::alerts::Alert>,
 }
 
 impl SimRes {
@@ -88,10 +93,52 @@ impl SimRes {
             })
             .collect();
         self.fog_changed |= self.fog.update(&eyes);
+        let input = alert_input(&self.session);
+        let new = self.alerts.update(&input);
+        self.new_alerts.extend(new);
     }
 
     fn alpha(&self) -> f32 {
         (self.acc / TICK_DT).clamp(0.0, 1.0)
+    }
+}
+
+/// What the alert tracker needs from the match: the local player's units,
+/// mana and storage.
+fn alert_input(s: &Session) -> crate::alerts::AlertInput {
+    let w = s.sim.world();
+    let me = s.local;
+    let monarch = w
+        .players()
+        .iter()
+        .find(|p| p.id == me)
+        .and_then(|p| p.monarch);
+    let units = w
+        .units()
+        .filter(|(_, u)| u.owner == me)
+        .map(|(id, u)| crate::alerts::AlertUnit {
+            id,
+            name: s.def(u.def).map_or("?".to_string(), |d| d.display.clone()),
+            pos: u.pos,
+            health: u.combat.health,
+            max_health: u.combat.max_health,
+            complete: u.build.is_complete(),
+            mobile: w
+                .defs()
+                .get(u.def)
+                .is_some_and(|d| d.maxvelocity > tak_math::Fx::ZERO),
+            monarch: Some(id) == monarch,
+        })
+        .collect();
+    let e = tak_sim::economy::player(w, me);
+    crate::alerts::AlertInput {
+        tick: s.tick().0,
+        units,
+        mana: e.map_or(0, |e| e.mana >> 16),
+        storage: e.map_or(0, |e| e.storage >> 16),
+        home: monarch
+            .and_then(|id| w.unit(id))
+            .map_or(tak_math::Vec2::ZERO, |u| u.pos),
     }
 }
 
@@ -345,6 +392,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             paused: false,
             fog: crate::fog::FogGrid::new(fog_cells.0, fog_cells.1),
             fog_changed: true,
+            alerts: crate::alerts::AlertTracker::default(),
+            new_alerts: Vec::new(),
         })
         .insert_resource(Ground(Arc::new(ground)))
         .insert_resource(CamState {
@@ -385,6 +434,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 controls::setup_cursors,
                 controls::setup_hints,
                 controls::setup_wheel,
+                controls::setup_sounds,
                 hud_view::setup_hud_art,
                 hud_view::setup_hud_view,
             )
@@ -422,6 +472,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     controls::hints_system,
                     controls::wheel_system,
                     controls::overlay_draw_system,
+                    controls::sound_system,
                     controls::rumble_system,
                     fps_report,
                 ),
@@ -735,6 +786,7 @@ fn shot_driver(
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
     ground: Res<Ground>,
+    mut feel: ResMut<Feel>,
     mut exit: MessageWriter<AppExit>,
     hud_buttons: Query<(
         &ButtonKind,
@@ -818,10 +870,12 @@ fn shot_driver(
     // `--click`: HUD clicks once the layout exists, through the same hit
     // test and key path as a real click.
     if plan.wait == 10 && !plan.pad_events.is_empty() {
-        let tick = sim.session.tick();
-        let view = sim.session.view();
+        let simr: &mut SimRes = &mut sim;
+        let tick = simr.session.tick();
+        let view = simr.session.view();
         let base = 3_000_000 + plan.next as u32 * 100_000;
         let mut last = base;
+        let mut jump = false;
         for e in &plan.pad_events {
             last = base + e.t;
             let outs = input
@@ -830,10 +884,36 @@ fn shot_driver(
             if !outs.is_empty() {
                 eprintln!("  pad {:?} -> {outs:?}", e.kind);
             }
+            jump |= outs.iter().any(|o| {
+                matches!(
+                    o,
+                    Output::Client {
+                        command: ClientCommand::JumpToAlert
+                    }
+                )
+            });
         }
         let _ = input
             .mapper
             .handle(&InputEvent::new(last + 1, EventKind::Frame), &view, tick);
+        if jump {
+            for a in &simr.alerts.alerts {
+                eprintln!("  alert at tick {}: {}", a.tick, a.text);
+            }
+            if let Some(a) = simr.alerts.next_jump() {
+                eprintln!("  alert jump: {} at {:?}", a.text, a.pos);
+                feel.toast = Some(a.text.clone());
+                input.mapper.glide_to(a.pos);
+            }
+        }
+        // Let glides (jumps, recentring) settle: 1.5 s of frames.
+        for k in 0..90 {
+            let _ = input.mapper.handle(
+                &InputEvent::new(last + 2 + k * 16, EventKind::Frame),
+                &view,
+                tick,
+            );
+        }
         let pan = input.mapper.take_camera_pan();
         cam.geom.target[0] += f(pan.x);
         cam.geom.target[1] += f(pan.y);
@@ -1251,6 +1331,7 @@ fn input_system(
             Output::Sim { command, .. } => {
                 let at = sim.session.submit(command.clone());
                 submitted.push((at.0, command.clone()));
+                feel.sounds.extend(controls::order_sound(command));
                 debug!("order for tick {}", at.0);
             }
             Output::ToggleOverlay => {
@@ -1281,6 +1362,7 @@ fn input_system(
                         input.mapper.glide_to(u.pos);
                     }
                 }
+                ClientCommand::JumpToAlert => jump_to_alert(&mut sim, &mut input, &mut feel),
                 _ => {}
             },
             Output::SelectAll { .. } => {}
@@ -1349,6 +1431,19 @@ fn input_system(
     }
     // Game speed and pause come from the profile (TA Pause, + / -) as
     // mapper outputs above: client only, ticks per wall second.
+}
+
+/// Alert jump (View / F3): the camera glides to the newest alert, then
+/// older ones on each press.
+fn jump_to_alert(sim: &mut SimRes, input: &mut InputRes, feel: &mut Feel) {
+    match sim.alerts.next_jump() {
+        Some(a) => {
+            let (pos, text) = (a.pos, a.text.clone());
+            input.mapper.glide_to(pos);
+            feel.toast = Some(text);
+        }
+        None => feel.toast = Some("No alerts".into()),
+    }
 }
 
 /// Terrain height under the screen centre (0 off the map).
@@ -2842,13 +2937,19 @@ struct MinimapState {
     pad_swallow: bool,
     /// The left button went down on the HUD panel.
     ui_held: bool,
+    /// Full-screen Crystal Ball (TA Tab, hold View).
+    big: bool,
 }
 
 impl MinimapState {
     /// Where the minimap is for a viewport (bottom-right corner, fitted
     /// to the window keeping the image's aspect: [`MinimapGeom::fit`]).
     fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
-        Some(MinimapGeom::fit(view, self.image?, self.map))
+        Some(if self.big {
+            MinimapGeom::full(view, self.image?, self.map)
+        } else {
+            MinimapGeom::fit(view, self.image?, self.map)
+        })
     }
 }
 
@@ -2863,6 +2964,10 @@ struct MinimapRoot;
 struct MinimapView;
 #[derive(Component)]
 struct MinimapDot(usize);
+/// An alert ping on the minimap: an expanding, fading ring.
+#[derive(Component)]
+struct MinimapPing(usize);
+const MINIMAP_PINGS: usize = 8;
 
 /// Team colours for minimap dots (**Chosen**: TA's player order blue, red,
 /// white, green, yellow, purple, cyan, orange).
@@ -2935,6 +3040,21 @@ fn setup_minimap(
         MinimapView,
         ChildOf(root),
     ));
+    for i in 0..MINIMAP_PINGS {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::MAX,
+                ..default()
+            },
+            BorderColor::all(Color::WHITE),
+            Visibility::Hidden,
+            ZIndex(3),
+            MinimapPing(i),
+            ChildOf(root),
+        ));
+    }
 }
 
 /// Unit dots in team colours and the camera rectangle.
@@ -2942,9 +3062,10 @@ fn minimap_system(
     mut commands: Commands,
     sim: NonSend<SimRes>,
     cam: Res<CamState>,
-    mm: Res<MinimapState>,
+    input: Res<InputRes>,
+    mut mm: ResMut<MinimapState>,
     fog: Res<FogRes>,
-    mut root: Query<(Entity, &mut Node), With<MinimapRoot>>,
+    mut root: Query<(Entity, &mut Node), (With<MinimapRoot>, Without<MinimapPing>)>,
     mut panel: Query<
         &mut Node,
         (
@@ -2952,9 +3073,18 @@ fn minimap_system(
             Without<MinimapRoot>,
             Without<MinimapView>,
             Without<MinimapDot>,
+            Without<MinimapPing>,
         ),
     >,
-    mut view: Query<&mut Node, (With<MinimapView>, Without<MinimapDot>, Without<MinimapRoot>)>,
+    mut view: Query<
+        &mut Node,
+        (
+            With<MinimapView>,
+            Without<MinimapDot>,
+            Without<MinimapRoot>,
+            Without<MinimapPing>,
+        ),
+    >,
     mut dots: Query<
         (
             &MinimapDot,
@@ -2962,12 +3092,29 @@ fn minimap_system(
             &mut BackgroundColor,
             &mut Visibility,
         ),
-        (Without<MinimapView>, Without<MinimapRoot>),
+        (
+            Without<MinimapView>,
+            Without<MinimapRoot>,
+            Without<MinimapPing>,
+        ),
+    >,
+    mut pings: Query<
+        (&MinimapPing, &mut Node, &mut BorderColor, &mut Visibility),
+        (
+            Without<MinimapView>,
+            Without<MinimapRoot>,
+            Without<MinimapDot>,
+            Without<MinimapPanel>,
+        ),
     >,
 ) {
     let Ok((root, mut root_node)) = root.single_mut() else {
         return;
     };
+    let big = input.mapper.crystal_ball();
+    if mm.big != big {
+        mm.big = big;
+    }
     let Some(g) = mm.geom(cam.geom.size) else {
         return;
     };
@@ -2987,6 +3134,34 @@ fn minimap_system(
         n.top = Val::Px(r[1]);
         n.width = Val::Px(r[2].max(2.0));
         n.height = Val::Px(r[3].max(2.0));
+    }
+    // Alert pings: rings that grow and fade over three seconds.
+    let tick = sim.session.tick().0;
+    let w = sim.session.sim.world();
+    let live: Vec<_> = sim.alerts.pings(tick).collect();
+    for (pg, mut n, mut bc, mut v) in &mut pings {
+        match live.iter().rev().nth(pg.0) {
+            Some((a, age)) => {
+                let h = f(w.map().height_at(a.pos));
+                let p = g.to_mini(f(a.pos.x), f(a.pos.y) - crate::view::SHEAR * h);
+                let k = *age as f32 / crate::alerts::PING_TICKS as f32;
+                let size = 8.0 + 34.0 * k;
+                n.left = Val::Px(p[0] - size / 2.0);
+                n.top = Val::Px(p[1] - size / 2.0);
+                n.width = Val::Px(size);
+                n.height = Val::Px(size);
+                let [r, gg, b] = a.kind.rgb();
+                *bc = BorderColor::all(Color::srgba(r, gg, b, 1.0 - 0.8 * k));
+                if *v != Visibility::Inherited {
+                    *v = Visibility::Inherited;
+                }
+            }
+            None => {
+                if *v != Visibility::Hidden {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
     }
     let units = &sim.curr.units;
     let mut have = 0;

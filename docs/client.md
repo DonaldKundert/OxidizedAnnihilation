@@ -1,4 +1,4 @@
-# Bevy client (`client/`, WP-Q, WP-R)
+# Bevy client (`client/`, WP-Q, WP-R, WP-V)
 
 The first playable view of the core: a real Kingdoms map, animated 3DO
 units driven by their own COB scripts, selection and orders through
@@ -11,9 +11,11 @@ Tags as elsewhere: **Known**, **Believed**, **Chosen**, **Unknown**.
 
 ## Build and run
 
-Bevy 0.20.0 (`default-features = false`, features `3d` + `ui`: no audio;
-gamepads through Bevy's `gilrs` backend). Bevy 0.20 declares
-`rust-version = 1.97.1`.
+Bevy 0.20.0 (`default-features = false`, features `3d` + `ui` +
+`bevy_audio` + `wav`: WAV only, for the original order sounds; gamepads
+through Bevy's `gilrs` backend). Bevy 0.20 declares `rust-version =
+1.97.1`. With no audio device Bevy logs "No audio device found" and the
+client plays nothing (headless runs and CI are unaffected).
 
 ### macOS (Apple Silicon)
 
@@ -33,8 +35,8 @@ play.
 
 ### Linux
 
-Needs the usual Bevy system packages (udev, alsa headers are not needed
-without audio, x11/xkbcommon/wayland, a Vulkan or GL driver). Same commands.
+Needs the usual Bevy system packages (udev, alsa headers for audio,
+x11/xkbcommon/wayland, a Vulkan or GL driver). Same commands.
 With a toolchain older than 1.97.1 (the cloud box has 1.97.0 and cannot
 download another), add `--ignore-rust-version` to `cargo build/run/test/clippy`;
 1.97.0 compiles Bevy 0.20 without changes.
@@ -93,20 +95,24 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
 
 ## Controls
 
-The full controller reference (both glyph sets), every feel value, the
-presets, live tuning and session recording are in
-[`controller.md`](controller.md) (WP-S). In short: both default `tak-input`
-profiles are merged into one mapper, so mouse, keyboard and a gamepad work
-together and share one selection; the minimap and HUD buttons take LMB or
-A with the cursor over them; F9 toggles the fog; Pause / Ctrl+P pauses and
-`=` / `-` change the game speed.
+The controls (Kingdoms Console on the pad, Classic TA:K on the keyboard,
+both glyph sets), every feel value, the presets, live tuning and session
+recording are in [`controller.md`](controller.md) (WP-S, WP-V); the design
+is [`ux/design-system.md`](ux/design-system.md). In short: both default
+`tak-input` profiles are merged into one mapper, so mouse, keyboard and a
+gamepad work together and share one selection; the minimap takes LMB or A
+with the cursor over it; HUD buttons carry out their action directly
+(`Mapper::perform`); F9 toggles the fog. Game speed and pause are profile
+actions (TA `+` / `-` / Pause) the client applies; they change ticks per
+wall second only, never tick length.
 
-Client flags added by WP-S: `--input-preset`, `--input-profile` (hot
-reloaded, saved by the overlay), `--record-session`, `--ghost`,
-`--ghost-camera`, `--synth-events` / `--synth-ticks`, `--glyphs`,
-`--pad-events` (screenshot mode), `--overlay`.
-
-Game speed changes ticks per wall second only, never tick length.
+Client flags: `--controls kingdoms|wp_s|wp_j` (scheme), `--input-preset`,
+`--input-profile` (hot reloaded, saved by the overlay), `--keys-tdf FILE` /
+`--no-keys-tdf` (import of TA:K's key file, default the install's),
+`--grid-keys` (optional build hotkeys), `--hud auto|console|classic`
+(layout; auto collapses the left panel while the pad drives),
+`--record-session`, `--ghost`, `--ghost-camera`, `--synth-events` /
+`--synth-ticks`, `--glyphs`, `--pad-events` (screenshot mode), `--overlay`.
 
 ## How it works
 
@@ -392,47 +398,62 @@ sim's job.
   shape now reads from the first tick, and enemy dots there stay hidden).
 - `--no-fog` starts with it off; F9 toggles it.
 
-### HUD and overlays
+### HUD and overlays (WP-V)
 
-Top bar: map, tick, pause/speed, every player's mana, storage and income;
-a defeated player shows as `DEFEATED`, straight from the sim
-(`World::is_defeated`, WP-U's `tak_sim::victory`: by default the monarch's
-death or having no units; WP-T replaced the client's own guess). The side
-is taken from the player's monarch definition, so it survives the monarch.
-Once `Sim::match_state()` is `Over`, a banner in the upper middle says
-**Victory** (the local player is among the winners), **Defeat** or
-**Draw** (no winners), with the winners and the time of the decision. It
-appears 150 ticks (5 s) after the deciding tick (**Believed**: TA waited
-about that long before its end screen, so the last death animations play
-first); display only, the camera and input keep working.
+The layout follows design system section 6 (`hud_view.rs`, logic in
+`hud.rs`):
 
-Bottom-left panel (WP-R): the first selected unit's name, def and order
-count; bars for health (for a frame, a dim segment under it shows the
-health its progress has earned), the unit's own mana pool
-(`economy::unit_mana`, spellcasters) and build progress (frames); then
-clickable buttons: orders (Stop, Patrol, Guard, Hold / Return / Fire,
-the active fire state and order mode highlighted) for own units; one
-button per spell of the selection's caster (WP-T: `^F1 Meteor (200)`,
-the weapon's name and `manapershot`, greyed while the caster's own mana
-is short, highlighted in its cast mode); and the whole build menu (F1–F8
-then S-F1… for Shift+F1–F8, with costs, the option in placement mode
-highlighted) for own builders. A button presses the key (and modifier)
-the mouse/keyboard profile binds to that action, so it does exactly what
-the key and the wheel slot do. While casting, the status line names the
-spell and its cost, and the cursor is the game's cast cursor. Clicks on the panel never select or order
-behind it; with a gamepad, A with the virtual cursor over a button does
-the same. Below: the placement hint while placing. A red line under the
-top bar shows the local player's latest refused build for 5 s
-(`ConstructionState::rejections`, `SiteError::reason()`), e.g. "Cannot
-build Barracks: terrain is too steep, too deep or blocked".
-`--click X,Y` (screenshot mode) clicks the HUD through the same hit test
-and key path, for checking it headless. Gizmos: team rings, selection rings, health
-and build-progress bars, queued-order lines for selected units, the
-cursor ground point, the snap target, the gamepad brush circle, the
-footprint of the building being placed, projectiles (orange spheres). The
-cursor itself is the game's own context cursor (`anims/CURSORS.GAF`),
-radial wheels are labelled slots around the cursor, and a hint bar shows
-the controller buttons for the current context (WP-S, `controller.md`).
+- **Top bar**: map, tick, pause/speed, every player's mana, storage and
+  income; a defeated player shows as `DEFEATED` (`World::is_defeated`).
+  Once `Sim::match_state()` is `Over`, a banner says **Victory**, **Defeat**
+  or **Draw** 150 ticks after the deciding tick (**Believed**: TA waited
+  about that long), display only.
+- **Left panel** (keyboard and mouse; folded away on the pad): the local
+  side's own `ButtonPanel` from `anims/<race>ig.gaf` (`aramonig`,
+  `verunaig`, `tarosig`, `zhonig`, `creonig`; **Known**: all five decode
+  cleanly with their sibling `.pcx` palette; entries are taken by index
+  because Veruna prefixes its names) with TA:K's buttons from
+  `anims/igcommonbuttons.gaf` (21 sequences, **Known** clean) on its 13
+  dark wells. The wells are found in the art (`hud::button_slots`: each
+  race paints them a few pixels apart; Aramon's positions are the
+  fallback). Arrangement (**Chosen**, the GUI file creates these buttons in
+  code): Attack, Move / Guard, Patrol / Stop, Clear / Heal (centre); the
+  stances Offensive, Defensive, Passive; the weapon buttons Primary,
+  Secondary, Special as spells 1-3 (numbered; the plates are blank).
+  Frames: 0 dark (unusable), 1 up, 2 lit (hover), 3 down (the active mode,
+  stance or cast). Clear and Heal leave their wells empty (the sim lacks
+  them).
+- **Build menu** under the panel: the first own builder's options as
+  `anims/buildpic/<unit>.jpg` portraits (171 files, 64×48, **Known**) with
+  the cost (and the Grid key when on), greyed when the player's mana is
+  short, lit while placing.
+- **Unit card** at the bottom left on the race's `InfoPanel` (512×49) and
+  `EndCap`: portrait, name (and the selection count), health (green,
+  yellow, red), the unit's own mana (blue), build progress (gold), stance,
+  current order ("Attacking Thirsha", "Building Wall") and queue length.
+  Experience and kills are not in the sim, so not shown.
+- **Selection strip** above the card for mixed selections: one portrait
+  per type with its count; during a sub-select cycle (RT) the full
+  selection with the active type lit and the rest dimmed.
+- **Bottom bar** (right of the card, left of the minimap; a column from the
+  bottom up): the active profile's prompts (pad glyph chips, or `[Key]`
+  text for Classic TA:K), the verb line ("X: Attack Zhon Hunter", "LMB:
+  Select Elsin", a hovered panel button's name and key), and a red message
+  line for refusals, the placement reason, the latest rejected build
+  (`ConstructionState::rejections`) and alerts.
+- **Crystal Ball**: the minimap; Tab (toggle) or holding View shows it
+  centred and as large as fits (`MinimapGeom::full`); clicks on it move the
+  camera as on the small one. Alert pings are expanding rings on it.
+- **Placement ghost**: the footprint in green, or red with the sim's own
+  reason in the bottom bar (`check_site`, `SiteError::reason`).
+- **Damage bars** (TA ~): all (selected, damaged, frames), selected only,
+  off.
+- Gizmos: team rings, selection rings (with the flash), health and build
+  bars, queued-order lines, the snap target, the brush circle,
+  projectiles. The cursor is the game's own (`anims/CURSORS.GAF`); wheels
+  are drawn by `controls.rs` (see `controller.md`).
+- `--click X,Y` (screenshot mode) clicks the HUD through the same hit test
+  and action path, for checking it headless.
 
 ## Core changes made for the client
 
@@ -450,8 +471,9 @@ the controller buttons for the current context (WP-S, `controller.md`).
 
 - Effects: no build sparkles, walking dust, Remote Effect rings or
   weapon shadows yet (see Effects).
-- No audio. Spell and build buttons are text, not the game's button art
-  (`buttonimageup` etc. in the weapon/unit data).
+- Sounds: only the five order acknowledgements; no unit voices, weapon
+  or alert sounds yet. The weapon buttons are blank plates numbered 1-3
+  (the per-weapon `buttonimageup` art in the unit data is not used yet).
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies at tick 1,620 (the match is decided then; the Victory
   banner shows from tick 1,770). Behaviour is the sim's.

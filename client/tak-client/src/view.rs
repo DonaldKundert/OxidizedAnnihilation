@@ -391,6 +391,23 @@ impl MinimapGeom {
         }
     }
 
+    /// The full-screen Crystal Ball (TA Tab): the same minimap, centred
+    /// and as large as fits in 88 % of the window width and 80 % of its
+    /// height, keeping its aspect.
+    pub fn full(view: [f32; 2], image: (u32, u32), map: [f32; 2]) -> Self {
+        let (bw, bh) = (view[0] * 0.88, view[1] * 0.80);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let s = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * s).round().max(1.0), (ih * s).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = ((view[0] - pw) / 2.0, (view[1] - ph) / 2.0);
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
     /// Whether a screen pixel is on the minimap panel.
     pub fn contains(&self, sx: f32, sy: f32) -> bool {
         let [l, t, w, h] = self.panel;

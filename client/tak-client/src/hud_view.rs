@@ -1073,11 +1073,12 @@ pub(super) fn strip_system(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn bottom_bar_system(
     time: Res<Time>,
-    sim: NonSend<SimRes>,
+    mut sim: NonSendMut<SimRes>,
     input: Res<InputRes>,
     mut feel: ResMut<Feel>,
     mode: Res<HudMode>,
     hover: Res<HudHover>,
+    plan: Option<Res<ShotPlan>>,
     mut msg: ResMut<BottomMsg>,
     cam: Res<CamState>,
     minimap: Res<MinimapState>,
@@ -1094,20 +1095,26 @@ pub(super) fn bottom_bar_system(
             n.max_width = want;
         }
     }
-    let s = &sim.session;
-    let w = s.sim.world();
     let now = time.elapsed_secs();
+    // Screenshot runs draw a few frames a second: keep messages up.
+    let hold = if plan.is_some() { 60.0 } else { 3.0 };
     // Refusals from the mapper this frame.
     for fb in &feel.feedback {
         if let Feedback::Refused { reason } = fb {
             msg.text = reason.reason().to_string();
-            msg.until = now + 3.0;
+            msg.until = now + hold;
         }
     }
     if let Some(t) = feel.toast.take() {
         msg.text = t;
-        msg.until = now + 3.0;
+        msg.until = now + hold;
     }
+    if let Some(a) = std::mem::take(&mut sim.new_alerts).pop() {
+        msg.text = a.text;
+        msg.until = now + hold + 1.0;
+    }
+    let s = &sim.session;
+    let w = s.sim.world();
     let view = s.view();
     let m = &input.mapper;
     let cursor = m.cursor_world();

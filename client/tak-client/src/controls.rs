@@ -49,6 +49,8 @@ pub(super) struct Feel {
     pub hud_choice: String,
     /// A one-off bottom-bar message (e.g. the damage-bar mode).
     pub toast: Option<String>,
+    /// Order acknowledgements to play this frame (`Sounds/*.WAV` names).
+    pub sounds: Vec<&'static str>,
 }
 
 impl Feel {
@@ -74,6 +76,7 @@ impl Feel {
             damage_bars: 0,
             hud_choice: args.hud.to_ascii_lowercase(),
             toast: None,
+            sounds: Vec::new(),
         }
     }
 
@@ -1629,6 +1632,81 @@ pub(super) fn wheel_system(
         }
         node.left = Val::Px(-cn.size.x / 2.0);
         node.top = Val::Px(top - cn.size.y - 4.0);
+    }
+}
+
+// ---- order sounds -------------------------------------------------------------
+
+/// The order-acknowledge sounds the in-game GUI names (`Sounds/MOVE.WAV`,
+/// `ATTACK`, `GUARD`, `PATROL`, `STOP`), decoded by Bevy's WAV support.
+#[derive(Resource, Default)]
+pub(super) struct OrderSounds(BTreeMap<&'static str, Handle<AudioSource>>);
+
+/// The acknowledgement for an order (**Chosen** for orders without their
+/// own sound: build walks like a move, a spell attacks, a stance has none).
+pub(super) fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
+    use tak_commands::SimCommand as C;
+    Some(match c {
+        C::Move { .. } | C::Build { .. } => "MOVE",
+        C::Attack { .. } | C::CastSpell { .. } => "ATTACK",
+        C::Guard { .. } => "GUARD",
+        C::Patrol { .. } => "PATROL",
+        C::Stop { .. } => "STOP",
+        C::SetFireState { .. } => return None,
+    })
+}
+
+pub(super) fn setup_sounds(
+    mut commands: Commands,
+    content: NonSend<Content>,
+    mut sources: ResMut<Assets<AudioSource>>,
+) {
+    let mut s = OrderSounds::default();
+    for name in ["MOVE", "ATTACK", "GUARD", "PATROL", "STOP"] {
+        if let Ok(bytes) = content.vfs.read(&format!("Sounds/{name}.WAV")) {
+            s.0.insert(
+                name,
+                sources.add(AudioSource {
+                    bytes: bytes.into(),
+                }),
+            );
+        }
+    }
+    eprintln!("order sounds: {} of 5", s.0.len());
+    commands.insert_resource(s);
+}
+
+/// Seconds a sound entity lives (without an audio device nothing plays and
+/// Bevy never despawns it, so it is cleaned up here).
+#[derive(Component)]
+pub(super) struct SoundTtl(f32);
+
+pub(super) fn sound_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    plan: Option<Res<ShotPlan>>,
+    sounds: Option<Res<OrderSounds>>,
+    mut feel: ResMut<Feel>,
+    mut live: Query<(Entity, &mut SoundTtl)>,
+) {
+    for (e, mut ttl) in &mut live {
+        ttl.0 -= time.delta_secs();
+        if ttl.0 <= 0.0 {
+            commands.entity(e).despawn();
+        }
+    }
+    let pending = std::mem::take(&mut feel.sounds);
+    let (Some(sounds), None) = (sounds, plan) else {
+        return;
+    };
+    // One acknowledgement per frame is enough (a burst of orders would
+    // stack the same voice).
+    if let Some(h) = pending.last().and_then(|n| sounds.0.get(n)) {
+        commands.spawn((
+            AudioPlayer::new(h.clone()),
+            PlaybackSettings::DESPAWN,
+            SoundTtl(3.0),
+        ));
     }
 }
 
