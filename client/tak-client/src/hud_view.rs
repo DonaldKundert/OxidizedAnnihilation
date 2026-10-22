@@ -1173,7 +1173,7 @@ pub(super) fn bottom_bar_system(
         }
     };
     if let Ok((mut t, mut node)) = help.single_mut() {
-        let want = if feel.ghost.is_some() || feel.overlay_open {
+        let want = if feel.ghost.is_some() || feel.overlay_open || m.wheel().is_some() {
             String::new()
         } else if let Some(h) = &hover.0 {
             h.clone()

@@ -325,7 +325,65 @@ The presets set the feel values; the control scheme keeps its own cursor
 mode (`reticle`) and right-stick role. Regenerate this table with
 `cargo run -p tak-input --example tuning_table`.
 
-<!-- TUNING TABLE -->
+| Group | Value | Unit | console | assisted | precise | wp_j | What it does |
+|---|---|---|---:|---:|---:|---:|---|
+| Cursor | `reticle` |  | on | on | on | off | Reticle mode: cursor fixed at screen centre, stick moves the camera |
+| Cursor | `reticle_smooth_ms` | ms | 0 | 0 | 0 | 0 | Reticle camera smoothing half-life (0: instant) |
+| Cursor | `fast_pan_pct` | % | 200 | 200 | 200 | 200 | Reticle mode: precision button pans this much faster |
+| Cursor | `cursor_speed` | px/s | 1100 | 900 | 1400 | 900 | Cursor speed at full stick |
+| Cursor | `cursor_curve_pct` | % | 110 | 110 | 100 | 100 | Response curve exponent x100 (100 linear) |
+| Cursor | `stick_deadzone` | raw | 7000 | 7000 | 7000 | 8000 | Inner stick deadzone |
+| Cursor | `stick_outer_deadzone` | raw | 2000 | 2000 | 2000 | 0 | Outer deadzone: this near full counts as full |
+| Cursor | `cursor_accel_pct` | % | 0 | 0 | 0 | 0 | Extra speed after holding full stick |
+| Cursor | `cursor_accel_ms` | ms | 350 | 350 | 350 | 400 | Time to reach the full acceleration bonus |
+| Cursor | `cursor_accel_threshold_pct` | % | 90 | 90 | 90 | 90 | Deflection that counts as full for acceleration |
+| Cursor | `cursor_zoom_pct` | % | 100 | 100 | 100 | 0 | Cursor speed follows zoom (100: same ground speed) |
+| Cursor | `precision_pct` | % | 35 | 35 | 30 | 25 | Precision (RT) speed multiplier |
+| Aim assist | `assist_priority` |  | on | on | on | off | Context targets: enemies with units selected, own units otherwise |
+| Aim assist | `friction_pct` | % | 30 | 20 | 45 | 100 | Cursor speed over a target's centre (100: off) |
+| Aim assist | `friction_radius_px` | px | 26 | 34 | 22 | 24 | Friction reach around a target |
+| Aim assist | `magnet_radius_px` | px | 44 | 56 | 24 | 40 | Soft snap radius |
+| Aim assist | `magnet_snap_px` | px | 8 | 12 | 6 | 12 | Lock-on distance |
+| Aim assist | `snap_half_life_ms` | ms | 45 | 30 | 60 | 0 | Snap pull half-life (0: linear WP-J pull) |
+| Aim assist | `magnet_pull_per_s` | /s | 8 | 8 | 8 | 8 | Linear pull per second (when half-life is 0) |
+| Aim assist | `snap_idle_pct` | % | 15 | 25 | 5 | 0 | Snap acts below this stick deflection |
+| Aim assist | `snap_hysteresis_px` | px | 10 | 14 | 6 | 0 | A new target must be this much nearer to take over |
+| Buttons | `hold_ms` | ms | 250 | 250 | 250 | 250 | Press longer than this is a hold |
+| Buttons | `double_tap_ms` | ms | 300 | 300 | 300 | 300 | Second press within this is a double tap |
+| Brush | `brush_min` | wu | 16 | 16 | 16 | 16 | Brush start radius (world units) |
+| Brush | `brush_growth_per_s` | wu/s | 140 | 120 | 170 | 160 | Brush growth speed |
+| Brush | `brush_max` | wu | 192 | 192 | 192 | 192 | Brush largest radius |
+| Brush | `brush_curve_pct` | % | 80 | 80 | 80 | 100 | Brush growth curve x100 (above 100: slow start) |
+| Brush | `drag_min_px` | px | 4 | 4 | 4 | 4 | Mouse drag shorter than this is a click |
+| Wheels | `wheel_deadzone` | raw | 16000 | 16000 | 16000 | 16000 | Stick deflection to highlight a slot |
+| Wheels | `wheel_max_slots` |  | 16 | 16 | 16 | 16 | Most slots on a wheel |
+| Wheels | `wheel_hysteresis_deg` | deg | 8 | 8 | 8 | 0 | Stay on a slot until this far past its edge |
+| Wheels | `wheel_confirm_on_press` |  | off | off | off | off | Wheel stays open; A confirms (off: release confirms) |
+| Wheels | `wheel_context` |  | on | on | on | off | Wheel shows what the selection can do |
+| Wheels | `wheel_recentre_clears` |  | off | off | off | off | Stick back to centre clears the highlight |
+| Camera | `pan_speed` | wu/s | 1200 | 1200 | 1200 | 1200 | Right-stick pan speed |
+| Camera | `pan_zoom_pct` | % | 100 | 100 | 100 | 0 | Pan speed follows zoom (100: same screen speed) |
+| Camera | `pan_smooth_ms` | ms | 60 | 60 | 60 | 0 | Pan smoothing half-life (0: instant) |
+| Camera | `edge_pan_px` | px | 24 | 24 | 24 | 0 | Edge pan margin for the stick cursor (0: off) |
+| Camera | `edge_pan_speed` | wu/s | 1000 | 1000 | 1000 | 900 | Edge pan speed |
+| Camera | `edge_pan_ramp_ms` | ms | 300 | 300 | 300 | 300 | Edge pan ramp-up time |
+| Camera | `edge_pan_mouse` |  | off | off | off | off | Edge pan with the mouse too |
+| Camera | `zoom_min_milli` | /1000 | 150 | 150 | 150 | 150 | Closest zoom (world units per pixel x1000) |
+| Camera | `zoom_max_milli` | /1000 | 4000 | 4000 | 4000 | 4000 | Farthest zoom |
+| Camera | `zoom_step_pct` | % | 10 | 10 | 10 | 10 | Zoom per mouse-wheel notch |
+| Camera | `zoom_stick_pct_per_s` | %/s | 150 | 150 | 150 | 150 | RB + right stick zoom speed |
+| Camera | `zoom_smooth_ms` | ms | 70 | 70 | 70 | 0 | Zoom smoothing half-life (0: instant) |
+| Camera | `glide_ms` | ms | 90 | 90 | 90 | 0 | Recentre / follow glide half-life (0: jump) |
+| Camera | `cursor_world_lock` |  | on | on | on | off | Panning and zooming keep the cursor on its ground point |
+| Camera | `right_stick_zoom` |  | on | on | on | off | Right stick up/down zooms (free mode: pans; zooms with RB held) |
+| Camera | `zoom_default_milli` | /1000 | 500 | 500 | 500 | 500 | Zoom that reset zoom (R3) returns to |
+| Camera | `zoom_ref_milli` | /1000 | 500 | 500 | 500 | 500 | Reference zoom for the zoom-scaled speeds |
+| Feedback | `select_flash_ms` | ms | 250 | 250 | 250 | 0 | Selection ring flash length |
+| Feedback | `rumble` |  | off | off | off | off | Controller rumble on snap, selection and damage |
+| Feedback | `rumble_snap_pct` | % | 20 | 20 | 20 | 20 | Rumble strength on snap |
+| Feedback | `rumble_select_pct` | % | 30 | 30 | 30 | 30 | Rumble strength on selection |
+| Feedback | `rumble_damage_pct` | % | 60 | 60 | 60 | 60 | Rumble strength on damage |
+| Feedback | `rumble_ms` | ms | 80 | 80 | 80 | 80 | Rumble pulse length |
 
 ## Presets and the feel lab
 
