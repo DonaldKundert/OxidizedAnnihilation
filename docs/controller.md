@@ -36,7 +36,8 @@ elsewhere: **Known**, **Believed**, **Chosen**, **Unknown**.
 - **HUD in the game's own art**: your race's button panel and info panel
   with TA:K's order buttons, build portraits, a unit card, a strip for
   mixed selections, and a bottom bar that says what X (or right click)
-  does here. On the pad the left panel folds away.
+  does here. The button panel sits at the right edge as in the original
+  TA:K; on the pad it folds away.
 - **Order sounds, alerts and the Crystal Ball**: the original
   MOVE/ATTACK/GUARD/PATROL/STOP acknowledgements; alerts (attacked,
   construction complete, unit trained, mana full, monarch in danger) ping

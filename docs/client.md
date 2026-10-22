@@ -110,7 +110,7 @@ Client flags: `--controls kingdoms|wp_s|wp_j` (scheme), `--input-preset`,
 `--input-profile` (hot reloaded, saved by the overlay), `--keys-tdf FILE` /
 `--no-keys-tdf` (import of TA:K's key file, default the install's),
 `--grid-keys` (optional build hotkeys), `--hud auto|console|classic`
-(layout; auto collapses the left panel while the pad drives),
+(layout; auto collapses the side panel while the pad drives),
 `--record-session`, `--ghost`, `--ghost-camera`, `--synth-events` /
 `--synth-ticks`, `--glyphs`, `--pad-events` (screenshot mode), `--overlay`.
 
@@ -408,8 +408,10 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   Once `Sim::match_state()` is `Over`, a banner says **Victory**, **Defeat**
   or **Draw** 150 ticks after the deciding tick (**Believed**: TA waited
   about that long), display only.
-- **Left panel** (keyboard and mouse; folded away on the pad): the local
-  side's own `ButtonPanel` from `anims/<race>ig.gaf` (`aramonig`,
+- **Side panel** at the right edge, bottom-aligned, where TA:K's
+  `UnitMenu` gadget is (`guis/<race>ingame.gui`: 512,128 128×352 on the
+  640×480 desktop; **Known**); keyboard and mouse only, folded away on the
+  pad. It is the local side's own `ButtonPanel` from `anims/<race>ig.gaf` (`aramonig`,
   `verunaig`, `tarosig`, `zhonig`, `creonig`; **Known**: all five decode
   cleanly with their sibling `.pcx` palette; entries are taken by index
   because Veruna prefixes its names) with TA:K's buttons from
@@ -423,7 +425,7 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   Frames: 0 dark (unusable), 1 up, 2 lit (hover), 3 down (the active mode,
   stance or cast). Clear and Heal leave their wells empty (the sim lacks
   them).
-- **Build menu** under the panel: the first own builder's options as
+- **Build menu** in a column left of the side panel: the first own builder's options as
   `anims/buildpic/<unit>.jpg` portraits (171 files, 64×48, **Known**) with
   the cost (and the Grid key when on), greyed when the player's mana is
   short, lit while placing.
@@ -441,7 +443,7 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   Select Elsin", a hovered panel button's name and key), and a red message
   line for refusals, the placement reason, the latest rejected build
   (`ConstructionState::rejections`) and alerts.
-- **Crystal Ball**: the minimap; Tab (toggle) or holding View shows it
+- **Crystal Ball**: the minimap, above the side panel in the Classic layout and at the bottom right when the panel is folded away (`MinimapGeom::fit_above`); Tab (toggle) or holding View shows it
   centred and as large as fits (`MinimapGeom::full`); clicks on it move the
   camera as on the small one. Alert pings are expanding rings on it.
 - **Placement ghost**: the footprint in green, or red with the sim's own

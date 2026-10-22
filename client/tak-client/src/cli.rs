@@ -88,7 +88,7 @@ pub struct Args {
     /// selected).
     #[arg(long)]
     pub grid_keys: bool,
-    /// HUD layout: auto (collapse the left panel while the pad is in use),
+    /// HUD layout: auto (collapse the side panel while the pad is in use),
     /// console (always collapsed, wheels and button prompts) or classic.
     #[arg(long, default_value = "auto")]
     pub hud: String,

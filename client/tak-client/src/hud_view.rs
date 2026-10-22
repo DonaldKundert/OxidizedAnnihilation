@@ -3,7 +3,7 @@
 //! (`anims/<race>ig.gaf`, `anims/igcommonbuttons.gaf`), the build menu with
 //! portraits (`anims/buildpic`), the unit card on the race's info panel, the
 //! multi-selection strip, and the contextual bottom bar. On controller
-//! play the left panel collapses: orders and building live in the wheels
+//! play the side panel collapses: orders and building live in the wheels
 //! and the bottom bar shows button prompts. Logic without Bevy is in
 //! `crate::hud`.
 
@@ -64,8 +64,10 @@ const PANEL_NAMES: [&str; 13] = [
 pub(super) const BUILD_CELLS: usize = 12;
 /// Multi-selection strip cells.
 const STRIP_CELLS: usize = 10;
-/// The left panel's top (below the top bar).
-const PANEL_TOP: f32 = 34.0;
+/// The side panel sits at the right edge, bottom-aligned, as TA:K's
+/// `UnitMenu` gadget does (`guis/<race>ingame.gui`: 512,128 128x352 on the
+/// 640x480 desktop, its bottom on the screen's bottom edge).
+pub(super) const SIDE_PANEL_H: f32 = 352.0;
 /// Button panel size (every race's `ButtonPanel` is 128x352).
 const PANEL_SIZE: [f32; 2] = [128.0, 352.0];
 /// Unit card (the race's `InfoPanel`, 512x49).
@@ -88,7 +90,7 @@ pub(super) struct HudArt {
 /// Which HUD layout is showing.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct HudMode {
-    /// Controller layout: left panel collapsed, prompts in the bottom bar.
+    /// Controller layout: side panel collapsed, prompts in the bottom bar.
     pub console: bool,
 }
 
@@ -128,7 +130,7 @@ pub(super) struct BottomMsg {
 }
 
 #[derive(Component)]
-pub(super) struct LeftPanel;
+pub(super) struct SidePanel;
 #[derive(Component)]
 pub(super) struct PanelBtnLabel(usize);
 #[derive(Component)]
@@ -291,14 +293,15 @@ pub(super) fn setup_hud_view(
     art: Res<HudArt>,
     bar: Query<Entity, With<BottomBar>>,
 ) {
-    // Left panel: the race's button panel with the order buttons on it.
+    // Side panel: the race's button panel with the order buttons on it, at
+    // the right edge like the original's UnitMenu.
     let (img, bg) = panel_bg(art.panel.as_ref());
     let panel = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(PANEL_TOP),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
                 width: Val::Px(PANEL_SIZE[0]),
                 height: Val::Px(PANEL_SIZE[1]),
                 ..default()
@@ -306,7 +309,7 @@ pub(super) fn setup_hud_view(
             img,
             bg,
             HudPanel,
-            LeftPanel,
+            SidePanel,
         ))
         .id();
     for (i, s) in art.slots.iter().enumerate().take(PANEL_BUTTONS.len()) {
@@ -336,19 +339,22 @@ pub(super) fn setup_hud_view(
             ChildOf(b),
         ));
     }
-    // Build menu: portraits two per row under the panel.
+    // Build menu: portraits two per row, a column beside the panel (top
+    // aligned with it).
     let grid = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(PANEL_TOP + PANEL_SIZE[1] + 2.0),
+                right: Val::Px(PANEL_SIZE[0] + 2.0),
+                bottom: Val::Px(0.0),
                 width: Val::Px(PANEL_SIZE[0]),
+                height: Val::Px(PANEL_SIZE[1]),
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
+                align_content: AlignContent::FlexStart,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.04, 0.03, 0.85)),
+            BackgroundColor(Color::NONE),
             Visibility::Hidden,
             HudPanel,
             BuildGrid,
@@ -365,6 +371,7 @@ pub(super) fn setup_hud_view(
                     ..default()
                 },
                 BorderColor::all(Color::srgb(0.3, 0.26, 0.18)),
+                BackgroundColor(Color::srgb(0.05, 0.04, 0.03)),
                 Visibility::Inherited,
                 ButtonKind::Build(i),
                 ChildOf(grid),
@@ -612,7 +619,7 @@ fn own_selection<'w>(
         .collect()
 }
 
-/// Left panel buttons: art frame by state (dark: unusable, up, lit:
+/// Side panel buttons: art frame by state (dark: unusable, up, lit:
 /// hovered, down: the active mode or stance), reserved wells left empty.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn panel_system(
@@ -622,7 +629,7 @@ pub(super) fn panel_system(
     mode: Res<HudMode>,
     mut hover: ResMut<HudHover>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut panel: Query<&mut Visibility, (With<LeftPanel>, Without<ButtonKind>)>,
+    mut panel: Query<&mut Visibility, (With<SidePanel>, Without<ButtonKind>)>,
     mut buttons: Query<
         (
             &ButtonKind,
@@ -631,7 +638,7 @@ pub(super) fn panel_system(
             &ComputedNode,
             &UiGlobalTransform,
         ),
-        Without<LeftPanel>,
+        Without<SidePanel>,
     >,
     mut labels: Query<(&PanelBtnLabel, &mut Text)>,
 ) {
@@ -1086,9 +1093,13 @@ pub(super) fn bottom_bar_system(
     mut help: Query<(&mut Text, &mut Node), (With<HelpLine>, Without<MsgLine>)>,
     mut line: Query<(&mut Text, &mut Node, &mut Visibility), (With<MsgLine>, Without<HelpLine>)>,
 ) {
-    let right = minimap
-        .geom(cam.geom.size)
-        .map_or(cam.geom.size[0], |g| g.panel[0]);
+    let right = if mode.console {
+        minimap
+            .geom(cam.geom.size)
+            .map_or(cam.geom.size[0], |g| g.panel[0])
+    } else {
+        cam.geom.size[0] - 2.0 * PANEL_SIZE[0] - 2.0
+    };
     if let Ok(mut n) = column.single_mut() {
         let want = Val::Px((right - BOTTOM_BAR_X - 8.0).max(160.0));
         if n.max_width != want {

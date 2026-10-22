@@ -2949,6 +2949,9 @@ struct MinimapState {
     ui_held: bool,
     /// Full-screen Crystal Ball (TA Tab, hold View).
     big: bool,
+    /// Height kept free at the bottom right (the Classic TA:K side panel):
+    /// the minimap sits above it.
+    reserve: f32,
 }
 
 impl MinimapState {
@@ -2957,6 +2960,8 @@ impl MinimapState {
     fn geom(&self, view: [f32; 2]) -> Option<MinimapGeom> {
         Some(if self.big {
             MinimapGeom::full(view, self.image?, self.map)
+        } else if self.reserve > 0.0 {
+            MinimapGeom::fit_above(view, self.image?, self.map, self.reserve)
         } else {
             MinimapGeom::fit(view, self.image?, self.map)
         })
@@ -3073,6 +3078,7 @@ fn minimap_system(
     sim: NonSend<SimRes>,
     cam: Res<CamState>,
     input: Res<InputRes>,
+    hud_mode: Option<Res<hud_view::HudMode>>,
     mut mm: ResMut<MinimapState>,
     fog: Res<FogRes>,
     mut root: Query<(Entity, &mut Node), (With<MinimapRoot>, Without<MinimapPing>)>,
@@ -3124,6 +3130,14 @@ fn minimap_system(
     let big = input.mapper.crystal_ball();
     if mm.big != big {
         mm.big = big;
+    }
+    let reserve = if hud_mode.is_some_and(|m| !m.console) {
+        hud_view::SIDE_PANEL_H
+    } else {
+        0.0
+    };
+    if mm.reserve != reserve {
+        mm.reserve = reserve;
     }
     let Some(g) = mm.geom(cam.geom.size) else {
         return;

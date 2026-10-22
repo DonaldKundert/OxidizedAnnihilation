@@ -413,6 +413,31 @@ impl MinimapGeom {
         }
     }
 
+    /// [`MinimapGeom::fit`] above a bottom-right panel `reserved` px tall
+    /// (the Classic TA:K side panel): the box is the same share of the
+    /// window but no taller than the space between the top bar (34 px) and
+    /// the panel, and it sits right above the panel.
+    pub fn fit_above(view: [f32; 2], image: (u32, u32), map: [f32; 2], reserved: f32) -> Self {
+        let avail = (view[1] - reserved - 34.0 - 2.0 * MINIMAP_MARGIN).max(40.0);
+        let bw = (view[0] * MINIMAP_SHARE[0]).clamp(MINIMAP_MIN[0], MINIMAP_MAX[0]);
+        let bh = (view[1] * MINIMAP_SHARE[1])
+            .clamp(MINIMAP_MIN[1], MINIMAP_MAX[1])
+            .min(avail);
+        let (iw, ih) = (image.0.max(1) as f32, image.1.max(1) as f32);
+        let sc = ((bw - 2.0 * MINIMAP_PAD) / iw).min((bh - 2.0 * MINIMAP_PAD) / ih);
+        let (w, h) = ((iw * sc).round().max(1.0), (ih * sc).round().max(1.0));
+        let (pw, ph) = (w + 2.0 * MINIMAP_PAD, h + 2.0 * MINIMAP_PAD);
+        let (pl, pt) = (
+            view[0] - pw - MINIMAP_MARGIN,
+            view[1] - reserved - ph - MINIMAP_MARGIN,
+        );
+        Self {
+            rect: [pl + MINIMAP_PAD, pt + MINIMAP_PAD, w, h],
+            panel: [pl, pt, pw, ph],
+            map,
+        }
+    }
+
     /// The full-screen Crystal Ball (TA Tab): the same minimap, centred
     /// and as large as fits in 88 % of the window width and 80 % of its
     /// height, keeping its aspect.
@@ -555,6 +580,19 @@ mod tests {
         assert!((r[0] + r[2] / 2.0 - 50.0).abs() < 1e-3);
         assert!((r[1] + r[3] / 2.0 - 25.0).abs() < 1e-3);
         assert!((r[2] - 20.0).abs() < 1e-3 && (r[3] - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn minimap_sits_above_the_side_panel() {
+        for view in [[1280.0, 720.0], [1920.0, 1080.0], [1024.0, 768.0]] {
+            for image in [(256, 256), (512, 107), (129, 431)] {
+                let g = MinimapGeom::fit_above(view, image, [4096.0, 4096.0], 352.0);
+                let [l, t, w, h] = g.panel;
+                assert!(t >= 34.0 - 1e-3, "{view:?} {image:?} {:?}", g.panel);
+                assert!(t + h <= view[1] - 352.0 + 1e-3, "{view:?} {image:?}");
+                assert!(l + w <= view[0] + 1e-3 && l >= 0.0);
+            }
+        }
     }
 
     #[test]
