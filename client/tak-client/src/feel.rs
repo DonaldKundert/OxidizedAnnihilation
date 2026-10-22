@@ -16,7 +16,7 @@ use tak_input::{
 };
 
 use crate::game::Session;
-use crate::view::{SimView, ViewGeom, f};
+use crate::view::{ViewGeom, f};
 
 // ---- profile file -----------------------------------------------------------
 
@@ -25,16 +25,35 @@ pub fn default_profile_path() -> PathBuf {
     PathBuf::from("tak-input-profile.json")
 }
 
-/// The combined controller + mouse/keyboard profile with a preset's tuning.
+/// The default control scheme (Kingdoms Console + Classic TA:K) with a
+/// preset's tuning.
 pub fn preset_profile(preset: &str) -> Result<Profile, String> {
+    scheme_profile("kingdoms", preset)
+}
+
+/// A control scheme ([`tak_input::CONTROL_SCHEMES`]: `kingdoms`, `wp_s`,
+/// `wp_j`) with a preset's feel values. The scheme keeps its own cursor mode
+/// (reticle or free) and right-stick role; `wp_j` keeps all its values.
+pub fn scheme_profile(scheme: &str, preset: &str) -> Result<Profile, String> {
     let tuning = Tuning::preset(preset).ok_or_else(|| {
         format!(
             "unknown --input-preset {preset:?} (try {})",
             tak_input::PRESETS.join(", ")
         )
     })?;
-    let mut p = Profile::default_combined();
-    p.tuning = tuning;
+    let mut p = Profile::named(scheme).ok_or_else(|| {
+        format!(
+            "unknown --controls {scheme:?} (try {})",
+            tak_input::CONTROL_SCHEMES.join(", ")
+        )
+    })?;
+    if !scheme.eq_ignore_ascii_case("wp_j") {
+        p.tuning = Tuning {
+            reticle: p.tuning.reticle,
+            right_stick_zoom: p.tuning.right_stick_zoom,
+            ..tuning
+        };
+    }
     Ok(p)
 }
 
@@ -46,6 +65,7 @@ fn mtime(path: &Path) -> Option<SystemTime> {
 /// valid profile), else the preset (written to `path` when one is given,
 /// so it can be edited). Returns the profile and the file's mtime.
 pub fn initial_profile(
+    scheme: &str,
     preset: &str,
     path: Option<&Path>,
 ) -> Result<(Profile, Option<SystemTime>), String> {
@@ -56,7 +76,7 @@ pub fn initial_profile(
         let prof = Profile::from_json(&s).map_err(|e| format!("{}: {e}", p.display()))?;
         return Ok((prof, mtime(p)));
     }
-    let prof = preset_profile(preset)?;
+    let prof = scheme_profile(scheme, preset)?;
     let mut t = None;
     if let Some(p) = path {
         t = Some(save_profile(p, &prof).map_err(|e| format!("{}: {e}", p.display()))?);
@@ -302,12 +322,14 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             prefix: "",
             text: "choose".into(),
         }));
-        if m.tuning().wheel_confirm_on_press {
+        let sticky = m.tuning().wheel_confirm_on_press || m.wheel_depth() > 0;
+        if sticky {
             v.push(hint_for(p, "confirm", |a| matches!(a, Action::Select)));
         } else {
             let want = match w.kind {
-                WheelKind::Command => Action::CommandWheel,
                 WheelKind::Build => Action::BuildWheel,
+                WheelKind::Spell => Action::SpellWheel,
+                _ => Action::CommandWheel,
             };
             let mut h = hint_for(p, "confirm", |a| *a == want);
             if let Some(h) = h.as_mut() {
@@ -334,6 +356,8 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             Mode::Patrol => "patrol here",
             Mode::Guard => "guard",
             Mode::CastSpell(_) => "cast",
+            Mode::Attack => "attack",
+            Mode::Move => "move here",
             Mode::None => "",
         };
         v.push(hint_for(p, what, |a| {
@@ -388,10 +412,11 @@ pub fn action_label(a: &Action) -> String {
         Action::GuardMode => "Guard".into(),
         Action::CastSpellMode => "Cast spell".into(),
         Action::CastSpell { index } => format!("Spell {}", index + 1),
+        // TA:K's names for the fire states.
         Action::SetFireState { state } => match state {
-            FireState::HoldFire => "Hold fire".into(),
-            FireState::ReturnFire => "Return fire".into(),
-            FireState::FireAtWill => "Fire at will".into(),
+            FireState::HoldFire => "Passive".into(),
+            FireState::ReturnFire => "Defensive".into(),
+            FireState::FireAtWill => "Offensive".into(),
         },
         Action::CycleIdleBuilder => "Idle builder".into(),
         Action::JumpToAlert => "Last alert".into(),
@@ -404,10 +429,39 @@ pub fn action_label(a: &Action) -> String {
             scope: Scope::OnScreen,
         } => "Same type".into(),
         Action::SelectSameType { scope: Scope::Map } => "Same type (map)".into(),
-        Action::FollowSelection => "Follow".into(),
+        Action::FollowSelection => "Track".into(),
         Action::BuildOption { index } => format!("Option {}", index + 1),
+        Action::AttackMode => "Attack".into(),
+        Action::MoveMode => "Move".into(),
+        Action::RecallGroup { group } => format!("Squad {}", squad_number(group.get())),
+        Action::AssignGroup { group } => format!("Set squad {}", squad_number(group.get())),
+        Action::JumpToGroup { group } => format!("Go to squad {}", squad_number(group.get())),
+        Action::OpenRing { ring } => match ring {
+            tak_input::Ring::Stance => "Stance >".into(),
+            tak_input::Ring::Unit => "Unit >".into(),
+            tak_input::Ring::Squads => "Squads >".into(),
+        },
+        Action::Reserved { order } => order.label().into(),
+        Action::SubSelectCycle => "Cycle type".into(),
+        Action::SelectMonarch { track: false } => "Select monarch".into(),
+        Action::SelectMonarch { track: true } => "Track monarch".into(),
+        Action::ResetZoom => "Reset zoom".into(),
+        Action::CrystalBall | Action::ToggleCrystalBall => "Crystal Ball".into(),
+        Action::SelectCategory { category } => format!("All {:?}", category),
+        Action::SetBookmark { slot } => format!("Set bookmark {slot}"),
+        Action::GoToBookmark { slot } => format!("Bookmark {slot}"),
+        Action::NextUnit => "Next unit".into(),
+        Action::ToggleDamageBars => "Damage bars".into(),
+        Action::GameSpeed { faster: true } => "Faster".into(),
+        Action::GameSpeed { faster: false } => "Slower".into(),
+        Action::TogglePause => "Pause".into(),
         other => format!("{other:?}"),
     }
+}
+
+/// TA numbers squads 1..10; squad 10 is group 0 (the `0` key).
+pub fn squad_number(group: u8) -> u8 {
+    if group == 0 { 10 } else { group }
 }
 
 // ---- recordings -------------------------------------------------------------
@@ -488,6 +542,22 @@ pub fn start_geom(s: &Session, zoom: f32, size: [f32; 2]) -> ViewGeom {
     }
 }
 
+/// Terrain height of the ground point drawn at the screen centre (the
+/// oblique view shows ground `z` at screen `z - SHEAR * h`), from the sim's
+/// height map; a few fixed-point steps of `z = target + SHEAR * h(z)`.
+pub fn centre_height(s: &Session, geom: &ViewGeom) -> f32 {
+    let w = s.sim.world();
+    let fx = |v: f32| tak_math::Fx::from_raw((v * 65536.0) as i32);
+    let mut h = 0.0;
+    for _ in 0..4 {
+        let z = geom.target[1] + crate::view::SHEAR * h;
+        h = f(w
+            .map()
+            .height_at(tak_math::Vec2::new(fx(geom.target[0]), fx(z))));
+    }
+    h
+}
+
 /// Drive a session headless with scripted device events through the real
 /// mapper (30 ticks per second, one input frame per tick), submitting its
 /// orders to the sim exactly as the client does, and record everything.
@@ -511,15 +581,12 @@ pub fn synth_recording(
     while s.tick().0 < ticks {
         let tick = s.tick();
         let t = t_base + tick.0 * 1000 / 30;
-        mapper.set_camera(geom.input_camera());
+        mapper.set_camera(geom.input_camera_at(centre_height(s, &geom)));
         let mut kinds = Vec::new();
         let mut outs = Vec::new();
         let mut submitted = Vec::new();
         {
-            let view = SimView {
-                world: s.sim.world(),
-                local: s.local,
-            };
+            let view = s.view();
             while next < events.len() && t_base + events[next].t <= t {
                 let e = &events[next];
                 kinds.push(e.kind.clone());
@@ -541,9 +608,15 @@ pub fn synth_recording(
                 Output::Client {
                     command: tak_commands::ClientCommand::CenterOnMonarch,
                 } => {
-                    let g = start_geom(s, geom.zoom, geom.size);
-                    let c = g.input_camera();
-                    mapper.glide_to(c.screen_to_world(c.center_screen()));
+                    let w = s.sim.world();
+                    if let Some(u) = w
+                        .players()
+                        .get(usize::from(s.local.0))
+                        .and_then(|p| p.monarch)
+                        .and_then(|id| w.unit(id))
+                    {
+                        mapper.glide_to(u.pos);
+                    }
                 }
                 _ => {}
             }
@@ -623,7 +696,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("p.json");
         let _ = std::fs::remove_file(&path);
-        let (p, mut t) = initial_profile("assisted", Some(&path)).unwrap();
+        let (p, mut t) = initial_profile("kingdoms", "assisted", Some(&path)).unwrap();
         assert_eq!(p.tuning, Tuning::assisted());
         assert!(path.exists());
         assert!(poll_profile(&path, &mut t).is_none());
@@ -638,7 +711,7 @@ mod tests {
         std::fs::write(&path, "{ nope").unwrap();
         t = Some(SystemTime::UNIX_EPOCH);
         assert!(poll_profile(&path, &mut t).unwrap().is_err());
-        assert!(initial_profile("console", Some(&path)).is_err());
+        assert!(initial_profile("kingdoms", "console", Some(&path)).is_err());
         assert!(preset_profile("bogus").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

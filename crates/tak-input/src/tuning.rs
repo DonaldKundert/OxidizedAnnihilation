@@ -52,6 +52,23 @@ pub struct Tuning {
     pub zoom_ref_milli: i32,
     /// Precision mode (RT) multiplies cursor speed by this percentage.
     pub precision_pct: i32,
+    /// Reticle mode (Halo Wars): the stick cursor stays at the screen
+    /// centre and the left stick moves the camera under it; aim assist acts
+    /// on the camera. Off: the left stick moves a free cursor.
+    pub reticle: bool,
+    /// Reticle mode camera smoothing: time for the camera velocity to close
+    /// half the gap to the stick's (0: instant).
+    pub reticle_smooth_ms: u32,
+    /// Reticle mode: holding the precision button pans faster by this
+    /// percentage instead of slowing a cursor.
+    pub fast_pan_pct: i32,
+    /// Right stick up/down zooms (Kingdoms Console). In free-cursor mode
+    /// the right stick still pans, and zooms while the queue modifier is
+    /// held.
+    pub right_stick_zoom: bool,
+    /// Zoom that "reset zoom" returns to, thousandths of a world unit per
+    /// pixel.
+    pub zoom_default_milli: i32,
 
     // ---- aim assist ----
     /// Context target priority: enemies when own units are selected, own
@@ -195,6 +212,11 @@ impl Tuning {
             cursor_zoom_pct: 0,
             zoom_ref_milli: 500,
             precision_pct: 25,
+            reticle: false,
+            reticle_smooth_ms: 0,
+            fast_pan_pct: 200,
+            right_stick_zoom: false,
+            zoom_default_milli: 500,
             assist_priority: false,
             friction_pct: 100,
             friction_radius_px: 24,
@@ -250,6 +272,8 @@ impl Tuning {
             cursor_accel_ms: 350,
             cursor_zoom_pct: 100,
             precision_pct: 35,
+            reticle: true,
+            right_stick_zoom: true,
             assist_priority: true,
             friction_pct: 30,
             friction_radius_px: 26,
@@ -430,6 +454,29 @@ const fn b(name: &'static str, group: &'static str, help: &'static str) -> Tunin
 
 /// Every [`Tuning`] field in overlay order.
 pub const TUNING_FIELDS: &[TuningField] = &[
+    b(
+        "reticle",
+        "Cursor",
+        "Reticle mode: cursor fixed at screen centre, stick moves the camera",
+    ),
+    f(
+        "reticle_smooth_ms",
+        "Cursor",
+        "ms",
+        10,
+        0,
+        500,
+        "Reticle camera smoothing half-life (0: instant)",
+    ),
+    f(
+        "fast_pan_pct",
+        "Cursor",
+        "%",
+        10,
+        100,
+        500,
+        "Reticle mode: precision button pans this much faster",
+    ),
     f(
         "cursor_speed",
         "Cursor",
@@ -806,6 +853,20 @@ pub const TUNING_FIELDS: &[TuningField] = &[
         "cursor_world_lock",
         "Camera",
         "Panning and zooming keep the cursor on its ground point",
+    ),
+    b(
+        "right_stick_zoom",
+        "Camera",
+        "Right stick up/down zooms (free mode: pans; zooms with RB held)",
+    ),
+    f(
+        "zoom_default_milli",
+        "Camera",
+        "/1000",
+        25,
+        100,
+        4000,
+        "Zoom that reset zoom (R3) returns to",
     ),
     f(
         "zoom_ref_milli",

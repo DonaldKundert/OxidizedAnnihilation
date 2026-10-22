@@ -18,6 +18,10 @@ pub enum Mode {
     Guard,
     /// Cast this spell at the cursor.
     CastSpell(SpellId),
+    /// Attack the unit under the cursor, or the ground (TA A).
+    Attack,
+    /// Move to the cursor, even over a unit (TA M).
+    Move,
 }
 
 /// The pickable unit under `pos`: the nearest whose pick radius contains it,
@@ -91,6 +95,9 @@ pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: Spe
 ///   or an enemy.
 /// - `Mode::CastSpell(s)`: `CastSpell` at the hovered unit or the ground, by
 ///   units that know `s`.
+/// - `Mode::Attack`: `Attack` the hovered unit (outside the selection), or
+///   the ground under the cursor.
+/// - `Mode::Move`: `Move { to: cursor }`, whatever is under it.
 /// - No mode: hovered enemy → `Attack`; hovered friendly unit outside the
 ///   selection → `Guard`; otherwise → `Move { to: cursor }`.
 ///
@@ -134,6 +141,19 @@ pub fn resolve_context<W: WorldView + ?Sized>(
                 Some(h) => Target::Unit(h.id),
                 None => Target::Ground(cursor),
             }),
+            queue,
+        }),
+        Mode::Attack => Some(SimCommand::Attack {
+            units: units.clone(),
+            target: match hovered {
+                Some(h) if !units.contains(h.id) => Target::Unit(h.id),
+                _ => Target::Ground(cursor),
+            },
+            queue,
+        }),
+        Mode::Move => Some(SimCommand::Move {
+            units: units.clone(),
+            to: cursor,
             queue,
         }),
         Mode::None => Some(match hovered {

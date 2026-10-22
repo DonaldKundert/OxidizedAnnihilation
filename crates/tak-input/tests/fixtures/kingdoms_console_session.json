@@ -1,0 +1,1012 @@
+{
+ "description": "Recorded (synthetic) Kingdoms Console session exercising every binding of design system section 4. Camera at origin, 1 world unit per pixel, 1280x960; the reticle is the screen centre. tests/kingdoms_console.rs checks each segment.",
+ "world": {
+  "local_player": 0,
+  "enemies": [
+   1
+  ],
+  "units": [
+   {
+    "index": 1,
+    "owner": 0,
+    "def": 1,
+    "x": 640,
+    "y": 480,
+    "monarch": true,
+    "spells": [
+     0,
+     1
+    ],
+    "categories": [
+     "MAGIC"
+    ]
+   },
+   {
+    "index": 2,
+    "owner": 0,
+    "def": 11,
+    "x": 700,
+    "y": 480,
+    "categories": [
+     "MELEE",
+     "ATTACK"
+    ]
+   },
+   {
+    "index": 3,
+    "owner": 0,
+    "def": 11,
+    "x": 720,
+    "y": 470,
+    "categories": [
+     "MELEE",
+     "ATTACK"
+    ]
+   },
+   {
+    "index": 4,
+    "owner": 0,
+    "def": 12,
+    "x": 700,
+    "y": 520,
+    "categories": [
+     "BALLISTIC",
+     "ATTACK"
+    ]
+   },
+   {
+    "index": 6,
+    "owner": 1,
+    "def": 30,
+    "x": 800,
+    "y": 480
+   },
+   {
+    "index": 7,
+    "owner": 0,
+    "def": 13,
+    "x": 300,
+    "y": 300,
+    "builder": "mobile",
+    "build_options": [
+     20,
+     21,
+     22
+    ],
+    "idle": true,
+    "categories": [
+     "BUILDER"
+    ]
+   }
+  ]
+ },
+ "segments": [
+  {
+   "label": "a_tap_selects_under_reticle",
+   "events": [
+    {
+     "t": 100,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 150,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 160,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "dpad_up_hold_assigns_squad_1",
+   "events": [
+    {
+     "t": 500,
+     "type": "button_down",
+     "button": "dpad_up"
+    },
+    {
+     "t": 800,
+     "type": "frame"
+    },
+    {
+     "t": 820,
+     "type": "button_up",
+     "button": "dpad_up"
+    }
+   ]
+  },
+  {
+   "label": "left_stick_pans_camera_under_fixed_reticle",
+   "events": [
+    {
+     "t": 1000,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 32767
+    },
+    {
+     "t": 1016,
+     "type": "frame"
+    },
+    {
+     "t": 1032,
+     "type": "frame"
+    },
+    {
+     "t": 1048,
+     "type": "frame"
+    },
+    {
+     "t": 1060,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 1070,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "a_tap_then_second_tap_selects_type_on_screen",
+   "events": [
+    {
+     "t": 1200,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 1250,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 1400,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 1450,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 1460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rb_held_a_adds_without_select_all",
+   "events": [
+    {
+     "t": 1700,
+     "type": "axis",
+     "axis": "left_y",
+     "value": -32767
+    },
+    {
+     "t": 1740,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 1800,
+     "type": "button_down",
+     "button": "rb"
+    },
+    {
+     "t": 1850,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 1900,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 1950,
+     "type": "button_up",
+     "button": "rb"
+    },
+    {
+     "t": 2300,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rt_tap_sub_select_first_type",
+   "events": [
+    {
+     "t": 2400,
+     "type": "button_down",
+     "button": "rt"
+    },
+    {
+     "t": 2450,
+     "type": "button_up",
+     "button": "rt"
+    },
+    {
+     "t": 2460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rt_tap_sub_select_second_type",
+   "events": [
+    {
+     "t": 2800,
+     "type": "button_down",
+     "button": "rt"
+    },
+    {
+     "t": 2850,
+     "type": "button_up",
+     "button": "rt"
+    },
+    {
+     "t": 2860,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rt_tap_back_to_full_selection",
+   "events": [
+    {
+     "t": 3200,
+     "type": "button_down",
+     "button": "rt"
+    },
+    {
+     "t": 3250,
+     "type": "button_up",
+     "button": "rt"
+    },
+    {
+     "t": 3260,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "x_press_attacks_enemy_under_reticle",
+   "events": [
+    {
+     "t": 3400,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 32767
+    },
+    {
+     "t": 3500,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 3500,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 32767
+    },
+    {
+     "t": 3540,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 3600,
+     "type": "button_down",
+     "button": "x"
+    },
+    {
+     "t": 3650,
+     "type": "button_up",
+     "button": "x"
+    },
+    {
+     "t": 3660,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rb_x_queues_order",
+   "events": [
+    {
+     "t": 3800,
+     "type": "button_down",
+     "button": "rb"
+    },
+    {
+     "t": 3850,
+     "type": "button_down",
+     "button": "x"
+    },
+    {
+     "t": 3900,
+     "type": "button_up",
+     "button": "x"
+    },
+    {
+     "t": 3950,
+     "type": "button_up",
+     "button": "rb"
+    },
+    {
+     "t": 4300,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rb_tap_all_on_screen",
+   "events": [
+    {
+     "t": 4400,
+     "type": "button_down",
+     "button": "rb"
+    },
+    {
+     "t": 4450,
+     "type": "button_up",
+     "button": "rb"
+    },
+    {
+     "t": 4460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "rb_second_tap_all_on_map",
+   "events": [
+    {
+     "t": 4600,
+     "type": "button_down",
+     "button": "rb"
+    },
+    {
+     "t": 4650,
+     "type": "button_up",
+     "button": "rb"
+    },
+    {
+     "t": 4700,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "b_tap_clears_selection",
+   "events": [
+    {
+     "t": 5000,
+     "type": "button_down",
+     "button": "b"
+    },
+    {
+     "t": 5050,
+     "type": "button_up",
+     "button": "b"
+    },
+    {
+     "t": 5060,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "dpad_up_tap_recalls_squad_1",
+   "events": [
+    {
+     "t": 5200,
+     "type": "button_down",
+     "button": "dpad_up"
+    },
+    {
+     "t": 5250,
+     "type": "button_up",
+     "button": "dpad_up"
+    },
+    {
+     "t": 5260,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "dpad_up_second_tap_jumps_camera_to_squad_1",
+   "events": [
+    {
+     "t": 5400,
+     "type": "button_down",
+     "button": "dpad_up"
+    },
+    {
+     "t": 5450,
+     "type": "button_up",
+     "button": "dpad_up"
+    },
+    {
+     "t": 5460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "y_tap_casts_first_spell",
+   "events": [
+    {
+     "t": 5800,
+     "type": "button_down",
+     "button": "y"
+    },
+    {
+     "t": 5850,
+     "type": "button_up",
+     "button": "y"
+    },
+    {
+     "t": 5860,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "b_tap_cancels_cast_mode",
+   "events": [
+    {
+     "t": 6000,
+     "type": "button_down",
+     "button": "b"
+    },
+    {
+     "t": 6050,
+     "type": "button_up",
+     "button": "b"
+    },
+    {
+     "t": 6060,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "y_hold_spell_wheel_confirms_on_release",
+   "events": [
+    {
+     "t": 6200,
+     "type": "button_down",
+     "button": "y"
+    },
+    {
+     "t": 6460,
+     "type": "frame"
+    },
+    {
+     "t": 6500,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 32767
+    },
+    {
+     "t": 6550,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 6600,
+     "type": "button_up",
+     "button": "y"
+    },
+    {
+     "t": 6610,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "b_tap_cancels_again",
+   "events": [
+    {
+     "t": 6800,
+     "type": "button_down",
+     "button": "b"
+    },
+    {
+     "t": 6850,
+     "type": "button_up",
+     "button": "b"
+    },
+    {
+     "t": 6860,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "lb_tap_next_idle_builder",
+   "events": [
+    {
+     "t": 7000,
+     "type": "button_down",
+     "button": "lb"
+    },
+    {
+     "t": 7050,
+     "type": "button_up",
+     "button": "lb"
+    },
+    {
+     "t": 7060,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "lb_hold_build_wheel_page_then_place",
+   "events": [
+    {
+     "t": 7200,
+     "type": "button_down",
+     "button": "lb"
+    },
+    {
+     "t": 7460,
+     "type": "frame"
+    },
+    {
+     "t": 7500,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 32767
+    },
+    {
+     "t": 7550,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 7600,
+     "type": "button_up",
+     "button": "lb"
+    },
+    {
+     "t": 7700,
+     "type": "button_down",
+     "button": "x"
+    },
+    {
+     "t": 7750,
+     "type": "button_up",
+     "button": "x"
+    },
+    {
+     "t": 7760,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "lt_orders_wheel_stance_sub_ring",
+   "events": [
+    {
+     "t": 8000,
+     "type": "button_down",
+     "button": "lt"
+    },
+    {
+     "t": 8050,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 13000
+    },
+    {
+     "t": 8050,
+     "type": "axis",
+     "axis": "left_y",
+     "value": -13000
+    },
+    {
+     "t": 8100,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 8100,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 8150,
+     "type": "button_up",
+     "button": "lt"
+    },
+    {
+     "t": 8200,
+     "type": "axis",
+     "axis": "left_x",
+     "value": -13000
+    },
+    {
+     "t": 8200,
+     "type": "axis",
+     "axis": "left_y",
+     "value": -13000
+    },
+    {
+     "t": 8250,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 8250,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 8300,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 8350,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 8360,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "lt_orders_wheel_stop_at_twelve",
+   "events": [
+    {
+     "t": 8600,
+     "type": "button_down",
+     "button": "lt"
+    },
+    {
+     "t": 8650,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 32767
+    },
+    {
+     "t": 8700,
+     "type": "axis",
+     "axis": "left_y",
+     "value": 0
+    },
+    {
+     "t": 8750,
+     "type": "button_up",
+     "button": "lt"
+    },
+    {
+     "t": 8760,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "b_hold_stops",
+   "events": [
+    {
+     "t": 9000,
+     "type": "button_down",
+     "button": "b"
+    },
+    {
+     "t": 9300,
+     "type": "frame"
+    },
+    {
+     "t": 9320,
+     "type": "button_up",
+     "button": "b"
+    }
+   ]
+  },
+  {
+   "label": "view_tap_jumps_to_alert",
+   "events": [
+    {
+     "t": 9600,
+     "type": "button_down",
+     "button": "view"
+    },
+    {
+     "t": 9650,
+     "type": "button_up",
+     "button": "view"
+    },
+    {
+     "t": 9660,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "view_hold_crystal_ball_on",
+   "events": [
+    {
+     "t": 9800,
+     "type": "button_down",
+     "button": "view"
+    },
+    {
+     "t": 10100,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "view_release_crystal_ball_off",
+   "events": [
+    {
+     "t": 10200,
+     "type": "button_up",
+     "button": "view"
+    },
+    {
+     "t": 10210,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "menu_opens_game_menu",
+   "events": [
+    {
+     "t": 10400,
+     "type": "button_down",
+     "button": "menu"
+    },
+    {
+     "t": 10450,
+     "type": "button_up",
+     "button": "menu"
+    },
+    {
+     "t": 10460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "l3_tap_centres_on_monarch",
+   "events": [
+    {
+     "t": 10600,
+     "type": "button_down",
+     "button": "l3"
+    },
+    {
+     "t": 10650,
+     "type": "button_up",
+     "button": "l3"
+    },
+    {
+     "t": 10660,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "l3_second_tap_selects_monarch",
+   "events": [
+    {
+     "t": 10800,
+     "type": "button_down",
+     "button": "l3"
+    },
+    {
+     "t": 10850,
+     "type": "button_up",
+     "button": "l3"
+    },
+    {
+     "t": 10860,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "l3_hold_tracks_monarch",
+   "events": [
+    {
+     "t": 11200,
+     "type": "button_down",
+     "button": "l3"
+    },
+    {
+     "t": 11500,
+     "type": "frame"
+    },
+    {
+     "t": 11520,
+     "type": "button_up",
+     "button": "l3"
+    }
+   ]
+  },
+  {
+   "label": "r3_hold_toggles_tracking",
+   "events": [
+    {
+     "t": 11800,
+     "type": "button_down",
+     "button": "r3"
+    },
+    {
+     "t": 12100,
+     "type": "frame"
+    },
+    {
+     "t": 12120,
+     "type": "button_up",
+     "button": "r3"
+    }
+   ]
+  },
+  {
+   "label": "right_stick_zooms_in",
+   "events": [
+    {
+     "t": 12400,
+     "type": "axis",
+     "axis": "right_y",
+     "value": 32767
+    },
+    {
+     "t": 12416,
+     "type": "frame"
+    },
+    {
+     "t": 12432,
+     "type": "frame"
+    },
+    {
+     "t": 12450,
+     "type": "axis",
+     "axis": "right_y",
+     "value": 0
+    },
+    {
+     "t": 12460,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "r3_tap_resets_zoom",
+   "events": [
+    {
+     "t": 12600,
+     "type": "button_down",
+     "button": "r3"
+    },
+    {
+     "t": 12650,
+     "type": "button_up",
+     "button": "r3"
+    },
+    {
+     "t": 12660,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "a_hold_brush_selects_circle",
+   "events": [
+    {
+     "t": 13000,
+     "type": "button_down",
+     "button": "a"
+    },
+    {
+     "t": 13300,
+     "type": "frame"
+    },
+    {
+     "t": 13310,
+     "type": "button_up",
+     "button": "a"
+    },
+    {
+     "t": 13320,
+     "type": "frame"
+    }
+   ]
+  },
+  {
+   "label": "x_hold_attack_move_is_reserved",
+   "events": [
+    {
+     "t": 13600,
+     "type": "button_down",
+     "button": "x"
+    },
+    {
+     "t": 13900,
+     "type": "frame"
+    },
+    {
+     "t": 13920,
+     "type": "button_up",
+     "button": "x"
+    }
+   ]
+  },
+  {
+   "label": "rt_hold_fast_pan",
+   "events": [
+    {
+     "t": 14200,
+     "type": "button_down",
+     "button": "rt"
+    },
+    {
+     "t": 14460,
+     "type": "frame"
+    },
+    {
+     "t": 14500,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 32767
+    },
+    {
+     "t": 14516,
+     "type": "frame"
+    },
+    {
+     "t": 14532,
+     "type": "frame"
+    },
+    {
+     "t": 14548,
+     "type": "frame"
+    },
+    {
+     "t": 14560,
+     "type": "axis",
+     "axis": "left_x",
+     "value": 0
+    },
+    {
+     "t": 14600,
+     "type": "button_up",
+     "button": "rt"
+    },
+    {
+     "t": 14610,
+     "type": "frame"
+    }
+   ]
+  }
+ ]
+}

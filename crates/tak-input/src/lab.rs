@@ -152,8 +152,9 @@ pub fn run_lab(presets: &[(String, Profile)], cfg: &LabConfig) -> Vec<LabRow> {
 pub fn default_presets() -> Vec<(String, Profile)> {
     let mut v = vec![("wp_j".to_owned(), Profile::wp_j_controller())];
     for name in ["console", "assisted", "precise"] {
-        let mut p = Profile::default_controller();
+        let mut p = Profile::wp_s_controller();
         p.tuning = Tuning::preset(name).unwrap_or_default();
+        p.tuning.reticle = false;
         v.push((name.to_owned(), p));
     }
     v

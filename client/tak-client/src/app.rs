@@ -25,7 +25,7 @@ use bevy::window::{PrimaryWindow, WindowResolution};
 use tak_commands::{ClientCommand, PlayerId, UnitId};
 use tak_input::{
     Action, Axis as InAxis, Button as InButton, EventKind, InputEvent, Key, Mapper, Mode, Output,
-    Profile, WheelKind,
+    Profile,
 };
 use tak_vfs::Vfs;
 
@@ -38,7 +38,7 @@ use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp
 use crate::models::{BuiltModel, TextureIndex, load_model};
 use crate::sprites::{SpriteSeq, SpriteStore, billboard, lift_for};
 use crate::terrain::{self, TerrainData};
-use crate::view::{MinimapGeom, SimView, ViewGeom, f, pick_radius};
+use crate::view::{MinimapGeom, ViewGeom, f, pick_radius};
 use controls::Feel;
 
 /// Seconds per sim tick.
@@ -97,6 +97,16 @@ impl SimRes {
 #[derive(Resource, Clone, Copy)]
 struct CamState {
     geom: ViewGeom,
+    /// Terrain height under the screen centre: `tak-input`'s camera maps
+    /// the plane at this height ([`ViewGeom::input_camera_at`]), so the
+    /// reticle picks exactly what is drawn under it.
+    input_h: f32,
+}
+
+impl CamState {
+    fn input_camera(&self) -> tak_input::Camera {
+        self.geom.input_camera_at(self.input_h)
+    }
 }
 
 /// Terrain heights for picking and placement.
@@ -242,62 +252,67 @@ enum ButtonKind {
 #[derive(Component)]
 struct HudButtonLabel;
 
-/// Order buttons: label and the mouse/keyboard profile's key.
-const ORDER_BUTTONS: [(&str, &str); 6] = [
-    ("Stop", "s"),
-    ("Patrol", "p"),
-    ("Guard", "g"),
-    ("Hold", "h"),
-    ("Return", "r"),
-    ("Fire", "f"),
+/// Order buttons: label and action (TA:K's order set; reserved orders
+/// are hidden until the sim supports them).
+const ORDER_BUTTONS: [(&str, Action); 6] = [
+    ("Stop", Action::Stop),
+    ("Patrol", Action::PatrolMode),
+    ("Guard", Action::GuardMode),
+    (
+        "Passive",
+        Action::SetFireState {
+            state: tak_commands::FireState::HoldFire,
+        },
+    ),
+    (
+        "Defensive",
+        Action::SetFireState {
+            state: tak_commands::FireState::ReturnFire,
+        },
+    ),
+    (
+        "Offensive",
+        Action::SetFireState {
+            state: tak_commands::FireState::FireAtWill,
+        },
+    ),
 ];
 
-/// Spell buttons (the profile binds Ctrl+F1-F3; no retail unit has more
-/// than three spells).
+/// Spell buttons (no retail unit has more than three spells).
 const SPELL_BUTTONS: usize = 3;
 
-/// Build buttons: the profile binds F1-F8 and Shift+F1-F8 (retail menus
-/// have at most 9 entries; the build wheel shows up to 16).
+/// Build buttons (retail menus have at most 9 entries).
 const BUILD_BUTTONS: usize = 16;
 
 impl ButtonKind {
-    /// The key (and modifier held with it) the mouse/keyboard profile
-    /// binds to this button's action.
-    fn key(self) -> (Option<&'static str>, String) {
+    /// What the button does: the same action as its key or wheel slot.
+    fn action(self) -> Action {
         match self {
-            ButtonKind::Order(i) => (None, ORDER_BUTTONS[i].1.to_string()),
-            ButtonKind::Spell(i) => (Some("ctrl"), format!("f{}", i + 1)),
-            ButtonKind::Build(i) if i < 8 => (None, format!("f{}", i + 1)),
-            ButtonKind::Build(i) => (Some("shift"), format!("f{}", i - 7)),
-        }
-    }
-
-    /// The key as shown on the button.
-    fn key_label(self) -> String {
-        let (m, k) = self.key();
-        let k = k.to_ascii_uppercase();
-        match m {
-            Some("ctrl") => format!("^{k}"),
-            Some("shift") => format!("S-{k}"),
-            _ => k,
+            ButtonKind::Order(i) => ORDER_BUTTONS[i].1,
+            ButtonKind::Spell(i) => Action::CastSpell { index: i as u8 },
+            ButtonKind::Build(i) => Action::BuildOption { index: i as u8 },
         }
     }
 }
 
-/// A HUD button's key press: modifier down, key down and up, modifier up.
-fn key_events((m, k): (Option<&'static str>, String)) -> Vec<EventKind> {
-    let mut v = Vec::new();
-    if let Some(m) = m {
-        v.push(EventKind::KeyDown { key: Key(m.into()) });
-    }
-    v.push(EventKind::KeyDown {
-        key: Key(k.clone()),
-    });
-    v.push(EventKind::KeyUp { key: Key(k) });
-    if let Some(m) = m {
-        v.push(EventKind::KeyUp { key: Key(m.into()) });
-    }
-    v
+/// The keyboard key (with modifier) a profile binds to `action`, as shown
+/// on HUD buttons, e.g. `S` or `^F1`.
+fn key_label(p: &Profile, action: Action) -> Option<String> {
+    p.bindings.iter().find_map(|b| {
+        let tak_input::Input::Key(k) = &b.input else {
+            return None;
+        };
+        if b.action != action {
+            return None;
+        }
+        let k = k.0.to_ascii_uppercase();
+        Some(match &b.with {
+            Some(tak_input::Input::Key(m)) if m.0 == "ctrl" => format!("^{k}"),
+            Some(tak_input::Input::Key(m)) if m.0 == "shift" => format!("S-{k}"),
+            Some(tak_input::Input::Key(m)) if m.0 == "alt" => format!("A-{k}"),
+            _ => k,
+        })
+    })
 }
 
 fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width: f32) {
@@ -322,8 +337,11 @@ fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = crate::game::open_vfs(&args.data)?;
-    let (profile, profile_mtime) =
-        crate::feel::initial_profile(&args.input_preset, args.input_profile.as_deref())?;
+    let (profile, profile_mtime) = crate::feel::initial_profile(
+        &args.controls,
+        &args.input_preset,
+        args.input_profile.as_deref(),
+    )?;
     if let Some(ev_path) = &args.synth_events {
         return synth(&args, &vfs, profile, ev_path);
     }
@@ -433,6 +451,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 zoom: args.zoom,
                 size: [w as f32, h as f32],
             },
+            input_h: 0.0,
         })
         .insert_resource(InputRes {
             mapper,
@@ -927,6 +946,7 @@ fn shot_driver(
     mut sim: NonSendMut<SimRes>,
     mut cam: ResMut<CamState>,
     mut input: ResMut<InputRes>,
+    ground: Res<Ground>,
     mut exit: MessageWriter<AppExit>,
     hud_buttons: Query<(
         &ButtonKind,
@@ -961,8 +981,9 @@ fn shot_driver(
         if let Some(p) = focus_point(&sim.session, plan.focus) {
             cam.geom.target = p;
         }
+        cam.input_h = centre_height(&cam.geom, &ground.0);
+        input.mapper.set_camera(cam.input_camera());
         if !plan.select.is_empty() {
-            input.mapper.set_camera(cam.geom.input_camera());
             select_units(&mut input.mapper, &sim, &plan.select);
         }
         for (id, u) in sim.session.sim.world().units() {
@@ -1010,10 +1031,7 @@ fn shot_driver(
     // test and key path as a real click.
     if plan.wait == 10 && !plan.pad_events.is_empty() {
         let tick = sim.session.tick();
-        let view = SimView {
-            world: sim.session.sim.world(),
-            local: sim.session.local,
-        };
+        let view = sim.session.view();
         let base = 3_000_000 + plan.next as u32 * 100_000;
         let mut last = base;
         for e in &plan.pad_events {
@@ -1031,6 +1049,11 @@ fn shot_driver(
         let pan = input.mapper.take_camera_pan();
         cam.geom.target[0] += f(pan.x);
         cam.geom.target[1] += f(pan.y);
+        if let Some(z) = input.mapper.take_camera_zoom() {
+            cam.geom.zoom = f(z);
+        }
+        cam.input_h = centre_height(&cam.geom, &ground.0);
+        input.mapper.set_camera(cam.input_camera());
         eprintln!(
             "  pad cursor {:?} kind {:?} wheel {:?}",
             input.mapper.cursor_screen(),
@@ -1048,16 +1071,9 @@ fn shot_driver(
             eprintln!("  click ({x}, {y}): {hit:?}");
             if let Some(Some(k)) = hit {
                 let tick = sim.session.tick();
-                let view = SimView {
-                    world: sim.session.sim.world(),
-                    local: sim.session.local,
-                };
-                for kind in key_events(k.key()) {
-                    let outs = input
-                        .mapper
-                        .handle(&InputEvent::new(2_000_000, kind), &view, tick);
-                    eprintln!("    -> {outs:?}");
-                }
+                let view = sim.session.view();
+                let outs = input.mapper.perform(k.action(), &view, tick);
+                eprintln!("    -> {outs:?}");
             }
         }
     }
@@ -1082,10 +1098,7 @@ fn shot_driver(
 /// mapper's state exactly as in play.
 fn select_units(mapper: &mut Mapper, sim: &SimRes, slots: &[u32]) {
     let world = sim.session.sim.world();
-    let view = SimView {
-        world,
-        local: sim.session.local,
-    };
+    let view = sim.session.view();
     let tick = sim.session.tick();
     let units: Vec<_> = world
         .units()
@@ -1145,6 +1158,13 @@ fn key_name(k: KeyCode) -> Option<String> {
         Period => "period",
         Enter => "enter",
         Tab => "tab",
+        Pause => "pause",
+        Backspace => "backspace",
+        Backquote => "grave",
+        Equal => "equal",
+        Minus => "minus",
+        NumpadAdd => "equal",
+        NumpadSubtract => "minus",
         F1 => "f1",
         F2 => "f2",
         F3 => "f3",
@@ -1261,8 +1281,10 @@ fn input_system(
             f(c.origin.y) + c.height_px as f32 / 2.0 * z,
         ];
     }
+    cam.input_h = centre_height(&cam.geom, &ground.0);
     let geom = cam.geom;
-    input.mapper.set_camera(geom.input_camera());
+    let input_h = cam.input_h;
+    input.mapper.set_camera(cam.input_camera());
     if plan.is_some() {
         return;
     }
@@ -1275,7 +1297,7 @@ fn input_system(
     if let Some(pos) = windows.single().ok().and_then(|w| w.cursor_position()) {
         let (o, d) = geom.ray(pos.x, pos.y);
         if let Some(hit) = ground.0.raycast(o, d) {
-            let v = geom.virtual_px(hit[0], hit[2]);
+            let v = geom.virtual_px_at(hit[0], hit[2], input_h);
             if input.last_pointer != Some(v) {
                 input.last_pointer = Some(v);
                 events.push(EventKind::PointerMove { x: v.0, y: v.1 });
@@ -1302,7 +1324,7 @@ fn input_system(
     }
     // HUD panel and buttons: a click there presses the button's key (the
     // same action as the keyboard) and never reaches the world.
-    let mut pressed_keys: Vec<(Option<&'static str>, String)> = Vec::new();
+    let mut pressed: Vec<Action> = Vec::new();
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
@@ -1310,7 +1332,7 @@ fn input_system(
     {
         minimap.ui_held = true;
         if let Some(k) = hit {
-            pressed_keys.push(k.key());
+            pressed.push(k.action());
         }
     }
     let swallow_left = minimap.mouse_drag
@@ -1367,7 +1389,7 @@ fn input_system(
         {
             minimap.pad_swallow = true;
             if let Some(k) = hit {
-                pressed_keys.push(k.key());
+                pressed.push(k.action());
             }
         }
         if minimap.pad_swallow {
@@ -1402,9 +1424,7 @@ fn input_system(
             }
         }
     }
-    for k in pressed_keys {
-        events.extend(key_events(k));
-    }
+
     for ev in wheel.read() {
         let steps = match ev.unit {
             MouseScrollUnit::Line => ev.y,
@@ -1424,16 +1444,17 @@ fn input_system(
     let tick = sim.session.tick();
     let mut outs = Vec::new();
     {
-        let view = SimView {
-            world: sim.session.sim.world(),
-            local: sim.session.local,
-        };
+        let view = sim.session.view();
         for kind in &events {
             outs.extend(
                 input
                     .mapper
                     .handle(&InputEvent::new(t, kind.clone()), &view, tick),
             );
+        }
+        // HUD buttons carry out their action directly.
+        for a in pressed {
+            outs.extend(input.mapper.perform(a, &view, tick));
         }
     }
     let mut submitted = Vec::new();
@@ -1452,24 +1473,38 @@ fn input_system(
                 }
             }
             Output::Client { command } => match command {
+                // The mapper's camera maps the ground under the screen
+                // centre, so glides go to true ground positions.
                 ClientCommand::CenterOnMonarch => {
-                    if let Some(p) = focus_point(&sim.session, Focus::Monarch(sim.session.local.0))
+                    let w = sim.session.sim.world();
+                    if let Some(p) = w
+                        .players()
+                        .get(usize::from(sim.session.local.0))
+                        .and_then(|p| p.monarch)
+                        .and_then(|id| w.unit(id))
                     {
-                        input.mapper.glide_to(fx_pos(p));
+                        input.mapper.glide_to(p.pos);
                     }
                 }
                 ClientCommand::CycleIdleBuilder => {
                     if let Some(id) = input.mapper.selection().iter().next()
                         && let Some(u) = sim.session.sim.world().unit(*id)
                     {
-                        let h = f(sim.session.sim.world().map().height_at(u.pos));
-                        let p = [f(u.pos.x), f(u.pos.y) - crate::view::SHEAR * h];
-                        input.mapper.glide_to(fx_pos(p));
+                        input.mapper.glide_to(u.pos);
                     }
                 }
                 _ => {}
             },
             Output::SelectAll { .. } => {}
+            Output::GameSpeed { faster } => {
+                sim.speed = if *faster {
+                    (sim.speed * 2.0).min(8.0)
+                } else {
+                    (sim.speed / 2.0).max(0.25)
+                };
+            }
+            Output::TogglePause => sim.paused = !sim.paused,
+            Output::ToggleDamageBars => feel.damage_bars = (feel.damage_bars + 1) % 3,
         }
     }
     let fb = input.mapper.take_feedback();
@@ -1495,6 +1530,10 @@ fn input_system(
     if let Some(z) = input.mapper.take_camera_zoom() {
         cam.geom.zoom = f(z);
     }
+    // Hand the moved camera back at once, so the cursor and reticle drawn
+    // this frame already ride with it.
+    cam.input_h = centre_height(&cam.geom, &ground.0);
+    input.mapper.set_camera(cam.input_camera());
     let dt = time.delta_secs();
     let speed = if overlay {
         0.0
@@ -1513,26 +1552,14 @@ fn input_system(
     if keys.pressed(KeyCode::ArrowDown) {
         cam.geom.target[1] += speed;
     }
-    // Game speed and pause (client only: changes ticks per wall second).
-    if keys.just_pressed(KeyCode::Pause)
-        || keys.just_pressed(KeyCode::KeyP) && keys.pressed(KeyCode::ControlLeft)
-    {
-        sim.paused = !sim.paused;
-    }
-    if keys.just_pressed(KeyCode::Equal) {
-        sim.speed = (sim.speed * 2.0).min(8.0);
-    }
-    if keys.just_pressed(KeyCode::Minus) {
-        sim.speed = (sim.speed / 2.0).max(0.25);
-    }
+    // Game speed and pause come from the profile (TA Pause, + / -) as
+    // mapper outputs above: client only, ticks per wall second.
 }
 
-/// A camera-target point as a `tak-input` ground position.
-fn fx_pos(p: [f32; 2]) -> tak_math::Vec2 {
-    tak_math::Vec2::new(
-        tak_math::Fx::from_raw((p[0] * 65536.0) as i32),
-        tak_math::Fx::from_raw((p[1] * 65536.0) as i32),
-    )
+/// Terrain height under the screen centre (0 off the map).
+fn centre_height(geom: &ViewGeom, ground: &TerrainData) -> f32 {
+    let (o, d) = geom.ray(geom.size[0] / 2.0, geom.size[1] / 2.0);
+    ground.raycast(o, d).map_or(0.0, |p| p[1])
 }
 
 /// Fixed 30 Hz stepping on an accumulator.
@@ -3558,11 +3585,10 @@ fn hud_widgets_system(
                     _ => false,
                 };
                 (
-                    format!(
-                        "{} [{}]",
-                        ORDER_BUTTONS[i].0,
-                        ORDER_BUTTONS[i].1.to_ascii_uppercase()
-                    ),
+                    match key_label(input.mapper.profile(), ORDER_BUTTONS[i].1) {
+                        Some(k) => format!("{} [{k}]", ORDER_BUTTONS[i].0),
+                        None => ORDER_BUTTONS[i].0.to_string(),
+                    },
                     own.is_some(),
                     active,
                 )
@@ -3571,7 +3597,12 @@ fn hud_widgets_system(
                 Some(sp) => {
                     usable = sp.ready;
                     (
-                        format!("{} {} ({})", kind.key_label(), sp.name, sp.cost),
+                        format!(
+                            "{} {} ({})",
+                            key_label(input.mapper.profile(), kind.action()).unwrap_or_default(),
+                            sp.name,
+                            sp.cost
+                        ),
                         true,
                         mode == Mode::CastSpell(sp.id),
                     )
@@ -3582,7 +3613,7 @@ fn hud_widgets_system(
                 Some(&o) => (
                     format!(
                         "{} {} ({})",
-                        kind.key_label(),
+                        key_label(input.mapper.profile(), kind.action()).unwrap_or_default(),
                         s.def(o).map_or("?", |d| d.display.as_str()),
                         w.defs().get(o).map_or(0, |d| d.build.buildcost)
                     ),

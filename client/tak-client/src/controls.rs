@@ -42,6 +42,9 @@ pub(super) struct Feel {
     last_own_health: Option<i64>,
     /// Screenshot mode has scripted pad events, so draw the stick cursor.
     pub shot_pad: bool,
+    /// Damage bars (TA ~): 0 all (selected, damaged, frames), 1 selected
+    /// only, 2 off.
+    pub damage_bars: u8,
 }
 
 impl Feel {
@@ -64,6 +67,7 @@ impl Feel {
             ghost_camera: args.ghost_camera,
             last_own_health: None,
             shot_pad: args.pad_events.is_some(),
+            damage_bars: 0,
         }
     }
 
@@ -252,7 +256,14 @@ fn adjust(feel: &mut Feel, input: &mut InputRes, row: usize, steps: i64) {
             .map_or(0, |i| {
                 (i as i64 + steps).rem_euclid(PRESETS.len() as i64) as usize
             });
-        let t = Tuning::preset(PRESETS[i]).unwrap_or_default();
+        // A preset sets the feel values; the cursor mode (reticle or free)
+        // and the right-stick role belong to the control scheme.
+        let cur = *input.mapper.tuning();
+        let t = Tuning {
+            reticle: cur.reticle,
+            right_stick_zoom: cur.right_stick_zoom,
+            ..Tuning::preset(PRESETS[i]).unwrap_or_default()
+        };
         input.mapper.set_tuning(t);
         feel.say(format!("preset {}", PRESETS[i]));
     } else if row <= n {
@@ -637,10 +648,7 @@ pub(super) fn cursor_system(
     mut q: Query<(&GameCursor, &mut Node, &mut ImageNode, &mut Visibility)>,
 ) {
     let Some(art) = art else { return };
-    let view = SimView {
-        world: sim.session.sim.world(),
-        local: sim.session.local,
-    };
+    let view = sim.session.view();
     let frame_tick = (time.elapsed_secs() * 30.0) as u32;
     for (gc, mut node, mut img, mut vis) in &mut q {
         let (pos, kind) = if gc.ghost {
@@ -1241,10 +1249,7 @@ pub(super) fn wheel_system(
     // Title above the top slot; the confirm / cancel buttons are in the
     // hint bar at the bottom.
     if let Ok((mut t, mut node, cn)) = centre.single_mut() {
-        let kind = match wh.kind {
-            WheelKind::Command => "Orders",
-            WheelKind::Build => "Build",
-        };
+        let kind = wh.kind.title();
         let title = if ghost.is_some() {
             format!("{kind} (ghost)")
         } else {
@@ -1290,6 +1295,7 @@ pub(super) fn rumble_system(
             Feedback::Snap => t.rumble_snap_pct,
             Feedback::Selection { .. } => t.rumble_select_pct,
             Feedback::Order => 0,
+            Feedback::Refused { .. } => t.rumble_snap_pct,
         });
     }
     if hurt {

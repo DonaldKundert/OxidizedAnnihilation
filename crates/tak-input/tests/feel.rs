@@ -43,7 +43,7 @@ fn world() -> TestWorld {
 }
 
 fn console() -> Profile {
-    Profile::default_controller()
+    Profile::wp_s_controller()
 }
 
 // ---- tuning and presets -----------------------------------------------------
@@ -104,6 +104,8 @@ fn default_profiles_round_trip() {
     for p in [
         Profile::default_controller(),
         Profile::default_combined(),
+        Profile::classic_tak(),
+        Profile::wp_s_combined(),
         Profile::wp_j_controller(),
     ] {
         p.validate().unwrap();
@@ -215,7 +217,7 @@ fn cursor_motion_is_frame_rate_independent() {
 #[test]
 fn acceleration_ramps_at_full_deflection() {
     let w = world();
-    let mut t = Tuning::console();
+    let mut t = console().tuning;
     t.cursor_accel_pct = 100;
     t.cursor_accel_ms = 200;
     t.friction_pct = 100;
@@ -454,7 +456,7 @@ fn every_spell_has_a_wheel_slot_and_key_and_mana_gates_cast_mode() {
     )
     .unwrap();
     let w = TestWorld::new(spec);
-    let mut m = Mapper::new(Profile::default_combined());
+    let mut m = Mapper::new(Profile::wp_s_combined());
     m.warp_cursor(pos(640, 480));
     run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
     assert_eq!(m.selection().len(), 1);
@@ -500,7 +502,7 @@ fn shift_f_keys_reach_build_options_past_f8() {
     )
     .unwrap();
     let w = TestWorld::new(spec);
-    let mut m = Mapper::new(Profile::default_combined());
+    let mut m = Mapper::new(Profile::wp_s_combined());
     m.warp_cursor(pos(640, 480));
     run(&mut m, &w, &[bdown(0, Button::A), bup(50, Button::A)]);
     run(&mut m, &w, &[key(500, "f8", true), key(510, "f8", false)]);
