@@ -1113,9 +1113,9 @@ pub(super) fn bottom_bar_system(
         msg.text = a.text;
         msg.until = now + hold + 1.0;
     }
+    let view = sim.view();
     let s = &sim.session;
     let w = s.sim.world();
-    let view = s.view();
     let m = &input.mapper;
     let cursor = m.cursor_world();
     let hovered = tak_input::pick_unit(&view, cursor);

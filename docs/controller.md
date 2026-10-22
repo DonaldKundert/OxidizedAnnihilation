@@ -299,6 +299,13 @@ on the frame rate.
   only own frames under construction; Attack mode any unit; Move and
   Patrol modes none.
 - Assist is off in precision / fast-pan mode and while brushing.
+- **Fog of war**: the input layer sees only what the local player sees.
+  The client's `WorldView` (`SimView` with the fog grid) leaves out enemy
+  units outside current sight, so they are never picked, snapped to,
+  brushed, counted by same-type select or attacked by a context order (an
+  order onto the ground where one stands is a move). Own and allied units
+  are always visible. With the fog off (F9, `--no-fog`) everything is
+  (`client/tak-client/tests/fog_view.rs`).
 
 ### Camera
 

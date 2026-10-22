@@ -223,7 +223,17 @@ impl Session {
             world: self.sim.world(),
             local: self.local,
             defs: Some(&self.defs),
+            fog: None,
         }
+    }
+
+    /// [`Session::view`] limited to what the local player can see through
+    /// `fog` (enemies outside current sight left out).
+    pub fn view_fogged<'a>(
+        &'a self,
+        fog: Option<&'a crate::fog::FogGrid>,
+    ) -> crate::view::SimView<'a> {
+        crate::view::SimView { fog, ..self.view() }
     }
 
     /// Load a real map with every player's build tree (the

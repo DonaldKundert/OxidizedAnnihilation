@@ -24,6 +24,25 @@ pub struct SimView<'a> {
     /// Client definition info by `UnitDefId` (content categories for the
     /// `Keys.TDF` select-category keys), when known.
     pub defs: Option<&'a [crate::game::DefInfo]>,
+    /// The local player's fog of war: enemy units outside current sight
+    /// are not part of the view at all, so picking, aim assist, the
+    /// reticle snap, brushes, same-type select and context orders never see
+    /// them (an order onto ground where a hidden enemy stands is a move).
+    /// `None`: everything is visible (no fog).
+    pub fog: Option<&'a crate::fog::FogGrid>,
+}
+
+impl SimView<'_> {
+    /// `true` if the local player can currently see a unit of `owner` at
+    /// `pos`: own and allied units always, enemies only inside current
+    /// sight.
+    pub fn sees(&self, owner: PlayerId, pos: tak_commands::WorldPos) -> bool {
+        if !self.is_enemy(owner) {
+            return true;
+        }
+        self.fog
+            .is_none_or(|g| g.at(f(pos.x), f(pos.y)) == crate::fog::FogCell::Seen)
+    }
 }
 
 /// Pick radius for a unit: half its footprint's larger side plus a margin.
@@ -40,6 +59,9 @@ impl WorldView for SimView<'_> {
         let defs = self.world.defs();
         for (id, u) in self.world.units() {
             let Some(d) = defs.get(u.def) else { continue };
+            if !self.sees(u.owner, u.pos) {
+                continue;
+            }
             let builder =
                 (d.build.builder && !d.build.canbuild.is_empty()).then_some(if d.build.mobile {
                     BuilderKind::Mobile

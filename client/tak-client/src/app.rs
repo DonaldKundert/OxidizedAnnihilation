@@ -76,6 +76,9 @@ pub struct SimRes {
     alerts: crate::alerts::AlertTracker,
     /// Alerts raised since the HUD last took them (bottom bar).
     new_alerts: Vec<crate::alerts::Alert>,
+    /// The fog of war is on (F9): the input view then hides enemies
+    /// outside current sight.
+    fog_on: bool,
 }
 
 impl SimRes {
@@ -96,6 +99,11 @@ impl SimRes {
         let input = alert_input(&self.session);
         let new = self.alerts.update(&input);
         self.new_alerts.extend(new);
+    }
+
+    /// The input layer's view: what the local player can see.
+    fn view(&self) -> crate::view::SimView<'_> {
+        self.session.view_fogged(self.fog_on.then_some(&self.fog))
     }
 
     fn alpha(&self) -> f32 {
@@ -394,6 +402,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             fog_changed: true,
             alerts: crate::alerts::AlertTracker::default(),
             new_alerts: Vec::new(),
+            fog_on: !args.no_fog,
         })
         .insert_resource(Ground(Arc::new(ground)))
         .insert_resource(CamState {
@@ -872,7 +881,7 @@ fn shot_driver(
     if plan.wait == 10 && !plan.pad_events.is_empty() {
         let simr: &mut SimRes = &mut sim;
         let tick = simr.session.tick();
-        let view = simr.session.view();
+        let view = simr.session.view_fogged(simr.fog_on.then_some(&simr.fog));
         let base = 3_000_000 + plan.next as u32 * 100_000;
         let mut last = base;
         let mut jump = false;
@@ -939,7 +948,7 @@ fn shot_driver(
             eprintln!("  click ({x}, {y}): {hit:?}");
             if let Some(Some(k)) = hit {
                 let tick = sim.session.tick();
-                let view = sim.session.view();
+                let view = sim.view();
                 let outs = input.mapper.perform(k.action(), &view, tick);
                 eprintln!("    -> {outs:?}");
             }
@@ -966,7 +975,7 @@ fn shot_driver(
 /// mapper's state exactly as in play.
 fn select_units(mapper: &mut Mapper, sim: &SimRes, slots: &[u32]) {
     let world = sim.session.sim.world();
-    let view = sim.session.view();
+    let view = sim.view();
     let tick = sim.session.tick();
     let units: Vec<_> = world
         .units()
@@ -1312,7 +1321,7 @@ fn input_system(
     let tick = sim.session.tick();
     let mut outs = Vec::new();
     {
-        let view = sim.session.view();
+        let view = sim.view();
         for kind in &events {
             outs.extend(
                 input
@@ -2839,6 +2848,7 @@ fn fog_system(
         fog.enabled = !fog.enabled;
     }
     let enabled = fog.enabled;
+    sim.fog_on = enabled;
     if fog.applied != Some(enabled) {
         fog.applied = Some(enabled);
         for mut v in &mut vis {

@@ -657,7 +657,7 @@ pub(super) fn cursor_system(
     mut q: Query<(&GameCursor, &mut Node, &mut ImageNode, &mut Visibility)>,
 ) {
     let Some(art) = art else { return };
-    let view = sim.session.view();
+    let view = sim.view();
     let frame_tick = (time.elapsed_secs() * 30.0) as u32;
     for (gc, mut node, mut img, mut vis) in &mut q {
         let (pos, kind) = if gc.ghost {
