@@ -45,6 +45,10 @@ pub(super) struct Feel {
     /// Damage bars (TA ~): 0 all (selected, damaged, frames), 1 selected
     /// only, 2 off.
     pub damage_bars: u8,
+    /// `--hud`: auto, console or classic.
+    pub hud_choice: String,
+    /// A one-off bottom-bar message (e.g. the damage-bar mode).
+    pub toast: Option<String>,
 }
 
 impl Feel {
@@ -68,6 +72,8 @@ impl Feel {
             last_own_health: None,
             shot_pad: args.pad_events.is_some(),
             damage_bars: 0,
+            hud_choice: args.hud.to_ascii_lowercase(),
+            toast: None,
         }
     }
 
@@ -837,15 +843,28 @@ pub(super) struct HintText(usize);
 
 pub(super) fn setup_hints(mut commands: Commands) {
     commands.init_resource::<GlyphArt>();
-    let bar = commands
+    // The bottom bar: a column (bottom up) of the button prompts, then the
+    // verb line and the message line `hud_view` adds.
+    let column = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(HUD_PANEL_W + 20.0),
-                bottom: Val::Px(8.0),
+                left: Val::Px(hud_view::BOTTOM_BAR_X),
+                bottom: Val::Px(4.0),
+                flex_direction: FlexDirection::ColumnReverse,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(3.0),
+                max_width: Val::Px(470.0),
+                ..default()
+            },
+            hud_view::BottomBar,
+        ))
+        .id();
+    let bar = commands
+        .spawn((
+            Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
-                max_width: Val::Px(600.0),
                 column_gap: Val::Px(10.0),
                 row_gap: Val::Px(4.0),
                 padding: UiRect::all(Val::Px(4.0)),
@@ -853,6 +872,7 @@ pub(super) fn setup_hints(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
             HintBar,
+            ChildOf(column),
         ))
         .id();
     for i in 0..HINTS {
@@ -901,6 +921,7 @@ pub(super) fn setup_hints(mut commands: Commands) {
 pub(super) fn hints_system(
     sim: NonSend<SimRes>,
     input: Res<InputRes>,
+    mode: Res<hud_view::HudMode>,
     mut feel: ResMut<Feel>,
     pads: Query<(&Gamepad, Option<&Name>)>,
     mut art: ResMut<GlyphArt>,
@@ -933,15 +954,29 @@ pub(super) fn hints_system(
         .iter()
         .filter_map(|id| w.unit(*id).filter(|u| u.owner == me))
         .collect();
-    let has_builder = sel.iter().any(|u| {
-        w.defs()
-            .get(u.def)
-            .is_some_and(|d| d.build.builder && !d.build.canbuild.is_empty())
-    });
+    let cx = feel::HintCx {
+        has_units: !sel.is_empty(),
+        has_builder: sel.iter().any(|u| {
+            w.defs()
+                .get(u.def)
+                .is_some_and(|d| d.build.builder && !d.build.canbuild.is_empty())
+        }),
+        has_caster: sel.iter().any(|u| {
+            w.defs()
+                .get(u.def)
+                .is_some_and(|d| d.combat.weapons.iter().any(|x| x.is_spell()))
+        }),
+        mixed: input.mapper.sub_select().is_some()
+            || sel
+                .iter()
+                .any(|u| sel.first().is_some_and(|f| f.def != u.def)),
+    };
     let hints = if feel.ghost.is_some() || feel.overlay_open {
         Vec::new()
+    } else if mode.console {
+        feel::hints(&input.mapper, cx)
     } else {
-        feel::hints(&input.mapper, !sel.is_empty(), has_builder)
+        feel::hints_classic(&input.mapper, cx)
     };
     for mut v in &mut bar {
         *v = if hints.is_empty() {
@@ -956,6 +991,7 @@ pub(super) fn hints_system(
         .map(|h| match &h.key {
             HintKey::Buttons(bs) => bs.iter().filter_map(|b| feel::glyph(layout, *b)).collect(),
             HintKey::Stick(left) => vec![feel::stick_glyph(*left)],
+            HintKey::Text(_) => Vec::new(),
         })
         .collect();
     for (it, mut v) in &mut items {
@@ -986,10 +1022,14 @@ pub(super) fn hints_system(
     }
     for (h, mut t) in &mut texts {
         t.0 = hints.get(h.0).map_or(String::new(), |h| {
+            let key = match &h.key {
+                HintKey::Text(k) => format!("[{k}] "),
+                _ => String::new(),
+            };
             if h.prefix.is_empty() {
-                h.text.clone()
+                format!("{key}{}", h.text)
             } else {
-                format!("{} {}", h.prefix, h.text)
+                format!("{key}{} {}", h.prefix, h.text)
             }
         });
     }

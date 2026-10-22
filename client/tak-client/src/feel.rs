@@ -255,6 +255,8 @@ pub enum HintKey {
     Buttons(Vec<Button>),
     /// The left (true) or right stick.
     Stick(bool),
+    /// A keyboard key or mouse button, by name (Classic TA:K prompts).
+    Text(String),
 }
 
 /// One button hint: `[glyph] prefix text`.
@@ -311,9 +313,22 @@ fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<H
     })
 }
 
-/// Context button hints for the HUD, read from the profile's bindings (so
-/// rebinding updates them).
-pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
+/// What the HUD knows about the selection, for the prompts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HintCx {
+    /// Own units selected.
+    pub has_units: bool,
+    /// A builder among them.
+    pub has_builder: bool,
+    /// A spellcaster among them.
+    pub has_caster: bool,
+    /// More than one unit type among them (the sub-select cycle applies).
+    pub mixed: bool,
+}
+
+/// Context button prompts for the bottom bar, read from the profile's
+/// bindings (so rebinding updates them): the controller's buttons.
+pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     let p = m.profile();
     let mut v: Vec<Option<Hint>> = Vec::new();
     if let Some(w) = m.wheel() {
@@ -337,7 +352,17 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             }
             v.push(h);
         }
-        v.push(hint_for(p, "cancel", |a| matches!(a, Action::Cancel)));
+        if w.pages > 1 {
+            v.push(hint_for(p, "next page", |a| {
+                matches!(a, Action::QueueModifier)
+            }));
+        }
+        let back = if m.wheel_depth() > 0 {
+            "back"
+        } else {
+            "cancel"
+        };
+        v.push(hint_for(p, back, |a| matches!(a, Action::Cancel)));
     } else if m.brush().is_some() {
         v.push(Some(Hint {
             key: HintKey::Stick(true),
@@ -363,17 +388,25 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
         v.push(hint_for(p, what, |a| {
             matches!(a, Action::Context { append: false })
         }));
-        v.push(hint_for(p, "queue", |a| {
-            matches!(a, Action::Context { append: true })
+        v.push(hint_for(p, "+ queue", |a| {
+            matches!(a, Action::QueueModifier)
         }));
         v.push(hint_for(p, "cancel", |a| matches!(a, Action::Cancel)));
-    } else if has_units {
+    } else if cx.has_units {
         v.push(hint_for(p, "move / attack", |a| {
             matches!(a, Action::Context { append: false })
         }));
         v.push(hint_for(p, "orders", |a| matches!(a, Action::CommandWheel)));
-        if has_builder {
+        if cx.has_builder {
             v.push(hint_for(p, "build", |a| matches!(a, Action::BuildWheel)));
+        }
+        if cx.has_caster {
+            v.push(hint_for(p, "spell", |a| matches!(a, Action::CastSpellMode)));
+        }
+        if cx.mixed {
+            v.push(hint_for(p, "cycle type", |a| {
+                matches!(a, Action::SubSelectCycle)
+            }));
         }
         v.push(hint_for(p, "same type", |a| {
             matches!(
@@ -384,7 +417,6 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
             )
         }));
         v.push(hint_for(p, "deselect", |a| matches!(a, Action::Cancel)));
-        v.push(hint_for(p, "precise", |a| matches!(a, Action::Precision)));
     } else {
         v.push(hint_for(p, "select", |a| matches!(a, Action::Select)));
         v.push(hint_for(p, "brush", |a| matches!(a, Action::Brush)));
@@ -396,12 +428,106 @@ pub fn hints(m: &Mapper, has_units: bool, has_builder: bool) -> Vec<Hint> {
                 }
             )
         }));
-        v.push(hint_for(p, "menu", |a| matches!(a, Action::CommandWheel)));
-        v.push(hint_for(p, "tuning", |a| {
-            matches!(a, Action::ToggleOverlay)
+        v.push(hint_for(p, "idle builder", |a| {
+            matches!(a, Action::CycleIdleBuilder)
         }));
+        v.push(hint_for(p, "squads 5-9", |a| {
+            matches!(a, Action::CommandWheel)
+        }));
+        v.push(hint_for(p, "alert", |a| matches!(a, Action::JumpToAlert)));
+        v.push(hint_for(p, "menu", |a| matches!(a, Action::ToggleOverlay)));
     }
     v.into_iter().flatten().collect()
+}
+
+/// The keyboard key (with modifier) a profile binds to an action, e.g. `S`
+/// or `Ctrl+F1`.
+pub fn key_name_for(p: &Profile, want: impl Fn(&Action) -> bool) -> Option<String> {
+    p.bindings.iter().find_map(|b| {
+        if !want(&b.action) {
+            return None;
+        }
+        let name = |i: &Input| match i {
+            Input::Key(k) => {
+                let mut s = k.0.clone();
+                if let Some(c) = s.get_mut(..1) {
+                    c.make_ascii_uppercase();
+                }
+                Some(s)
+            }
+            Input::Button(Button::MouseLeft) => Some("LMB".into()),
+            Input::Button(Button::MouseRight) => Some("RMB".into()),
+            Input::Button(_) => None,
+        };
+        let k = name(&b.input)?;
+        Some(match b.with.as_ref().and_then(name) {
+            Some(m) => format!("{m}+{k}"),
+            None => k,
+        })
+    })
+}
+
+/// Classic TA:K prompts (keys and mouse) for the bottom bar.
+pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
+    let p = m.profile();
+    let mut v: Vec<(Option<String>, &str)> = Vec::new();
+    if m.mode() != Mode::None {
+        v.push((Some("LMB".into()), "confirm"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::QueueModifier)),
+            "+ click: queue",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::Cancel)), "cancel"));
+    } else if cx.has_units {
+        v.push((Some("RMB".into()), "order"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::AttackMode)),
+            "attack",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
+        v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::PatrolMode)),
+            "patrol",
+        ));
+        v.push((key_name_for(p, |a| matches!(a, Action::Stop)), "stop"));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::AssignGroup { .. }))
+                .map(|k| k.trim_end_matches(|c: char| c.is_ascii_digit()).to_string() + "1-9"),
+            "squad",
+        ));
+    } else {
+        v.push((Some("LMB".into()), "select / drag"));
+        v.push((Some("2x LMB".into()), "same type"));
+        v.push((
+            key_name_for(p, |a| {
+                matches!(
+                    a,
+                    Action::SelectAll {
+                        scope: Scope::OnScreen
+                    }
+                )
+            }),
+            "all on screen",
+        ));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::SelectMonarch { track: true })),
+            "monarch",
+        ));
+        v.push((
+            key_name_for(p, |a| matches!(a, Action::ToggleCrystalBall)),
+            "Crystal Ball",
+        ));
+    }
+    v.into_iter()
+        .filter_map(|(k, t)| {
+            Some(Hint {
+                key: HintKey::Text(k?),
+                prefix: "",
+                text: t.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// A short label for a wheel slot (build options are named by the caller).
@@ -679,14 +805,38 @@ mod tests {
     #[test]
     fn hints_come_from_bindings() {
         let m = Mapper::new(preset_profile("console").unwrap());
-        let h = hints(&m, false, false);
+        let h = hints(&m, HintCx::default());
         assert_eq!(h[0].key, HintKey::Buttons(vec![Button::A]));
         assert_eq!(h[0].text, "select");
         assert!(h.iter().any(|h| h.prefix == "hold" && h.text == "brush"));
-        let h = hints(&m, true, true);
+        let h = hints(
+            &m,
+            HintCx {
+                has_units: true,
+                has_builder: true,
+                ..HintCx::default()
+            },
+        );
         assert!(
             h.iter()
                 .any(|h| h.key == HintKey::Buttons(vec![Button::Lb]) && h.text == "build")
+        );
+        let h = hints_classic(
+            &m,
+            HintCx {
+                has_units: true,
+                ..HintCx::default()
+            },
+        );
+        assert!(
+            h.iter()
+                .any(|h| h.key == HintKey::Text("S".into()) && h.text == "stop"),
+            "{h:?}"
+        );
+        assert!(
+            h.iter()
+                .any(|h| h.key == HintKey::Text("Ctrl+1-9".into()) && h.text == "squad"),
+            "{h:?}"
         );
     }
 
