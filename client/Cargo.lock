@@ -5194,6 +5194,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tak-commands",
+ "tak-formats",
  "tak-math",
  "thiserror 2.0.21",
 ]

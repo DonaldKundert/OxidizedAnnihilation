@@ -161,3 +161,37 @@ pub fn wp_j_mk() -> tak_input::Profile {
     p.tuning = tak_input::Tuning::wp_j();
     p
 }
+
+/// A mapper plus the camera a client keeps: after every event the
+/// requested pan and zoom (about the screen centre) are applied and handed
+/// back, so glides and the reticle move over the world.
+pub struct CamRig {
+    pub m: Mapper,
+    pub cam: tak_input::Camera,
+}
+
+impl CamRig {
+    pub fn new(p: tak_input::Profile) -> CamRig {
+        let cam = tak_input::Camera::default();
+        let mut m = Mapper::new(p);
+        m.set_camera(cam);
+        CamRig { m, cam }
+    }
+
+    pub fn run(&mut self, world: &TestWorld, events: &[InputEvent]) -> Vec<Output> {
+        let mut out = Vec::new();
+        for e in events {
+            out.extend(self.m.handle(e, world, tick_at(e.t)));
+            let pan = self.m.take_camera_pan();
+            self.cam.origin += pan;
+            if let Some(z) = self.m.take_camera_zoom() {
+                let c = self.cam.screen_to_world(self.cam.center_screen());
+                self.cam.world_per_px = z;
+                let half = self.cam.center_screen().scale(z);
+                self.cam.origin = c - half;
+            }
+            self.m.set_camera(self.cam);
+        }
+        out
+    }
+}

@@ -1695,7 +1695,10 @@ impl Mapper {
             Action::JumpToGroup { group } => {
                 let units = own_units(cx.world, &self.groups[usize::from(group.get())]);
                 match centre_of(cx.world, &units) {
-                    Some(c) => self.glide_to(c),
+                    Some(c) => {
+                        self.follow = false;
+                        self.glide_to(c);
+                    }
                     None => self.refuse(Refusal::NothingThere),
                 }
             }
@@ -1712,7 +1715,10 @@ impl Mapper {
                 }
             }
             Action::GoToBookmark { slot } => match self.bookmark(slot) {
-                Some(p) => self.glide_to(p),
+                Some(p) => {
+                    self.follow = false;
+                    self.glide_to(p);
+                }
                 None => self.refuse(Refusal::NothingThere),
             },
             Action::NextUnit => self.next_unit(cx),
@@ -1821,6 +1827,7 @@ impl Mapper {
         match next {
             Some(u) => {
                 self.last_next_unit = Some(u.id);
+                self.follow = false;
                 self.glide_to(u.pos);
             }
             None => self.refuse(Refusal::NothingThere),

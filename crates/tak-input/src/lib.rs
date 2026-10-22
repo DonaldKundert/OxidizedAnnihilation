@@ -30,6 +30,7 @@ mod brush;
 mod context;
 mod cursor;
 mod event;
+mod keys_tdf;
 pub mod lab;
 mod mapper;
 mod record;
@@ -48,6 +49,7 @@ pub use cursor::{
     per_second, soft_snap, stick_vector, stick_vector_zones, zoom_factor,
 };
 pub use event::{Axis, Button, EventKind, Input, InputEvent, Key};
+pub use keys_tdf::{KeyLine, KeysError, KeysImport, LineStatus, parse_keys_tdf};
 pub use mapper::{BOOKMARKS, CursorKind, Feedback, Mapper, Output, Refusal, SubSelect};
 pub use record::{
     FrameIo, Ghost, RECORDING_VERSION, RecFrame, Recorder, Recording, RecordingError, Summary,

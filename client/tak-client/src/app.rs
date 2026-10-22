@@ -337,11 +337,32 @@ fn spawn_button(commands: &mut Commands, parent: Entity, kind: ButtonKind, width
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = crate::game::open_vfs(&args.data)?;
-    let (profile, profile_mtime) = crate::feel::initial_profile(
+    let from_file = args.input_profile.as_ref().is_some_and(|p| p.exists());
+    let (mut profile, profile_mtime) = crate::feel::initial_profile(
         &args.controls,
         &args.input_preset,
         args.input_profile.as_deref(),
     )?;
+    // The player's own Keys.TDF (TA:K's key file) carries over onto the
+    // Classic TA:K keys, unless a saved profile already says otherwise.
+    if !from_file && !args.no_keys_tdf && args.controls.eq_ignore_ascii_case("kingdoms") {
+        let path = args
+            .keys_tdf
+            .clone()
+            .unwrap_or_else(|| args.data.join("Keys.TDF"));
+        if let Ok(data) = std::fs::read(&path) {
+            match tak_input::parse_keys_tdf(&data) {
+                Ok(imp) => {
+                    profile = profile.with_keys_tdf(&imp);
+                    eprintln!("{}: {}", path.display(), imp.summary());
+                }
+                Err(e) => eprintln!("{}: not imported: {e}", path.display()),
+            }
+        }
+    }
+    if args.grid_keys {
+        profile.grid_build_keys = true;
+    }
     if let Some(ev_path) = &args.synth_events {
         return synth(&args, &vfs, profile, ev_path);
     }
