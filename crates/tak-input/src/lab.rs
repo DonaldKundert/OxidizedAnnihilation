@@ -137,6 +137,11 @@ pub struct LabRow {
     pub brush_f1_permille: u32,
     /// Mean brush time (start to release), ms.
     pub brush_ms: u32,
+    /// Far task: mean time to attack an enemy that starts off screen
+    /// (700..1400 px away), correct trials, ms.
+    pub far_ms: u32,
+    /// Far task: wrong-target, missed or timed-out trials, per mille.
+    pub far_errors_permille: u32,
 }
 
 /// Run every `(name, profile)` through the same trials.
@@ -156,6 +161,10 @@ pub fn default_presets() -> Vec<(String, Profile)> {
         p.tuning = Tuning::preset(name).unwrap_or_default();
         p.tuning.reticle = false;
         v.push((name.to_owned(), p));
+        let mut r = Profile::kingdoms_console();
+        r.tuning = Tuning::preset(name).unwrap_or_default();
+        r.tuning.reticle = true;
+        v.push((format!("{name} reticle"), r));
     }
     v
 }
@@ -163,11 +172,11 @@ pub fn default_presets() -> Vec<(String, Profile)> {
 /// The results as a Markdown table.
 pub fn table_markdown(rows: &[LabRow]) -> String {
     let mut s = String::from(
-        "| Preset | Acquire ms | Acquire ms (dense) | Overshoot px | Wrong target | Miss | Errors | Brush F1 | Brush ms |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n",
+        "| Preset | Acquire ms | Acquire ms (dense) | Overshoot px | Wrong target | Miss | Errors | Brush F1 | Brush ms | Far ms | Far errors |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
     );
     for r in rows {
         s.push_str(&format!(
-            "| {} | {} | {} | {}.{} | {}.{}% | {}.{}% | {}.{}% | {}.{}% | {} |\n",
+            "| {} | {} | {} | {}.{} | {}.{}% | {}.{}% | {}.{}% | {}.{}% | {} | {} | {}.{}% |\n",
             r.name,
             r.acquire_ms,
             r.acquire_dense_ms,
@@ -182,6 +191,9 @@ pub fn table_markdown(rows: &[LabRow]) -> String {
             r.brush_f1_permille / 10,
             r.brush_f1_permille % 10,
             r.brush_ms,
+            r.far_ms,
+            r.far_errors_permille / 10,
+            r.far_errors_permille % 10,
         ));
     }
     s
@@ -273,6 +285,10 @@ fn aim_world(rng: &mut Rng, d: Density) -> LabWorld {
 
 struct Rig {
     m: Mapper,
+    /// The mapper's camera (moves in reticle mode).
+    cam: Camera,
+    /// Apply camera pans in free mode too (edge pan; the far task).
+    pan_free: bool,
     w: LabWorld,
     t: u32,
     frame_no: u32,
@@ -287,6 +303,8 @@ impl Rig {
         m.set_camera(lab_camera());
         Rig {
             m,
+            cam: lab_camera(),
+            pan_free: false,
             w,
             t: 1000,
             frame_no: 0,
@@ -300,6 +318,21 @@ impl Rig {
         let tick = Tick(self.t * 30 / 1000);
         let o = self.m.handle(&InputEvent::new(self.t, kind), &self.w, tick);
         self.outs.extend(o);
+        // Reticle mode: the camera follows the mapper's pan like the
+        // client's does (free mode keeps the fixed lab view).
+        if self.m.tuning().reticle || self.pan_free {
+            let pan = self.m.take_camera_pan();
+            if pan != Vec2::ZERO {
+                self.cam.origin += pan;
+                self.m.set_camera(self.cam);
+            }
+        }
+    }
+
+    /// The cursor (free mode) or the ground under the reticle, in pixels of
+    /// the fixed lab view: what the player aims with in either mode.
+    fn pos(&self) -> Vec2 {
+        lab_camera().world_to_screen(self.m.cursor_world())
     }
 
     fn set_stick(&mut self, x: i16, y: i16) {
@@ -323,7 +356,7 @@ impl Rig {
         self.frame_no += 1;
         self.t += if self.frame_no % 3 == 0 { 16 } else { 17 };
         self.ev(EventKind::Frame);
-        let c = self.m.cursor_screen();
+        let c = self.pos();
         self.hist.push_back((self.t, c));
         while self.hist.len() > 64 {
             self.hist.pop_front();
@@ -344,7 +377,7 @@ impl Rig {
             .rev()
             .find(|(t, _)| *t <= at)
             .or(self.hist.front())
-            .map_or(self.m.cursor_screen(), |&(_, c)| c)
+            .map_or(self.pos(), |&(_, c)| c)
     }
 
     fn button(&mut self, b: Button, down: bool) {
@@ -365,6 +398,14 @@ impl Rig {
     /// Warp the virtual cursor (stick source) to a screen point.
     fn warp(&mut self, s: Vec2) {
         self.m.warp_cursor(s);
+        if self.m.tuning().reticle {
+            // Put the lab-view point `s` under the reticle.
+            let lab = lab_camera();
+            let w = lab.screen_to_world(s);
+            self.cam.origin = w - lab.center_screen().scale(lab.world_per_px);
+            self.m.set_camera(self.cam);
+            let _ = self.m.take_camera_pan();
+        }
         self.hist.clear();
         self.hist.push_back((self.t, s));
     }
@@ -438,13 +479,13 @@ fn aim(
     goal: Goal,
 ) -> (bool, Fx) {
     let t = *rig.m.tuning();
-    let start = rig.m.cursor_screen();
+    let start = rig.pos();
     let d0 = target - start;
     let dist0 = d0.length();
     let dir0 = d0.normalize().unwrap_or(Vec2::new(Fx::ONE, Fx::ZERO));
     let mut max_proj = Fx::ZERO;
     let mut track = |rig: &Rig| {
-        let p = (rig.m.cursor_screen() - start).dot(dir0);
+        let p = (rig.pos() - start).dot(dir0);
         if p > max_proj {
             max_proj = p;
         }
@@ -545,6 +586,10 @@ struct Acc {
     brush_n: u32,
     brush_f1: u64,
     brush_ms: u64,
+    far_n: u32,
+    far_hits: u32,
+    far_ms: u64,
+    far_err: u32,
 }
 
 fn trial_rng(seed: u64, kind: u64, density: Density, i: u32) -> (Rng, Rng) {
@@ -641,6 +686,18 @@ fn run_preset(name: &str, profile: &Profile, cfg: &LabConfig) -> LabRow {
                     Verdict::Miss => acc.miss += 1,
                 }
             }
+            // Far: attack an enemy that starts off screen.
+            if density == Density::Sparse {
+                let (mut wr, mut hr) = trial_rng(cfg.seed, 9, density, i);
+                match far_trial(profile, &h, &mut wr, &mut hr) {
+                    Some(ms) => {
+                        acc.far_hits += 1;
+                        acc.far_ms += u64::from(ms);
+                    }
+                    None => acc.far_err += 1,
+                }
+                acc.far_n += 1;
+            }
             // Brush.
             let (mut wr, mut hr) = trial_rng(cfg.seed, 7, density, i);
             if let Some((f1, ms)) = brush_trial(profile, density, &h, &mut wr, &mut hr) {
@@ -661,6 +718,69 @@ fn run_preset(name: &str, profile: &Profile, cfg: &LabConfig) -> LabRow {
         miss_permille: div(u64::from(acc.miss) * 1000, acc.trials),
         brush_f1_permille: div(acc.brush_f1, acc.brush_n),
         brush_ms: div(acc.brush_ms, acc.brush_n),
+        far_ms: div(acc.far_ms, acc.far_hits),
+        far_errors_permille: div(u64::from(acc.far_err) * 1000, acc.far_n),
+    }
+}
+
+/// One far trial: an own unit selected at the view centre, an enemy
+/// 350..700 world units (700..1400 px) away, off screen, among other units
+/// spread over a large map. The player pushes toward it (the reticle pans
+/// the camera; the free cursor reaches the screen edge and edge-pans) and
+/// presses X. `Some(time)` when the attack hits the right enemy.
+fn far_trial(profile: &Profile, h: &Human, wr: &mut Rng, hr: &mut Rng) -> Option<u32> {
+    // View centre is world (320, 240) in the lab camera.
+    let centre = Vec2::from_ints(320, 240);
+    let a = Angle::from_raw(wr.next_u32() as u16);
+    let d = wr.range_i32(350, 701);
+    let tp = centre + Vec2::from_angle(a).scale(Fx::from_int(d));
+    let mut units = vec![unit(1, 0, 320, 240), {
+        let mut u = unit(2, 1, tp.x.to_int_round(), tp.y.to_int_round());
+        u.def = UnitDefId(11);
+        u
+    }];
+    // Scenery: other units over the area, away from the target.
+    let mut id = 3;
+    let mut tries = 0;
+    while units.len() < 60 && tries < 4000 {
+        tries += 1;
+        let x = wr.range_i32(-500, 1140);
+        let y = wr.range_i32(-500, 980);
+        let p = Vec2::from_ints(x, y);
+        if units.iter().any(|u| u.pos.distance(p) < Fx::from_int(30)) {
+            continue;
+        }
+        units.push(unit(id, u8::from(wr.below(2) == 0), x, y));
+        id += 1;
+    }
+    let target = units[1];
+    let mut rig = Rig::new(profile, LabWorld { units });
+    rig.pan_free = true;
+    let cam = lab_camera();
+    rig.warp(cam.world_to_screen(centre));
+    rig.tap(Button::A, h.press_ms);
+    rig.frames_for(600);
+    if !rig.m.selection().contains(UnitId::new(1, 0)) {
+        return None;
+    }
+    rig.outs.clear();
+    let t0 = rig.t;
+    rig.frames_for(hr.range(h.react_ms.0, h.react_ms.1 + 1));
+    let goal = Goal {
+        stop_px: h.stop_px,
+        accept_px: h.accept_px,
+        fly: hr.below(1000) < h.fly_permille,
+    };
+    let tscreen = cam.world_to_screen(target.pos);
+    let (ok, _) = aim(&mut rig, tscreen, h, hr, t0 + h.timeout_ms * 2, goal);
+    if !ok {
+        return None;
+    }
+    rig.outs.clear();
+    rig.tap(Button::X, h.press_ms);
+    match attack_verdict(&rig.outs, target.id) {
+        Verdict::Hit => Some(rig.t - t0),
+        _ => None,
     }
 }
 

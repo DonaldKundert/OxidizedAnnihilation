@@ -849,3 +849,29 @@ fn feel_lab_console_beats_wp_j() {
         "{rows:?}"
     );
 }
+
+#[test]
+fn feel_lab_reticle_matches_near_aim_and_wins_far() {
+    let cfg = LabConfig {
+        trials: 24,
+        ..LabConfig::default()
+    };
+    let presets: Vec<_> = default_presets()
+        .into_iter()
+        .filter(|(n, _)| n == "console" || n == "console reticle")
+        .collect();
+    let rows = run_lab(&presets, &cfg);
+    let (free, ret) = (&rows[0], &rows[1]);
+    // Same speed law and assist: on-screen aiming is a wash.
+    assert!(ret.acquire_ms <= free.acquire_ms + 10, "{rows:?}");
+    assert!(
+        ret.wrong_permille + ret.miss_permille <= free.wrong_permille + free.miss_permille + 10,
+        "{rows:?}"
+    );
+    // Off-screen targets: no edge-pan ramp, no cursor stuck at the edge.
+    assert!(ret.far_ms < free.far_ms, "{rows:?}");
+    assert!(
+        ret.far_errors_permille <= free.far_errors_permille,
+        "{rows:?}"
+    );
+}
