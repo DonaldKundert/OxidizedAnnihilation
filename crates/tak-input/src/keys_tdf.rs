@@ -191,6 +191,7 @@ fn command(value: &str) -> Cmd {
     match verb {
         "unitcommand" => match arg {
             "attack" => Cmd::Do(Action::AttackMode),
+            "attackmove" => Cmd::Do(Action::AttackMoveMode),
             "move" => Cmd::Do(Action::MoveMode),
             "guard" => Cmd::Do(Action::GuardMode),
             "patrol" => Cmd::Do(Action::PatrolMode),

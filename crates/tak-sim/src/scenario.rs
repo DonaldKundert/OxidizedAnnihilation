@@ -72,6 +72,10 @@ pub struct Scenario {
     pub unit_defs: Vec<UnitDef>,
     /// Player slots; entry `i` is `PlayerId(i)`.
     pub players: Vec<PlayerSpec>,
+    /// Explicit tick-zero units. None retains automatic skirmish monarchs;
+    /// Some(empty) deliberately starts with no units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_units: Option<Vec<crate::campaign::InitialUnit>>,
     /// Economy rules and sacred sites (WP-N). Optional in JSON.
     #[serde(default)]
     pub economy: Box<crate::economy::EconomySetup>,
@@ -138,6 +142,14 @@ impl Scenario {
                     "player {i}: monarch def {} does not exist",
                     p.monarch.0
                 )));
+            }
+        }
+        if let Some(units) = &self.initial_units {
+            if units.len() > crate::world::MAX_UNITS {
+                return Err(ScenarioError::Invalid("too many initial units".into()));
+            }
+            for unit in units {
+                unit.validate(self)?;
             }
         }
         Ok(())

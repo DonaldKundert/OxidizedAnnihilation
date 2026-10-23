@@ -11,8 +11,9 @@ use tak_input::{CursorKind, Feedback, Refusal};
 
 use super::*;
 use crate::hud::{
-    ARAMON_SLOTS, DamageBars, PANEL_BUTTONS, SKIN_BUTTON_PANEL, SKIN_END_CAP, SKIN_INFO_PANEL,
-    button_slots, group_by_type, health_rgb, race_skin, verb_line,
+    ARAMON_SLOTS, BUTTON_STATES, DamageBars, PANEL_BUTTONS, SKIN_BUTTON_PANEL, SKIN_END_CAP,
+    SKIN_INFO_PANEL, button_image, button_slots, button_state, group_by_type, health_rgb,
+    race_skin, verb_line,
 };
 
 /// What each panel button does, in [`PANEL_BUTTONS`] order. Reserved ones
@@ -29,6 +30,9 @@ pub(super) const PANEL_ACTIONS: [Action; 13] = [
     Action::Reserved {
         order: tak_input::ReservedOrder::Heal,
     },
+    Action::CastSpell { index: 0 },
+    Action::CastSpell { index: 1 },
+    Action::CastSpell { index: 2 },
     Action::SetFireState {
         state: tak_commands::FireState::FireAtWill,
     },
@@ -38,9 +42,6 @@ pub(super) const PANEL_ACTIONS: [Action; 13] = [
     Action::SetFireState {
         state: tak_commands::FireState::HoldFire,
     },
-    Action::CastSpell { index: 0 },
-    Action::CastSpell { index: 1 },
-    Action::CastSpell { index: 2 },
 ];
 
 /// TA:K names for the panel buttons (help line).
@@ -52,12 +53,12 @@ const PANEL_NAMES: [&str; 13] = [
     "Stop",
     "Clear",
     "Heal",
-    "Offensive",
-    "Defensive",
-    "Passive",
     "Primary",
     "Secondary",
     "Special",
+    "Offensive",
+    "Defensive",
+    "Passive",
 ];
 
 /// Build menu cells (retail menus have at most 9 entries).
@@ -83,8 +84,24 @@ pub(super) struct HudArt {
     cap: Option<(Handle<Image>, [f32; 2])>,
     /// Frames of each `PANEL_BUTTONS` entry (0 dark, 1 up, 2 lit, 3 down).
     buttons: Vec<Vec<Handle<Image>>>,
+    /// Weapon-slot pictures keyed exactly as `Session::weapon_art`, not
+    /// by the index in the filtered spell menu.
+    weapon_buttons: BTreeMap<(u32, u8), [Option<Handle<Image>>; BUTTON_STATES]>,
     /// Button wells on the panel, `[x, y, w, h]`.
     slots: Vec<[u32; 4]>,
+}
+
+impl HudArt {
+    /// The same picture for the classic panel and controller spell wheel.
+    pub(super) fn weapon_button(
+        &self,
+        def: tak_commands::UnitDefId,
+        spell: tak_commands::SpellId,
+        state: usize,
+    ) -> Option<&Handle<Image>> {
+        let slot = u8::try_from(spell.0).ok()?;
+        button_image(self.weapon_buttons.get(&(def.0, slot))?, state)
+    }
 }
 
 /// Which HUD layout is showing.
@@ -269,6 +286,31 @@ pub(super) fn setup_hud_art(
     report.push(format!(
         "igcommonbuttons {got}/{} buttons",
         PANEL_BUTTONS.len()
+    ));
+    // These are ordinary JPEGs, not GAF entry names. Cache by path so
+    // shared spell art and repeated disabled/down pictures decode once.
+    let mut pictures: BTreeMap<String, Option<Handle<Image>>> = BTreeMap::new();
+    for (&key, weapon) in &s.weapon_art {
+        let frames: [Option<Handle<Image>>; BUTTON_STATES] = std::array::from_fn(|state| {
+            let path = weapon.button_images[state].as_ref()?;
+            pictures
+                .entry(path.clone())
+                .or_insert_with(|| {
+                    let bytes = content.vfs.read(path).ok()?;
+                    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+                    let (w, h) = img.dimensions();
+                    Some(images.add(rgba_image(w, h, img.into_raw())))
+                })
+                .clone()
+        });
+        if frames.iter().any(Option::is_some) {
+            art.weapon_buttons.insert(key, frames);
+        }
+    }
+    report.push(format!(
+        "weapon pictures {}/{}",
+        pictures.values().filter(|h| h.is_some()).count(),
+        pictures.len()
     ));
     eprintln!("hud art: {skin}: {}", report.join(", "));
     commands.insert_resource(art);
@@ -661,9 +703,12 @@ pub(super) fn panel_system(
     let w = s.sim.world();
     let sel = own_selection(w, s.local, input.mapper.selection());
     let first = sel.first().map(|(_, u)| *u);
-    let spells = crate::view::caster_spells(w, s.local, input.mapper.selection())
-        .map(|(_, sp)| sp)
-        .unwrap_or_default();
+    let caster = crate::view::caster_spells(w, s.local, input.mapper.selection());
+    let caster_def = caster
+        .as_ref()
+        .and_then(|(id, _)| w.unit(*id))
+        .map(|u| u.def);
+    let spells = caster.as_ref().map_or(&[][..], |(_, sp)| sp.as_slice());
     let mouse = windows.single().ok().and_then(|w| w.cursor_position());
     let m = input.mapper.mode();
     for (kind, mut img, mut vis, cn, tr) in &mut buttons {
@@ -672,8 +717,16 @@ pub(super) fn panel_system(
         };
         let a = PANEL_ACTIONS[i];
         let frames = art.buttons.get(i).map_or(&[][..], Vec::as_slice);
+        let spell = match a {
+            Action::CastSpell { index } => spells.get(usize::from(index)),
+            _ => None,
+        };
+        let picture = |state| {
+            let def = caster_def?;
+            art.weapon_button(def, spell?.id, state)
+        };
         let shown = a.is_supported()
-            && !frames.is_empty()
+            && (!frames.is_empty() || picture(1).is_some())
             && match a {
                 Action::CastSpell { index } => spells.len() > usize::from(index),
                 _ => true,
@@ -714,11 +767,12 @@ pub(super) fn panel_system(
         });
         if hovered {
             let name = match a {
-                Action::CastSpell { index } => spells
-                    .get(usize::from(index))
-                    .map_or(PANEL_NAMES[i].to_string(), |x| {
-                        format!("{} ({} mana)", x.name, x.cost)
-                    }),
+                Action::CastSpell { .. } => spell.map_or(PANEL_NAMES[i].to_string(), |x| {
+                    let shortage = x
+                        .shortfall_text()
+                        .map_or(String::new(), |t| format!("; {t}"));
+                    format!("{}: {}{shortage}", x.name, x.mana_text())
+                }),
                 _ => PANEL_NAMES[i].to_string(),
             };
             hover.0 = Some(match key_label(input.mapper.profile(), a) {
@@ -726,27 +780,33 @@ pub(super) fn panel_system(
                 None => name,
             });
         }
-        let f = if !usable {
-            0
-        } else if active {
-            3
-        } else if hovered {
-            2
+        let f = button_state(usable, active, hovered);
+        let custom = picture(f);
+        img.color = if custom.is_some() && !usable {
+            Color::srgb(0.5, 0.5, 0.5)
         } else {
-            1
+            Color::WHITE
         };
-        if let Some(h) = frames.get(f).or_else(|| frames.last())
+        if let Some(h) = custom.or_else(|| frames.get(f).or_else(|| frames.last()))
             && img.image != *h
         {
             img.image = h.clone();
         }
     }
     for (l, mut t) in &mut labels {
-        // The weapon buttons are blank plates: number them.
-        let want = if l.0 >= 10 {
-            format!("{}", l.0 - 9)
-        } else {
-            String::new()
+        // Keep a numbered plate only when a mod/install lacks its art.
+        let want = match PANEL_ACTIONS[l.0] {
+            Action::CastSpell { index } => {
+                let has_picture = spells.get(usize::from(index)).is_some_and(|sp| {
+                    caster_def.is_some_and(|def| art.weapon_button(def, sp.id, 1).is_some())
+                });
+                if has_picture {
+                    String::new()
+                } else {
+                    format!("{}", index + 1)
+                }
+            }
+            _ => String::new(),
         };
         if t.0 != want {
             t.0 = want;
@@ -864,6 +924,7 @@ fn order_text(s: &Session, w: &tak_sim::World, u: &tak_sim::world::Unit) -> Stri
     let now = match u.orders.front() {
         None => "Idle".to_string(),
         Some(tak_sim::Order::Move { .. }) => "Moving".into(),
+        Some(tak_sim::Order::AttackMove { .. }) => "Attack-moving".into(),
         Some(tak_sim::Order::Patrol { .. }) => "Patrolling".into(),
         Some(tak_sim::Order::Guard { target }) => format!("Guarding {}", name(*target)),
         Some(tak_sim::Order::Attack {
@@ -1135,30 +1196,33 @@ pub(super) fn bottom_bar_system(
         .and_then(|u| s.def(u.def))
         .map(|d| d.display.clone());
     let prompt = if mode.console {
-        match feel.layout {
-            crate::feel::Layout::Xbox => "X",
-            crate::feel::Layout::PlayStation => "Square",
-        }
+        crate::feel::pad_action_name(m.profile(), feel.layout, |a| {
+            matches!(a, Action::Context { append: false })
+        })
+        .unwrap_or_else(|| "confirm".into())
+    } else if m.mode() != Mode::None {
+        "LMB".into()
     } else {
-        "RMB"
+        "RMB".into()
     };
     let select_prompt = if mode.console {
-        match feel.layout {
-            crate::feel::Layout::Xbox => "A",
-            crate::feel::Layout::PlayStation => "Cross",
-        }
+        crate::feel::pad_action_name(m.profile(), feel.layout, |a| matches!(a, Action::Select))
+            .unwrap_or_else(|| "confirm".into())
     } else {
-        "LMB"
+        "LMB".into()
     };
     let mut placement_error = None;
     let verb = match m.cursor_kind(&view) {
         CursorKind::Normal => String::new(),
-        CursorKind::Select => verb_line(select_prompt, "Select", target_name.as_deref()),
-        CursorKind::Move => verb_line(prompt, "Move", None),
-        CursorKind::Attack => verb_line(prompt, "Attack", target_name.as_deref()),
-        CursorKind::Guard => verb_line(prompt, "Guard", target_name.as_deref()),
-        CursorKind::Patrol => verb_line(prompt, "Patrol", None),
-        CursorKind::Cast => verb_line(prompt, "Cast", target_name.as_deref()),
+        CursorKind::Select => verb_line(&select_prompt, "Select", target_name.as_deref()),
+        CursorKind::Move => verb_line(&prompt, "Move", None),
+        CursorKind::Attack if m.mode() == Mode::AttackMove => {
+            verb_line(&prompt, "Attack-move", None)
+        }
+        CursorKind::Attack => verb_line(&prompt, "Attack", target_name.as_deref()),
+        CursorKind::Guard => verb_line(&prompt, "Guard", target_name.as_deref()),
+        CursorKind::Patrol => verb_line(&prompt, "Patrol", None),
+        CursorKind::Cast => verb_line(&prompt, "Cast", target_name.as_deref()),
         CursorKind::Invalid => "Not possible here".into(),
         CursorKind::Build | CursorKind::BuildBlocked => {
             let def = match m.mode() {
@@ -1179,7 +1243,7 @@ pub(super) fn bottom_bar_system(
             if placement_error.is_some() {
                 format!("{name}: blocked")
             } else {
-                verb_line(prompt, "Build", Some(&name))
+                verb_line(&prompt, "Build", Some(&name))
             }
         }
     };
@@ -1241,4 +1305,34 @@ pub(super) fn bottom_bar_system(
     }
     let _ = Refusal::NothingThere;
     let _ = DamageBars::All;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classic_panel_actions_match_weapon_then_stance_art() {
+        for (index, action) in PANEL_ACTIONS[7..10].iter().enumerate() {
+            assert_eq!(*action, Action::CastSpell { index: index as u8 });
+        }
+        assert_eq!(
+            PANEL_ACTIONS[10],
+            Action::SetFireState {
+                state: tak_commands::FireState::FireAtWill
+            }
+        );
+        assert_eq!(
+            PANEL_ACTIONS[11],
+            Action::SetFireState {
+                state: tak_commands::FireState::ReturnFire
+            }
+        );
+        assert_eq!(
+            PANEL_ACTIONS[12],
+            Action::SetFireState {
+                state: tak_commands::FireState::HoldFire
+            }
+        );
+    }
 }

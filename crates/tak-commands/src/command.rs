@@ -155,6 +155,15 @@ pub enum SimCommand {
         /// Replace or append.
         queue: QueueMode,
     },
+    /// Move to a ground point, stopping to engage enemies along the way.
+    AttackMove {
+        /// Units to move.
+        units: UnitSet,
+        /// Destination to resume after each engagement.
+        to: WorldPos,
+        /// Replace or append.
+        queue: QueueMode,
+    },
     /// Attack a unit, or force-fire at a ground point.
     Attack {
         /// Attackers.
@@ -225,6 +234,7 @@ impl SimCommand {
     pub fn units(&self) -> &UnitSet {
         match self {
             SimCommand::Move { units, .. }
+            | SimCommand::AttackMove { units, .. }
             | SimCommand::Attack { units, .. }
             | SimCommand::Build { units, .. }
             | SimCommand::Guard { units, .. }
@@ -240,6 +250,7 @@ impl SimCommand {
     pub fn queue(&self) -> Option<QueueMode> {
         match self {
             SimCommand::Move { queue, .. }
+            | SimCommand::AttackMove { queue, .. }
             | SimCommand::Attack { queue, .. }
             | SimCommand::Build { queue, .. }
             | SimCommand::Guard { queue, .. }

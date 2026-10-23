@@ -5,6 +5,52 @@
 
 use tak_commands::{UnitDefId, UnitId};
 
+/// Image order shared by the common GAF buttons and per-weapon pictures:
+/// disabled, up, hovered, active.
+pub const BUTTON_STATES: usize = 4;
+
+/// Which button image to show. An unusable button cannot appear active.
+pub fn button_state(usable: bool, active: bool, hovered: bool) -> usize {
+    match (usable, active, hovered) {
+        (false, _, _) => 0,
+        (true, true, _) => 3,
+        (true, false, true) => 2,
+        _ => 1,
+    }
+}
+
+/// Per-weapon FBI button pictures, in [`button_state`] order. The values
+/// name JPEGs under `anims/weaponpic/` (**Known**, installed files). This
+/// metadata is display-only and never enters the simulation.
+pub fn weapon_button_paths(
+    extra: &std::collections::BTreeMap<String, String>,
+) -> [Option<String>; BUTTON_STATES] {
+    [
+        "buttonimagedisabled",
+        "buttonimageup",
+        "buttonimageselected",
+        "buttonimagedown",
+    ]
+    .map(|key| {
+        let name = extra.get(key)?.trim().to_ascii_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        let stem = name.strip_suffix(".jpg").unwrap_or(&name);
+        Some(format!("anims/weaponpic/{stem}.jpg"))
+    })
+}
+
+/// A missing state falls back to the normal picture, then any decoded
+/// picture. With no pictures at all the caller keeps its plain plate.
+pub fn button_image<T>(images: &[Option<T>; BUTTON_STATES], state: usize) -> Option<&T> {
+    images
+        .get(state)
+        .and_then(Option::as_ref)
+        .or(images[1].as_ref())
+        .or_else(|| images.iter().find_map(Option::as_ref))
+}
+
 /// The in-game skin GAF (`anims/<name>.gaf`, palette `anims/<name>.pcx`)
 /// for a side, from the monarch's unit name prefix (**Known**: the five
 /// files exist; Veruna's entries carry a `Veruna`/`V` prefix, so entries
@@ -109,9 +155,11 @@ pub fn button_slots(rgba: &[u8], w: u32, h: u32) -> Vec<[u32; 4]> {
 }
 
 /// What each of the panel's 13 wells holds, in [`button_slots`] order:
-/// three rows of two orders and a centre one, the three stances, the three
-/// weapon (spell) buttons. Entries are `igcommonbuttons.gaf` sequences.
-/// **Chosen** arrangement (the GUI file creates these buttons in code).
+/// three rows of two orders and a centre one, the three weapon (spell)
+/// buttons, then the three stances. Entries are `igcommonbuttons.gaf`
+/// sequences. **Known** row order: the owned manual, printed pp. 70–71,
+/// puts weapons above the bottom stance trio. Order/utility placement
+/// otherwise remains **Chosen** (the GUI creates these buttons in code).
 pub const PANEL_BUTTONS: [&str; 13] = [
     "AttackButton",
     "MoveButton",
@@ -120,12 +168,12 @@ pub const PANEL_BUTTONS: [&str; 13] = [
     "StopButton",
     "ClearButton",
     "RepairButton",
-    "AgOffensiveButton",
-    "AgDefensiveButton",
-    "AgPassiveButton",
     "WPrimaryButton",
     "WSecondaryButton",
     "WSpecialButton",
+    "AgOffensiveButton",
+    "AgDefensiveButton",
+    "AgPassiveButton",
 ];
 
 /// The selection grouped by unit type for the multi-selection strip: each
@@ -208,6 +256,62 @@ pub fn health_rgb(frac: f32) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classic_panel_weapons_are_above_the_bottom_stances() {
+        assert_eq!(
+            &PANEL_BUTTONS[7..10],
+            &["WPrimaryButton", "WSecondaryButton", "WSpecialButton"]
+        );
+        assert_eq!(
+            &PANEL_BUTTONS[10..13],
+            &["AgOffensiveButton", "AgDefensiveButton", "AgPassiveButton"]
+        );
+        assert!(ARAMON_SLOTS[9][1] < ARAMON_SLOTS[10][1]);
+    }
+
+    #[test]
+    fn weapon_pictures_preserve_fbi_state_names() {
+        let extra = [
+            ("buttonimagedisabled".into(), "TestOff".into()),
+            ("buttonimageup".into(), " TestUp.JPG ".into()),
+            ("buttonimageselected".into(), "TestHover".into()),
+            ("buttonimagedown".into(), " ".into()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            weapon_button_paths(&extra),
+            [
+                Some("anims/weaponpic/testoff.jpg".into()),
+                Some("anims/weaponpic/testup.jpg".into()),
+                Some("anims/weaponpic/testhover.jpg".into()),
+                None,
+            ]
+        );
+        assert_eq!(
+            weapon_button_paths(&Default::default()),
+            [None, None, None, None]
+        );
+    }
+
+    #[test]
+    fn button_state_priority_and_missing_picture_fallback() {
+        assert_eq!(button_state(false, true, true), 0);
+        assert_eq!(button_state(true, true, true), 3);
+        assert_eq!(button_state(true, false, true), 2);
+        assert_eq!(button_state(true, false, false), 1);
+        let pictures = [None, Some("normal"), Some("hover"), None];
+        assert_eq!(button_image(&pictures, 2), Some(&"hover"));
+        assert_eq!(button_image(&pictures, 0), Some(&"normal"));
+        assert_eq!(button_image(&pictures, 3), Some(&"normal"));
+        assert_eq!(button_image(&pictures, usize::MAX), Some(&"normal"));
+        assert_eq!(
+            button_image(&[Some("only"), None, None, None], 1),
+            Some(&"only")
+        );
+        assert_eq!(button_image::<()>(&[None, None, None, None], 1), None);
+    }
 
     #[test]
     fn skins_by_side() {

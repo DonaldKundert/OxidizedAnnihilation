@@ -183,6 +183,7 @@ fn scenario() -> Scenario {
     };
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed: 5,
         map,
         unit_defs: vec![king, wall, keep, walker("SWORD", 500, 9), mason, lode, tank],

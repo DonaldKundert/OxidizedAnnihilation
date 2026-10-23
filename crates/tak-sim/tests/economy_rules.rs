@@ -71,6 +71,7 @@ fn scenario(players: usize) -> Scenario {
     };
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed: 3,
         map: MapInfo::flat(
             2048,

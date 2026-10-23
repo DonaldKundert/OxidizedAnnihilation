@@ -442,6 +442,7 @@ fn scripted_intents_match_and_issue_orders() {
         .iter()
         .map(|c| match c {
             SimCommand::Move { .. } => "move",
+            SimCommand::AttackMove { .. } => "attack_move",
             SimCommand::Attack { .. } => "attack",
             SimCommand::Build { at: Some(_), .. } => "place",
             SimCommand::Build { at: None, .. } => "produce",

@@ -68,6 +68,8 @@ pub enum Action {
         #[serde(default)]
         append: bool,
     },
+    /// Attack-move to the current cursor immediately (console hold-X).
+    AttackMove,
     /// Close a wheel, abort a brush, clear the order mode, or deselect.
     Cancel,
     /// Select own units sharing a type with the selection.
@@ -165,6 +167,8 @@ pub enum Action {
     /// Next context order attacks the unit or ground under the cursor
     /// (TA A, then click).
     AttackMode,
+    /// Next context order attack-moves to the cursor (distinct from force-fire).
+    AttackMoveMode,
     /// Next context order moves, even over a unit (TA M, then click).
     MoveMode,
     /// Select every own unit of a category on the map (TA Ctrl+letter;

@@ -84,6 +84,9 @@ pub const EXPLODE_AS_SLOT: u8 = u8::MAX;
 /// How a weapon is drawn (from its FBI section).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WeaponArt {
+    /// Disabled / up / hovered / active JPEGs (`anims/weaponpic/`), from
+    /// the weapon's `buttonimage*` keys. Display-only.
+    pub button_images: [Option<String>; crate::hud::BUTTON_STATES],
     /// `weapontype`, lowercase (`ballistic`, `line of sight`, ...).
     pub kind: String,
     /// `model`: projectile 3DO.
@@ -126,6 +129,7 @@ impl WeaponArt {
                 (t.clamp(1, 60), color)
             });
         WeaponArt {
+            button_images: crate::hud::weapon_button_paths(&w.extra),
             kind: w.kind.clone().unwrap_or_default().to_ascii_lowercase(),
             model: nonempty(&w.model).map(|m| m.trim_end_matches(".3do").to_ascii_lowercase()),
             art_file: w
@@ -613,6 +617,22 @@ pub fn lerp_pose(a: Option<&PieceTransform>, b: &PieceTransform, t: f32) -> Pose
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weapon_button_metadata_survives_the_content_adapter() {
+        let doc = tak_formats::tdf::parse(
+            b"[WEAPON3]\n{\nname=Test spell;\nmanapershot=25;\nbuttonimageup=TestUp;\nbuttonimageselected=TestHover;\nbuttonimagedown=TestDown;\nbuttonimagedisabled=TestOff;\n}\n",
+        )
+        .unwrap();
+        let mut ctx = tak_content::fields::Ctx::default();
+        let weapon = tak_content::unit::weapon(&doc.sections[0], "synthetic.fbi", &mut ctx);
+        let art = WeaponArt::from_fbi(&weapon);
+        assert_eq!(
+            art.button_images,
+            ["testoff", "testup", "testhover", "testdown"]
+                .map(|name| Some(format!("anims/weaponpic/{name}.jpg")))
+        );
+    }
 
     #[test]
     fn angles_take_the_short_way() {

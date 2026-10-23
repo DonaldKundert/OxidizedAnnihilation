@@ -20,6 +20,8 @@ pub enum Mode {
     CastSpell(SpellId),
     /// Attack the unit under the cursor, or the ground (TA A).
     Attack,
+    /// Move to the cursor, engaging enemies and resuming the destination.
+    AttackMove,
     /// Move to the cursor, even over a unit (TA M).
     Move,
 }
@@ -98,6 +100,7 @@ pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: Spe
 /// - `Mode::Attack`: `Attack` the hovered unit (outside the selection), or
 ///   the ground under the cursor.
 /// - `Mode::Move`: `Move { to: cursor }`, whatever is under it.
+/// - `Mode::AttackMove`: `AttackMove { to: cursor }`, whatever is under it.
 /// - No mode: hovered enemy → `Attack`; hovered friendly unit outside the
 ///   selection → `Guard`; otherwise → `Move { to: cursor }`.
 ///
@@ -152,6 +155,11 @@ pub fn resolve_context<W: WorldView + ?Sized>(
             queue,
         }),
         Mode::Move => Some(SimCommand::Move {
+            units: units.clone(),
+            to: cursor,
+            queue,
+        }),
+        Mode::AttackMove => Some(SimCommand::AttackMove {
             units: units.clone(),
             to: cursor,
             queue,

@@ -1,0 +1,198 @@
+name: Client CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
+  # Keep Bevy's compile/link footprint within standard hosted-runner resources.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  client:
+    name: Client format, lint, test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Check out source without retaining credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          # Bevy 0.20 requires Rust >= 1.97.1, above the core workspace's MSRV.
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+
+      - name: Cache client dependencies and build outputs
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: client -> target
+          key: ${{ runner.os }}-rust-1.99.1-${{ hashFiles('Cargo.lock', 'client/Cargo.lock') }}
+          cache-provider: github
+          cache-bin: false
+          cache-on-failure: false
+          # No extra directories: never cache game installations, saves or logs.
+
+      - name: Check client formatting
+        run: cargo fmt --all -- --check
+
+      - name: Install Linux window, audio, input and Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            g++ pkg-config libudev-dev libasound2-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libvulkan-dev mesa-vulkan-drivers
+
+      - name: Report verification scope
+        run: |
+          if [ "${TAK_DATA_DIR+x}" = x ]; then
+            echo 'TAK_DATA_DIR must remain unset on public hosted CI.' >&2
+            exit 1
+          fi
+          {
+            echo '### Client verification scope'
+            echo '- Checks cover the separate client workspace: formatting, lint, tests and executable linking.'
+            echo '- TAK_DATA_DIR is deliberately unset. Retail-data replay/corpus tests skip.'
+            echo '- No game assets, secrets, display server or GPU playtest are used.'
+            echo '- A green run does not establish rendering, audio playback or gameplay fidelity.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint client and all test targets
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test client without proprietary game data
+        run: env -u TAK_DATA_DIR cargo test --locked --workspace -- --nocapture
+
+      - name: Link client executable
+        run: cargo build --locked --workspace --bins
+
+      - name: Install pinned license-notice generator
+        run: cargo install --locked --version 0.9.2 --debug cargo-about
+
+      - name: Package engine-only client with dependency notices
+        run: |
+          # This allowlist is intentionally fail-closed: no GPL/unknown license fallback.
+          cat > "$RUNNER_TEMP/client-about.toml" <<'EOF'
+          accepted = [
+            "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+            "ISC", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "Zlib",
+            "BSL-1.0", "Unicode-3.0", "Unlicense", "CC0-1.0", "OFL-1.1",
+          ]
+          targets = ["x86_64-unknown-linux-gnu"]
+          ignore-dev-dependencies = true
+          private = { ignore = true }
+          EOF
+          cat > "$RUNNER_TEMP/client-about.hbs" <<'EOF'
+          Third-party Rust dependency license notices
+          {{#each licenses}}
+          ===============================================================================
+          {{name}} ({{id}})
+          Used by:
+          {{#each used_by}}
+          - {{crate.name}} {{crate.version}}
+          {{/each}}
+
+          {{{text}}}
+          {{/each}}
+          EOF
+          mkdir -p dist/client-linux-x86_64
+          install -m 755 target/debug/tak-client dist/client-linux-x86_64/tak-client
+          cp ../LICENSE dist/client-linux-x86_64/LICENSE
+          # Cargo metadata excludes std; preserve the toolchain's library notices too.
+          rust_notices="$(rustc --print sysroot)/share/doc/rust"
+          test -s "$rust_notices/COPYRIGHT-library.html"
+          mkdir -p dist/client-linux-x86_64/rust-standard-library
+          cp "$rust_notices/COPYRIGHT-library.html" dist/client-linux-x86_64/rust-standard-library/
+          cp -R "$rust_notices/licenses" dist/client-linux-x86_64/rust-standard-library/
+          cargo about generate --locked --fail --workspace \
+            --target x86_64-unknown-linux-gnu \
+            -c "$RUNNER_TEMP/client-about.toml" \
+            -o dist/client-linux-x86_64/THIRD_PARTY_NOTICES.txt \
+            "$RUNNER_TEMP/client-about.hbs"
+          cargo metadata --locked --format-version 1 \
+            --filter-platform x86_64-unknown-linux-gnu > "$RUNNER_TEMP/client-metadata.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          metadata = json.loads((Path(os.environ['RUNNER_TEMP']) / 'client-metadata.json').read_text())
+          package = Path('dist/client-linux-x86_64')
+          # Include original upstream notices too, including nested font/asset notices.
+          # Never copy source, game data, build caches, saves or test/runtime logs.
+          active = {node['id'] for node in metadata['resolve']['nodes']}
+          inventory = []
+          notice_names = ('LICENSE', 'LICENCE', 'COPYING', 'COPYRIGHT', 'NOTICE', 'UNLICENSE', 'OFL', 'AUTHORS', 'PATENTS')
+          for dep in sorted(metadata['packages'], key=lambda item: (item['name'], item['version'])):
+              if dep['id'] not in active or dep['source'] is None:
+                  continue
+              root = Path(dep['manifest_path']).parent.resolve()
+              dest = package / 'dependency-notices' / f"{dep['name']}-{dep['version']}"
+              notices = set(path for path in root.rglob('*') if path.is_file() and path.suffix not in ('.rs', '.c', '.h', '.cpp') and any(name in path.name.upper() for name in notice_names))
+              if dep.get('license_file'):
+                  notices.add(root / dep['license_file'])
+              if not notices:
+                  raise SystemExit(f'Missing packaged upstream notices for {dep["name"]} {dep["version"]}; review before distribution')
+              for notice in sorted(notices):
+                  relative = notice.resolve().relative_to(root)
+                  if notice.stat().st_size > 2 * 1024 * 1024:
+                      raise SystemExit(f'Unexpectedly large notice: {dep["name"]}/{relative}')
+                  target = dest / relative
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  notice.read_text(encoding='utf-8')  # Reject binary payloads masquerading as notices.
+                  shutil.copyfile(notice, target)
+              inventory.append({'name': dep['name'], 'version': dep['version'], 'license': dep['license'], 'repository': dep['repository']})
+          (package / 'DEPENDENCIES.json').write_text(json.dumps(inventory, indent=2) + '\n')
+          binary = package / 'tak-client'
+          if binary.stat().st_size > 512 * 1024 * 1024:
+              raise SystemExit('Client binary exceeds the explicit 512 MiB artifact budget')
+          (package / 'BUILD.txt').write_text(
+              'Oxidized Annihilation development client, Linux x86_64.\n'
+              f'Validated revision: {os.environ["GITHUB_SHA"]}\n'
+              'Rust toolchain: 1.99.1; Ubuntu 24.04; development profile, debug info disabled.\n'
+              'No proprietary game assets are included. Supply your own licensed installation at runtime.\n'
+              'System audio/input/window/Vulkan libraries are not bundled.\n'
+              'This is not rendering, audio-playback or gameplay-fidelity certification.\n'
+          )
+          print(f'Engine binary bytes: {binary.stat().st_size}')
+          print(f'Dependency notice inventory: {len(inventory)} packages')
+          PY
+          tar -czf dist/client-linux-x86_64.tar.gz -C dist client-linux-x86_64
+          test "$(stat -c %s dist/client-linux-x86_64.tar.gz)" -le 536870912
+          {
+            echo '### Engine-only development artifact'
+            echo "Binary bytes: $(stat -c %s dist/client-linux-x86_64/tak-client)"
+            echo "Archive bytes: $(stat -c %s dist/client-linux-x86_64.tar.gz)"
+            sha256sum dist/client-linux-x86_64.tar.gz
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload engine-only development client
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: client-linux-x86_64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: client/dist/client-linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

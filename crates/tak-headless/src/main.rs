@@ -1,3 +1,5 @@
+mod checkpoint_cli;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -20,31 +22,40 @@ struct Cli {
 }
 
 /// Where the match comes from: a synthetic scenario JSON (`--scenario`), or
-/// a real map from an install (`--map`, with `--data` or `$TAK_DATA_DIR`).
+/// a real skirmish map (`--map`) or authored placements (`--campaign`).
 #[derive(Args)]
 struct Source {
     /// Scenario JSON (synthetic match, no scripts).
-    #[arg(long, conflicts_with = "map")]
+    #[arg(long, conflicts_with_all = ["map", "campaign"])]
     scenario: Option<PathBuf>,
     /// Real map: VFS path without extension, e.g. "kmap/Adamantine Gate".
-    #[arg(long)]
+    #[arg(long, conflicts_with = "campaign")]
     map: Option<String>,
-    /// Kingdoms install directory (for --map).
+    /// Authored mission placements: VFS path without extension.
+    #[arg(long, requires = "campaign_players")]
+    campaign: Option<String>,
+    /// Explicit OTA owner slots and sides in simulation order, e.g. 1:ARA,2:ZON.
+    #[arg(long, requires = "campaign")]
+    campaign_players: Option<String>,
+    /// Opt in to supported OTA objectives (only owners 1,2 in that order).
+    #[arg(long, requires = "campaign")]
+    campaign_objectives: bool,
+    /// Kingdoms install directory (for --map or --campaign).
     #[arg(long, env = "TAK_DATA_DIR")]
     data: Option<PathBuf>,
     /// Sides for --map, comma-separated, by prefix or name (one monarch each).
-    #[arg(long, default_value = "ARA,ZON")]
+    #[arg(long, default_value = "ARA,ZON", conflicts_with = "campaign")]
     players: String,
-    /// World RNG seed for --map.
+    /// World RNG seed for --map or --campaign.
     #[arg(long, default_value_t = 1)]
     world_seed: u64,
-    /// Run a --map match without its COB scripts.
+    /// Run a --map or --campaign match without its COB scripts.
     #[arg(long)]
     no_scripts: bool,
 }
 
 enum Loaded {
-    Synthetic(tak_sim::Scenario),
+    Synthetic(Box<tak_sim::Scenario>),
     Map(Box<Match>, bool),
 }
 
@@ -76,8 +87,32 @@ impl Loaded {
 
 impl Source {
     fn load(&self) -> Result<Loaded, Error> {
+        if let Some(map) = &self.campaign {
+            let owners = self.campaign_players.as_deref().ok_or_else(|| {
+                Error::Setup(
+                    "--campaign needs explicit --campaign-players OTA_SLOT:SIDE pairs".into(),
+                )
+            })?;
+            let players = tak_headless::campaign::parse_players(owners)?;
+            let data = self
+                .data
+                .as_ref()
+                .ok_or_else(|| Error::Setup("--campaign needs --data or $TAK_DATA_DIR".into()))?;
+            let loaded = tak_headless::campaign::load_campaign_map(
+                data,
+                map,
+                &players,
+                self.world_seed,
+                self.campaign_objectives,
+            )?;
+            eprint!(
+                "{}",
+                tak_headless::campaign::report(&loaded, &players, self.campaign_objectives)
+            );
+            return Ok(Loaded::Map(Box::new(loaded.game), !self.no_scripts));
+        }
         match (&self.scenario, &self.map) {
-            (Some(p), _) => Ok(Loaded::Synthetic(load_scenario(p)?)),
+            (Some(p), _) => Ok(Loaded::Synthetic(Box::new(load_scenario(p)?))),
             (None, Some(map)) => {
                 let data = self
                     .data
@@ -86,7 +121,7 @@ impl Source {
                 let m = load_map(data, map, &self.players, self.world_seed)?;
                 Ok(Loaded::Map(Box::new(m), !self.no_scripts))
             }
-            (None, None) => Err(Error::Setup("pass --scenario or --map".into())),
+            (None, None) => Err(Error::Setup("pass --scenario, --map or --campaign".into())),
         }
     }
 }
@@ -101,6 +136,8 @@ enum LogKind {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Save, inspect or deterministically resume a replay checkpoint.
+    Checkpoint(checkpoint_cli::CheckpointArgs),
     /// Run a scenario and print (or write) the per-tick hashes.
     Run {
         #[command(flatten)]
@@ -184,6 +221,7 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<ExitCode, Error> {
     match Cli::parse().cmd {
+        Cmd::Checkpoint(args) => args.run(),
         Cmd::Run {
             source,
             log,
@@ -260,6 +298,11 @@ fn real_main() -> Result<ExitCode, Error> {
         } => {
             let loaded = source.load()?;
             let sc = loaded.scenario();
+            if sc.initial_units.is_some() {
+                return Err(Error::Setup(
+                    "gen-log only supports automatic monarch startup; supply an authored-unit command log with --log".into(),
+                ));
+            }
             let log = match kind {
                 LogKind::Random => random_log(sc, ticks, seed),
                 LogKind::Walk => walk_log(sc, ticks, every, seed),

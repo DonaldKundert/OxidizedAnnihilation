@@ -111,6 +111,7 @@ pub fn scenario() -> Scenario {
     };
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed: 3,
         economy: Default::default(),
         features: Default::default(),

@@ -92,9 +92,11 @@ pub struct UnitBuild {
 pub struct Assist {
     /// The frame being built.
     pub target: UnitId,
-    /// Destination of the `Move` construction issued to bring the builder
-    /// into range, while it walks.
+    /// Last attempted steering goal. Retained after path failure so an
+    /// unreachable unchanged target is not retried every tick.
     pub walk_to: Option<WorldPos>,
+    /// The front Move is still the temporary assist walk, not a player order.
+    pub walking: bool,
     /// `StartBuilding` was called and `StopBuilding` is still owed.
     pub building: bool,
 }
@@ -148,6 +150,7 @@ impl UnitBuild {
         h.option(self.assist, |h, a| {
             h.unit_id(a.target);
             h.option(a.walk_to, StateHasher::vec2);
+            h.bool(a.walking);
             h.bool(a.building);
         });
     }
@@ -276,7 +279,7 @@ pub fn apply_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
         let replace = b.mobile && *queue == QueueMode::Replace;
         if let Some(u) = world.unit_mut(id) {
             if replace {
-                u.orders.clear();
+                u.cancel_player_orders();
             }
             if u.orders.len() < MAX_ORDERS {
                 u.orders.push_back(order);
@@ -366,14 +369,10 @@ fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
         Some(crate::combat::CombatOrder::Guard(g)) if u.build.job.is_none() => Some(g),
         _ => None,
     };
-    let walk_to = assist.and_then(|a| a.walk_to);
-    let own_walk = walk_to
-        .is_some_and(|w| u.orders.len() == 1 && u.orders.front() == Some(&Order::Move { to: w }));
-    let combat_walk = u
-        .combat
-        .goal
-        .is_some_and(|g| u.orders.len() == 1 && u.orders.front() == Some(&Order::Move { to: g }));
-    let busy = !u.orders.is_empty() && !own_walk && !combat_walk;
+    let walk_to = assist.filter(|a| a.walking).and_then(|a| a.walk_to);
+    let mut own_walk = walk_to.is_some_and(|w| u.orders.front() == Some(&Order::Move { to: w }));
+    let mut combat_walk = crate::combat::is_our_move(u);
+    let busy = guarded.is_none() && !u.orders.is_empty() && !own_walk && !combat_walk;
     let target = guarded
         .filter(|_| !busy)
         .and_then(|g| assist_target(world, owner, g));
@@ -386,8 +385,16 @@ fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
             }
             if own_walk {
                 if let Some(u) = world.unit_mut(id) {
-                    u.orders.clear();
+                    u.orders.pop_front();
+                    if combat_walk {
+                        u.combat.goal = None;
+                    }
                 }
+                // This exact temporary move has been consumed. Do not infer
+                // ownership again from coordinates: a queued player move may
+                // name the same point. A new target needs fresh steering.
+                own_walk = false;
+                combat_walk = false;
             }
             assist = None;
         }
@@ -399,6 +406,7 @@ fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     let mut a = assist.unwrap_or(Assist {
         target: t,
         walk_to: None,
+        walking: false,
         building: false,
     });
     let (Some(u), Some(tu)) = (world.unit(id), world.unit(t)) else {
@@ -415,11 +423,15 @@ fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
         // the target moved (unreachable frames are left alone).
         let goal = world.map().clamp(tpos);
         if !own_walk && a.walk_to != Some(goal) {
-            pathfinding::go_to(world, id, goal);
             if let Some(u) = world.unit_mut(id) {
+                if combat_walk {
+                    u.orders.pop_front();
+                }
+                u.orders.push_front(Order::Move { to: goal });
                 u.combat.goal = None;
             }
             a.walk_to = Some(goal);
+            a.walking = true;
         }
         if a.building {
             start(scripts, id, "StopBuilding");
@@ -430,11 +442,12 @@ fn assist_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     }
     if own_walk || combat_walk {
         if let Some(u) = world.unit_mut(id) {
-            u.orders.clear();
+            u.orders.pop_front();
             u.combat.goal = None;
         }
     }
     a.walk_to = None;
+    a.walking = false;
     if !a.building {
         start(scripts, id, "StartBuilding");
         a.building = true;
@@ -570,6 +583,14 @@ fn unit_at_site(world: &World, def: UnitDefId, owner: PlayerId, site: WorldPos) 
 
 fn mobile_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     let Some(u) = world.unit(id) else { return };
+    // A queued Build behind an active Attack/Guard is not active yet,
+    // even when combat has no temporary Move at the front while firing.
+    if u.combat.order.is_some() {
+        if u.build.job.is_some() {
+            end_job(world, scripts, id, false);
+        }
+        return;
+    }
     let owner = u.owner;
     let front = front_build(&u.orders);
     let job = u.build.job;
@@ -633,11 +654,9 @@ fn mobile_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
             .map_or(Vec::new(), |u| u.orders.iter().copied().collect());
         pathfinding::go_to(world, id, job.site);
         if let Some(u) = world.unit_mut(id) {
-            for o in rest {
-                if u.orders.len() < MAX_ORDERS {
-                    u.orders.push_back(o);
-                }
-            }
+            // The temporary steering move uses one extra slot; every
+            // previously accepted player order must survive it.
+            u.orders.extend(rest);
         }
         job.walking = true;
         store_job(world, id, job);

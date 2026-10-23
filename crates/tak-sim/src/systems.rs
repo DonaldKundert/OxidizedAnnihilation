@@ -40,6 +40,9 @@ pub const ALIGN_THRESHOLD: u16 = 0x2000;
 
 /// Spawn each player's monarch. Returns the new ids in spawn order.
 pub fn spawn_start_units(world: &mut World) -> Vec<UnitId> {
+    if let Some(units) = world.initial_units.take() {
+        return crate::campaign::spawn_initial_units(world, units);
+    }
     let center = world.map().center();
     let mut spawned = Vec::new();
     for i in 0..world.players.len() {
@@ -60,8 +63,7 @@ pub fn spawn_start_units(world: &mut World) -> Vec<UnitId> {
 
 /// Apply the commands for the current tick. Entries for other ticks, unknown
 /// or defeated players, and unit ids that are stale or owned by someone else are dropped
-/// silently. Orders the skeleton does not implement yet (attack, build,
-/// guard, patrol, spells) are ignored entirely and do not touch the queue.
+/// silently. Order-specific validation is performed by the owning system.
 pub fn apply_commands(world: &mut World, commands: &[LoggedCommand]) {
     for c in commands {
         if c.tick != world.tick || !world.has_player(c.player) || world.is_defeated(c.player) {
@@ -78,8 +80,7 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             for &id in units {
                 if let Some(u) = world.unit_mut_owned(id, player) {
                     if *queue == QueueMode::Replace {
-                        u.orders.clear();
-                        u.combat.cancel_orders();
+                        u.cancel_player_orders();
                     }
                     if u.orders.len() < MAX_ORDERS {
                         u.orders.push_back(Order::Move { to });
@@ -87,11 +88,26 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
                 }
             }
         }
+        SimCommand::AttackMove { units, to, queue } => {
+            let to = world.map().clamp(*to);
+            for &id in units {
+                if let Some(u) = world.unit_mut_owned(id, player) {
+                    if u.combat.is_dying() || !u.build.is_complete() {
+                        continue;
+                    }
+                    if *queue == QueueMode::Replace {
+                        u.cancel_player_orders();
+                    }
+                    if u.orders.len() < MAX_ORDERS {
+                        u.orders.push_back(Order::AttackMove { to });
+                    }
+                }
+            }
+        }
         SimCommand::Stop { units } => {
             for &id in units {
                 if let Some(u) = world.unit_mut_owned(id, player) {
-                    u.orders.clear();
-                    u.combat.cancel_orders();
+                    u.cancel_player_orders();
                 }
             }
         }
@@ -116,22 +132,50 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
 /// per unit per tick).
 pub fn orders(world: &mut World) {
     for id in world.unit_ids() {
+        let combat_capable = world
+            .unit(id)
+            .and_then(|u| world.defs().get(u.def))
+            .is_some_and(|d| d.combat.max_damage > 0);
         if let Some(u) = world.unit_mut(id) {
-            order_step(u);
+            order_step(u, combat_capable);
         }
     }
 }
 
-fn order_step(u: &mut Unit) {
-    while let Some(Order::Move { to }) = u.orders.front() {
-        if u.pos.distance(*to) > ARRIVAL_TOLERANCE {
+fn order_step(u: &mut Unit, combat_capable: bool) {
+    // Orders behind a combat order are waiting, not movement waypoints.
+    if u.combat.order.is_some() && !crate::combat::is_our_move(u) {
+        return;
+    }
+    while let Some(to) = match u.orders.front() {
+        Some(Order::Move { to }) => Some(*to),
+        Some(Order::AttackMove { to })
+            if !combat_capable
+                || u.combat
+                    .attack_move
+                    .as_ref()
+                    .is_some_and(|a| a.target.is_none()) =>
+        {
+            Some(*to)
+        }
+        _ => None,
+    } {
+        if u.pos.distance(to) > ARRIVAL_TOLERANCE {
             break;
         }
-        u.orders.pop_front();
+        if matches!(u.orders.pop_front(), Some(Order::AttackMove { .. })) {
+            u.combat.attack_move = None;
+        }
         u.path = Default::default();
         u.path.outcome = crate::pathfinding::Outcome::Arrived;
         if u.orders.is_empty() {
             u.speed = Fx::ZERO;
+        }
+        if u.combat.order.is_some() {
+            // A completed temporary combat move never completes a queued
+            // player move, even when both happen to name the same point.
+            u.combat.goal = None;
+            break;
         }
     }
     if let Some(&o @ Order::Patrol { to }) = u.orders.front() {
@@ -209,10 +253,7 @@ pub fn move_unit(u: &mut Unit, def: &UnitDef, map: &MapInfo) {
 /// - Idle units brake to a halt along their heading. Waiting for a path
 ///   counts as idle.
 fn drive(u: &mut Unit, def: &UnitDef, map: &MapInfo, terr: Terrain) {
-    let Some(to) = (match u.orders.front() {
-        Some(Order::Move { to }) | Some(Order::Patrol { to }) => Some(*to),
-        _ => None,
-    }) else {
+    let Some(to) = crate::pathfinding::front_target(u) else {
         u.speed = u.speed.saturating_sub(def.brakerate).max(Fx::ZERO);
         advance(u, map, terr);
         return;
@@ -238,8 +279,9 @@ fn drive(u: &mut Unit, def: &UnitDef, map: &MapInfo, terr: Terrain) {
     let wp = u.path.waypoints[0];
     let final_wp = u.path.waypoints.len() == 1;
     let next = u.path.waypoints.get(1).copied().unwrap_or(wp);
-    let last_leg =
-        final_wp && u.orders.len() == 1 && matches!(u.orders.front(), Some(Order::Move { .. }));
+    let last_leg = final_wp
+        && (matches!(u.orders.front(), Some(Order::AttackMove { .. }))
+            || (u.orders.len() == 1 && matches!(u.orders.front(), Some(Order::Move { .. }))));
 
     // Pure-pursuit aim point.
     let dist = u.pos.distance(wp);

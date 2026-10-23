@@ -25,6 +25,7 @@
 
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
+pub mod campaign;
 pub mod cob;
 pub mod combat;
 pub mod construction;

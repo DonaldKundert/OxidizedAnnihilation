@@ -295,6 +295,22 @@ fn pad_binding(
     })
 }
 
+/// Text equivalent of a profile's gamepad glyphs, including a chord.
+/// Used beside wheel details and in the verb line, so those prompts
+/// follow both PlayStation layouts and custom bindings.
+pub fn pad_action_name(
+    p: &Profile,
+    layout: Layout,
+    want: impl Fn(&Action) -> bool,
+) -> Option<String> {
+    let (button, modifier, _) = pad_binding(p, want)?;
+    let mut names = Vec::new();
+    for b in modifier.into_iter().chain(std::iter::once(button)) {
+        names.push(glyph(layout, b)?.name);
+    }
+    Some(names.join("+"))
+}
+
 fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<Hint> {
     let (b, with, g) = pad_binding(p, want)?;
     let prefix = match g {
@@ -382,6 +398,7 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             Mode::Guard => "guard",
             Mode::CastSpell(_) => "cast",
             Mode::Attack => "attack",
+            Mode::AttackMove => "attack-move here",
             Mode::Move => "move here",
             Mode::None => "",
         };
@@ -395,6 +412,9 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     } else if cx.has_units {
         v.push(hint_for(p, "move / attack", |a| {
             matches!(a, Action::Context { append: false })
+        }));
+        v.push(hint_for(p, "attack-move", |a| {
+            matches!(a, Action::AttackMove | Action::AttackMoveMode)
         }));
         v.push(hint_for(p, "orders", |a| matches!(a, Action::CommandWheel)));
         if cx.has_builder {
@@ -484,6 +504,12 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             key_name_for(p, |a| matches!(a, Action::AttackMode)),
             "attack",
         ));
+        v.push((
+            key_name_for(p, |a| {
+                matches!(a, Action::AttackMove | Action::AttackMoveMode)
+            }),
+            "attack-move",
+        ));
         v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
         v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
         v.push((
@@ -558,6 +584,7 @@ pub fn action_label(a: &Action) -> String {
         Action::FollowSelection => "Track".into(),
         Action::BuildOption { index } => format!("Option {}", index + 1),
         Action::AttackMode => "Attack".into(),
+        Action::AttackMove | Action::AttackMoveMode => "Attack-move".into(),
         Action::MoveMode => "Move".into(),
         Action::RecallGroup { group } => format!("Squad {}", squad_number(group.get())),
         Action::AssignGroup { group } => format!("Set squad {}", squad_number(group.get())),
@@ -776,6 +803,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn attack_move_is_distinct_from_force_attack_in_both_hint_sets() {
+        let m = Mapper::new(Profile::default_combined());
+        let cx = HintCx {
+            has_units: true,
+            ..Default::default()
+        };
+        let pad = hints(&m, cx);
+        assert!(pad.iter().any(|h| h.text == "attack-move"
+            && h.prefix == "hold"
+            && h.key == HintKey::Buttons(vec![Button::X])));
+        let classic = hints_classic(&m, cx);
+        assert!(
+            classic
+                .iter()
+                .any(|h| h.text == "attack-move" && h.key == HintKey::Text("Alt+A".into()))
+        );
+        assert!(
+            classic
+                .iter()
+                .any(|h| h.text == "attack" && h.key == HintKey::Text("A".into()))
+        );
+        assert_eq!(action_label(&Action::AttackMove), "Attack-move");
+        assert_eq!(action_label(&Action::AttackMoveMode), "Attack-move");
+        assert_eq!(action_label(&Action::AttackMode), "Attack");
+    }
+
+    #[test]
     fn layouts_detect_from_name_and_vendor() {
         assert_eq!(
             detect_layout("auto", Some("Xbox Wireless Controller"), Some(0x045e)),
@@ -838,6 +892,36 @@ mod tests {
                 .any(|h| h.key == HintKey::Text("Ctrl+1-9".into()) && h.text == "squad"),
             "{h:?}"
         );
+    }
+
+    #[test]
+    fn plain_pad_prompts_follow_layout_rebinding_and_chords() {
+        let mut p = Profile::kingdoms_console();
+        let context = |a: &Action| matches!(a, Action::Context { append: false });
+        assert_eq!(
+            pad_action_name(&p, Layout::Xbox, context).as_deref(),
+            Some("X")
+        );
+        assert_eq!(
+            pad_action_name(&p, Layout::PlayStation, context).as_deref(),
+            Some("Square")
+        );
+        for b in &mut p.bindings {
+            if context(&b.action) {
+                b.input = Input::Button(Button::Y);
+                b.with = Some(Input::Button(Button::Lb));
+            }
+        }
+        assert_eq!(
+            pad_action_name(&p, Layout::Xbox, context).as_deref(),
+            Some("LB+Y")
+        );
+        assert_eq!(
+            pad_action_name(&p, Layout::PlayStation, context).as_deref(),
+            Some("L1+Triangle")
+        );
+        p.bindings.retain(|b| !context(&b.action));
+        assert_eq!(pad_action_name(&p, Layout::Xbox, context), None);
     }
 
     #[test]

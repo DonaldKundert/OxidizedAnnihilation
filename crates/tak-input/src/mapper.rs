@@ -564,7 +564,7 @@ impl Mapper {
                 _ => CursorKind::Invalid,
             },
             Mode::CastSpell(_) => CursorKind::Cast,
-            Mode::Attack => CursorKind::Attack,
+            Mode::Attack | Mode::AttackMove => CursorKind::Attack,
             Mode::Move => CursorKind::Move,
             Mode::None if units.is_empty() => match hovered {
                 Some(h) if h.owner == me => CursorKind::Select,
@@ -673,7 +673,7 @@ impl Mapper {
                 Mode::Patrol => false,
                 Mode::Guard => u.owner == me,
                 Mode::CastSpell(_) | Mode::Attack => true,
-                Mode::Move => false,
+                Mode::Move | Mode::AttackMove => false,
                 Mode::None if has_units => world.is_enemy(u.owner),
                 Mode::None => u.owner == me,
             }
@@ -1644,6 +1644,19 @@ impl Mapper {
                 }
             }
             Action::Context { append } => self.context(append, cx),
+            Action::AttackMove => {
+                let units = own_units(cx.world, &self.selection);
+                if units.is_empty() {
+                    self.refuse(Refusal::NothingSelected);
+                } else {
+                    let to = self.cursor_world();
+                    let queue = self.queue_mode(false);
+                    self.sim(SimCommand::AttackMove { units, to, queue }, cx);
+                    if queue == QueueMode::Replace {
+                        self.mode = Mode::None;
+                    }
+                }
+            }
             Action::Cancel => self.cancel(cx),
             Action::SelectSameType { scope } => {
                 self.client(ClientCommand::SelectSameType { scope }, cx)
@@ -1704,6 +1717,7 @@ impl Mapper {
             }
             Action::ToggleCrystalBall => self.crystal_toggled = !self.crystal_toggled,
             Action::AttackMode => self.set_mode_if_units(Mode::Attack, cx),
+            Action::AttackMoveMode => self.set_mode_if_units(Mode::AttackMove, cx),
             Action::MoveMode => self.set_mode_if_units(Mode::Move, cx),
             Action::SelectCategory { category } => self.select_category(category, cx),
             Action::SetBookmark { slot } => {

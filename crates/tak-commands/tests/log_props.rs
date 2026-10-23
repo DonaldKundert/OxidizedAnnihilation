@@ -44,6 +44,11 @@ fn sim_command() -> impl Strategy<Value = SimCommand> {
             to,
             queue
         }),
+        (units(), pos(), queue()).prop_map(|(units, to, queue)| SimCommand::AttackMove {
+            units,
+            to,
+            queue
+        }),
         (units(), target(), queue()).prop_map(|(units, target, queue)| SimCommand::Attack {
             units,
             target,

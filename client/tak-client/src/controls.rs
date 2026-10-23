@@ -830,7 +830,7 @@ fn chip_for(art: &mut GlyphArt, images: &mut Assets<Image>, g: &Glyph) -> Handle
         .clone()
 }
 
-const HINTS: usize = 7;
+const HINTS: usize = 8;
 
 #[derive(Component)]
 pub(super) struct HintBar;
@@ -1062,6 +1062,8 @@ const WHEEL_CLEAR: f32 = 26.0;
 const WHEEL_MIN_R: f32 = 64.0;
 /// Build portraits on wheel slots (`anims/buildpic` is 64x48).
 const SLOT_PIC: [f32; 2] = [48.0, 36.0];
+/// Weapon pictures are square; do not stretch them like build portraits.
+const SPELL_PIC: [f32; 2] = [32.0, 32.0];
 
 #[derive(Component)]
 pub(super) struct WheelRoot;
@@ -1251,6 +1253,8 @@ struct SlotView {
     short: bool,
     /// A unit portrait (build options).
     unit: Option<tak_commands::UnitDefId>,
+    /// Caster definition and actual weapon slot, not filtered menu index.
+    spell: Option<(tak_commands::UnitDefId, tak_commands::SpellId)>,
     /// Centre panel text for the highlighted slot.
     info: String,
     /// Centre panel shortfall line (red).
@@ -1263,12 +1267,14 @@ fn wheel_slot_view(
     s: &Session,
     w: &tak_sim::World,
     sel: &tak_commands::UnitSet,
+    order_prompt: &str,
 ) -> SlotView {
     let mut v = SlotView {
         label: feel::action_label(a),
         usable: true,
         short: false,
         unit: None,
+        spell: None,
         info: String::new(),
         shortfall: String::new(),
     };
@@ -1296,19 +1302,15 @@ fn wheel_slot_view(
             }
         }
         Action::CastSpell { index } => {
-            if let Some(sp) = crate::view::caster_spells(w, s.local, sel)
-                .and_then(|(_, sp)| sp.get(usize::from(*index)).cloned())
+            if let Some((caster, sp)) = crate::view::caster_spells(w, s.local, sel)
+                .and_then(|(id, sp)| sp.get(usize::from(*index)).cloned().map(|sp| (id, sp)))
             {
                 v.label = format!("{} ({})", sp.name, sp.cost);
+                v.spell = w.unit(caster).map(|u| (u.def, sp.id));
                 v.usable = sp.ready;
                 v.short = !sp.ready;
-                v.info = format!("{}\n{} mana", sp.name, sp.cost);
-                if !sp.ready {
-                    let own = crate::view::caster_spells(w, s.local, sel)
-                        .and_then(|(id, _)| tak_sim::economy::unit_mana(w, id))
-                        .map_or(0.0, |m| f(m.mana));
-                    v.shortfall = format!("short {:.0} mana", sp.cost as f32 - own);
-                }
+                v.info = format!("{}\n{}", sp.name, sp.mana_text());
+                v.shortfall = sp.shortfall_text().unwrap_or_default();
             } else {
                 v.usable = false;
             }
@@ -1318,10 +1320,13 @@ fn wheel_slot_view(
                 .is_some_and(|(_, sp)| sp.first().is_some_and(|x| x.ready));
         }
         Action::OpenRing { .. } => v.info = format!("{}\nconfirm to open", v.label),
-        Action::AttackMode => v.info = "Attack\nthen X on a target".into(),
-        Action::MoveMode => v.info = "Move\nthen X on the ground".into(),
-        Action::GuardMode => v.info = "Guard\nthen X on a friend".into(),
-        Action::PatrolMode => v.info = "Patrol\nthen X on the ground".into(),
+        Action::AttackMode => v.info = format!("Attack\nthen {order_prompt} on a target"),
+        Action::AttackMoveMode => {
+            v.info = format!("Attack-move\nthen {order_prompt} on the ground")
+        }
+        Action::MoveMode => v.info = format!("Move\nthen {order_prompt} on the ground"),
+        Action::GuardMode => v.info = format!("Guard\nthen {order_prompt} on a friend"),
+        Action::PatrolMode => v.info = format!("Patrol\nthen {order_prompt} on the ground"),
         other => v.info = feel::action_label(other),
     }
     v
@@ -1335,8 +1340,11 @@ pub(super) fn wheel_system(
     feel: Res<Feel>,
     cam: Res<CamState>,
     ground: Res<Ground>,
-    mut portraits: ResMut<Portraits>,
-    mut images: ResMut<Assets<Image>>,
+    pictures: (
+        Res<hud_view::HudArt>,
+        ResMut<Portraits>,
+        ResMut<Assets<Image>>,
+    ),
     mut root: Query<
         (&mut Node, &mut Visibility),
         (
@@ -1427,6 +1435,7 @@ pub(super) fn wheel_system(
         ),
     >,
 ) {
+    let (art, mut portraits, mut images) = pictures;
     let s = &sim.session;
     let w = s.sim.world();
     let ghost = feel.ghost.as_ref().and_then(|r| r.ghost_at(s.tick().0));
@@ -1448,9 +1457,13 @@ pub(super) fn wheel_system(
     rn.top = Val::Px(p[1]);
     let n = wh.slots.len().min(WHEEL_SLOTS);
     let sel = input.mapper.selection();
+    let order_prompt = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+        matches!(a, Action::Context { append: false })
+    })
+    .unwrap_or_else(|| "confirm".into());
     let views: Vec<SlotView> = wh.slots[..n]
         .iter()
-        .map(|a| wheel_slot_view(a, s, w, sel))
+        .map(|a| wheel_slot_view(a, s, w, sel, &order_prompt))
         .collect();
     // The centre panel (highlighted slot) and its size, so the ring clears
     // it as it clears the cursor.
@@ -1477,6 +1490,8 @@ pub(super) fn wheel_system(
             let chars = views[sl.0].label.chars().count() as f32;
             let pic = if views[sl.0].unit.is_some() {
                 SLOT_PIC[1] + 2.0
+            } else if views[sl.0].spell.is_some() {
+                SPELL_PIC[1] + 2.0
             } else {
                 0.0
             };
@@ -1534,13 +1549,28 @@ pub(super) fn wheel_system(
         }
     }
     for (sp, mut node, mut img) in &mut pics {
-        let unit = (sp.0 < n).then(|| views[sp.0].unit).flatten();
-        let handle = unit.and_then(|u| {
-            s.def(u)
-                .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+        let view = views.get(sp.0).filter(|_| sp.0 < n);
+        let handle = view.and_then(|view| {
+            if let Some((def, spell)) = view.spell {
+                let state =
+                    crate::hud::button_state(view.usable, false, wh.highlighted == Some(sp.0));
+                art.weapon_button(def, spell, state).cloned()
+            } else {
+                view.unit.and_then(|u| {
+                    s.def(u)
+                        .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+                })
+            }
         });
         match handle {
             Some(h) => {
+                let size = if view.is_some_and(|v| v.spell.is_some()) {
+                    SPELL_PIC
+                } else {
+                    SLOT_PIC
+                };
+                node.width = Val::Px(size[0]);
+                node.height = Val::Px(size[1]);
                 img.image = h;
                 img.color = if views[sp.0].short {
                     Color::srgb(0.45, 0.45, 0.45)
@@ -1596,12 +1626,28 @@ pub(super) fn wheel_system(
             }
         }
         if let Ok((mut node, mut img)) = info_pic.single_mut() {
-            let h = view.unit.and_then(|u| {
-                s.def(u)
-                    .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
-            });
+            let h = if let Some((def, spell)) = view.spell {
+                art.weapon_button(
+                    def,
+                    spell,
+                    crate::hud::button_state(view.usable, false, true),
+                )
+                .cloned()
+            } else {
+                view.unit.and_then(|u| {
+                    s.def(u)
+                        .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+                })
+            };
             match h {
                 Some(h) => {
+                    let size = if view.spell.is_some() {
+                        SPELL_PIC
+                    } else {
+                        [64.0, 48.0]
+                    };
+                    node.width = Val::Px(size[0]);
+                    node.height = Val::Px(size[1]);
                     img.image = h;
                     img.color = if view.short {
                         Color::srgb(0.5, 0.5, 0.5)
@@ -1622,7 +1668,15 @@ pub(super) fn wheel_system(
             wh.kind.title().to_string()
         };
         if wh.pages > 1 {
-            title.push_str(&format!("   page {}/{}  (RB: next)", wh.page + 1, wh.pages));
+            let next = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+                matches!(a, Action::QueueModifier)
+            })
+            .unwrap_or_else(|| "next page".into());
+            title.push_str(&format!(
+                "   page {}/{}  ({next}: next)",
+                wh.page + 1,
+                wh.pages
+            ));
         }
         if ghost.is_some() {
             title.push_str(" (ghost)");
@@ -1648,7 +1702,7 @@ pub(super) fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> 
     use tak_commands::SimCommand as C;
     Some(match c {
         C::Move { .. } | C::Build { .. } => "MOVE",
-        C::Attack { .. } | C::CastSpell { .. } => "ATTACK",
+        C::Attack { .. } | C::AttackMove { .. } | C::CastSpell { .. } => "ATTACK",
         C::Guard { .. } => "GUARD",
         C::Patrol { .. } => "PATROL",
         C::Stop { .. } => "STOP",

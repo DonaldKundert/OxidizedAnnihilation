@@ -2133,7 +2133,7 @@ fn sprite_assets(
                 // Shadow opacity baked into the texture (a material alpha
                 // below 0.5 did not show on lavapipe).
                 let a = (SHADOW_ALPHA * 255.0) as u8;
-                for p in px.chunks_exact_mut(4) {
+                for p in px.as_chunks_mut::<4>().0 {
                     p[3] = p[3].min(a);
                 }
             }
@@ -3557,7 +3557,9 @@ fn gizmo_system(
             let mut from = Vec3::new(x, u.ground + 2.0, y);
             for o in &unit.orders {
                 let to = match o {
-                    tak_sim::Order::Move { to } | tak_sim::Order::Patrol { to } => Some(*to),
+                    tak_sim::Order::Move { to }
+                    | tak_sim::Order::AttackMove { to }
+                    | tak_sim::Order::Patrol { to } => Some(*to),
                     tak_sim::Order::Build { at: Some(at), .. } => Some(*at),
                     tak_sim::Order::Attack {
                         target: tak_commands::Target::Ground(p),
