@@ -1229,7 +1229,7 @@ fn input_system(
     }
     let ghost = feel.ghost.is_some();
     // Opening the overlay drops gestures in progress (no stuck holds).
-    let overlay = feel.overlay_open;
+    let overlay = feel.overlay_open || feel.overlay_captured_input;
     let t = time.elapsed().as_millis() as u32;
     let mut events = Vec::new();
     // Pointer: the terrain point under the mouse, as a virtual pixel.
@@ -1250,8 +1250,12 @@ fn input_system(
     if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
         && mouse.just_pressed(MouseButton::Left)
         && mg.contains(pos.x, pos.y)
+        && !overlay
     {
         minimap.mouse_drag = true;
+    }
+    if overlay {
+        minimap.mouse_drag = false;
     }
     if minimap.mouse_drag {
         if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
@@ -1267,6 +1271,7 @@ fn input_system(
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
+        && !overlay
         && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
     {
         minimap.ui_held = true;
@@ -1385,6 +1390,22 @@ fn input_system(
         events.retain(|e| matches!(e, EventKind::Scroll { .. }));
     }
     events.push(EventKind::Frame);
+    if overlay {
+        // Keep the mapper clock current and drain releases, with neutral
+        // sticks. Otherwise reopening gameplay integrates stale axes over
+        // all the time spent in the overlay. Resample real axes afterwards.
+        events.retain(|e| {
+            matches!(
+                e,
+                EventKind::KeyUp { .. } | EventKind::ButtonUp { .. } | EventKind::Frame
+            )
+        });
+        for axis in [InAxis::LeftX, InAxis::LeftY, InAxis::RightX, InAxis::RightY] {
+            events.insert(0, EventKind::Axis { axis, value: 0 });
+        }
+        input.last_axes.clear();
+        input.last_pointer = None;
+    }
 
     let tick = sim.session.tick();
     let mut outs = Vec::new();
@@ -1401,6 +1422,10 @@ fn input_system(
         for a in pressed {
             outs.extend(input.mapper.perform(a, &view, tick));
         }
+    }
+    if overlay {
+        // A custom release binding must not escape the overlay either.
+        outs.clear();
     }
     let mut submitted = Vec::new();
     for o in &outs {
@@ -1479,10 +1504,13 @@ fn input_system(
     // Camera: mapper pan (right stick, edge pan, glides) and zoom (wheel,
     // RB + right stick), then the arrow keys.
     let pan = input.mapper.take_camera_pan();
-    cam.geom.target[0] += f(pan.x);
-    cam.geom.target[1] += f(pan.y);
-    if let Some(z) = input.mapper.take_camera_zoom() {
-        cam.geom.zoom = f(z);
+    let zoom = input.mapper.take_camera_zoom();
+    if !overlay {
+        cam.geom.target[0] += f(pan.x);
+        cam.geom.target[1] += f(pan.y);
+        if let Some(z) = zoom {
+            cam.geom.zoom = f(z);
+        }
     }
     // Hand the moved camera back at once, so the cursor and reticle drawn
     // this frame already ride with it.
@@ -3846,3 +3874,7 @@ fn gizmo_system(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "overlay_input_tests.rs"]
+mod overlay_input_tests;

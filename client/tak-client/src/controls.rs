@@ -29,6 +29,8 @@ pub(super) struct Feel {
     /// Message for the overlay / HUD and seconds left.
     pub status: Option<(String, f32)>,
     pub overlay_open: bool,
+    /// If open at frame start, retain input ownership through the closing frame.
+    pub overlay_captured_input: bool,
     overlay_row: usize,
     /// Feedback drained from the mapper this frame.
     pub feedback: Vec<Feedback>,
@@ -68,6 +70,7 @@ impl Feel {
             poll_timer: 0.0,
             status: None,
             overlay_open: args.overlay,
+            overlay_captured_input: false,
             overlay_row: 0,
             feedback: Vec::new(),
             recorder: None,
@@ -319,6 +322,7 @@ pub(super) fn overlay_input_system(
     mut feel: ResMut<Feel>,
     mut input: ResMut<InputRes>,
 ) {
+    feel.overlay_captured_input = feel.overlay_open;
     if !feel.overlay_open {
         return;
     }
