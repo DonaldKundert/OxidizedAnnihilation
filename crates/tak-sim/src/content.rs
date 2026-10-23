@@ -236,6 +236,7 @@ impl Scenario {
         ));
         let sc = Scenario {
             version: SCENARIO_FORMAT_VERSION,
+            initial_units: None,
             seed: 0,
             map: info,
             unit_defs,

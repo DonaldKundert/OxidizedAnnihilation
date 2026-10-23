@@ -78,8 +78,9 @@ pub struct VictorySetup {
     /// Skirmish: what a defeated player's units do.
     pub defeated_units: DefeatedUnits,
     /// Team per player (index = player id); `None` or a missing entry is a
-    /// team of one. Players on the same team win together. Only victory
-    /// reads teams; combat still treats every other player as an enemy.
+    /// team of one. Players on the same team win together and do not
+    /// automatically target each other. Explicit attacks and damage are
+    /// unchanged; this does not imply shared vision, control or resources.
     pub teams: Vec<Option<u8>>,
     /// Mission conditions; `None` plays a skirmish.
     pub mission: Option<MissionRules>,
@@ -113,7 +114,9 @@ impl VictorySetup {
         Ok(())
     }
 
-    fn team(&self, p: usize) -> u32 {
+    // A single key definition for victory and World's read-only diplomacy
+    // predicates. Explicit u8 teams cannot collide with singleton players.
+    pub(crate) fn team(&self, p: usize) -> u32 {
         match self.teams.get(p).copied().flatten() {
             Some(t) => u32::from(t),
             None => 0x100 + p as u32,

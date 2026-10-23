@@ -18,7 +18,7 @@ fn every_archive_opens_and_every_file_extracts() {
             tak_vfs::hapi::Archive::open(src).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         for e in a.entries() {
             let data = a
-                .read(e)
+                .read_bounded(e, u64::from(e.size))
                 .unwrap_or_else(|err| panic!("{} / {}: {err}", path.display(), e.path));
             files += 1;
             bytes += data.len() as u64;

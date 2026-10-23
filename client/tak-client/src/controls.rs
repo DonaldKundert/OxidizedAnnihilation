@@ -13,6 +13,7 @@ use tak_input::{CursorKind, Feedback, PRESETS, Recorder, Recording, TUNING_FIELD
 
 use super::*;
 use crate::feel::{self, Glyph, HintKey, Layout, Symbol};
+use crate::hud::{CURSOR_KINDS, cursor_seq};
 
 /// Feel state shared by the input adapter and the controls systems.
 #[derive(Resource)]
@@ -28,6 +29,8 @@ pub(super) struct Feel {
     /// Message for the overlay / HUD and seconds left.
     pub status: Option<(String, f32)>,
     pub overlay_open: bool,
+    /// If open at frame start, retain input ownership through the closing frame.
+    pub overlay_captured_input: bool,
     overlay_row: usize,
     /// Feedback drained from the mapper this frame.
     pub feedback: Vec<Feedback>,
@@ -49,6 +52,10 @@ pub(super) struct Feel {
     pub hud_choice: String,
     /// A one-off bottom-bar message (e.g. the damage-bar mode).
     pub toast: Option<String>,
+    /// Client-owned quick-save request, kept outside deterministic input rules.
+    pub quick_save_requested: bool,
+    pub quick_save_dir: Result<PathBuf, String>,
+    pub loaded_checkpoint: Option<PathBuf>,
     /// Order acknowledgements to play this frame (`Sounds/*.WAV` names).
     pub sounds: Vec<&'static str>,
 }
@@ -63,6 +70,7 @@ impl Feel {
             poll_timer: 0.0,
             status: None,
             overlay_open: args.overlay,
+            overlay_captured_input: false,
             overlay_row: 0,
             feedback: Vec::new(),
             recorder: None,
@@ -76,6 +84,10 @@ impl Feel {
             damage_bars: 0,
             hud_choice: args.hud.to_ascii_lowercase(),
             toast: None,
+            quick_save_requested: false,
+            loaded_checkpoint: args.load_checkpoint.clone(),
+            quick_save_dir: crate::saves::save_directory(args.save_dir.as_deref(), &args.data)
+                .map_err(|e| e.to_string()),
             sounds: Vec::new(),
         }
     }
@@ -128,6 +140,14 @@ fn save(feel: &mut Feel, input: &InputRes) {
         .profile_path
         .clone()
         .unwrap_or_else(feel::default_profile_path);
+    if feel
+        .loaded_checkpoint
+        .as_ref()
+        .is_some_and(|input| crate::saves::same_file(input, &path))
+    {
+        feel.say("profile save refused: destination aliases the loaded game checkpoint");
+        return;
+    }
     match feel::save_profile(&path, input.mapper.profile()) {
         Ok(t) => {
             if feel.profile_path.is_none() {
@@ -189,6 +209,11 @@ pub(super) fn setup_overlay(mut commands: Commands) {
         Text::new("Tuning"),
         hud_text(16.0),
         OverlayTitle,
+        ChildOf(root),
+    ));
+    commands.spawn((
+        Text::new("Match quick-save: F10 or pad X / Square. Creates a new replay save."),
+        hud_text(13.0),
         ChildOf(root),
     ));
     for i in 0..OVERLAY_ROWS {
@@ -297,6 +322,7 @@ pub(super) fn overlay_input_system(
     mut feel: ResMut<Feel>,
     mut input: ResMut<InputRes>,
 ) {
+    feel.overlay_captured_input = feel.overlay_open;
     if !feel.overlay_open {
         return;
     }
@@ -328,6 +354,13 @@ pub(super) fn overlay_input_system(
         || (keys.just_pressed(KeyCode::KeyS)
             && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::SuperLeft)));
     if let Some(pad) = pads.iter().next() {
+        if crate::saves::quick_save_shortcut(
+            false,
+            feel.overlay_open,
+            pad.just_pressed(GamepadButton::West),
+        ) {
+            feel.quick_save_requested = true;
+        }
         if pad.just_pressed(GamepadButton::DPadDown) {
             row = (row + 1) % n;
         }
@@ -504,13 +537,18 @@ pub(super) fn overlay_draw_system(
             "Write the profile (bindings + tuning) to the file above".to_string()
         };
         let pad = match feel.layout {
-            Layout::Xbox => "D-pad move/adjust, LB/RB x10, A toggle, Y save, B close",
+            Layout::Xbox => {
+                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, B close"
+            }
             Layout::PlayStation => {
-                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save, Circle close"
+                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save profile, Square quick-save match, Circle close"
             }
         };
         s.0 = format!(
-            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save, F11 close. Mouse: - / +{}",
+            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F11 close. Mouse: - / +\nQuick-save: {}{}",
+            feel.quick_save_dir
+                .as_ref()
+                .map_or_else(|e| e.clone(), |p| p.display().to_string()),
             feel.status
                 .as_ref()
                 .map_or(String::new(), |(m, _)| format!("\n{m}"))
@@ -537,36 +575,6 @@ impl CursorArt {
         self.0.contains_key("cursornormal")
     }
 }
-
-/// `anims/CURSORS.GAF` sequence for each context (**Chosen** mapping; the
-/// names say what each is for).
-fn cursor_seq(kind: CursorKind) -> &'static str {
-    match kind {
-        CursorKind::Normal => "cursornormal",
-        CursorKind::Select => "cursorselect",
-        CursorKind::Move => "CursorMove",
-        CursorKind::Attack => "CursorAttack",
-        CursorKind::Guard => "CursorDefend",
-        CursorKind::Patrol => "CursorPatrol",
-        CursorKind::Build => "cursorgrn",
-        CursorKind::BuildBlocked => "cursorred",
-        CursorKind::Cast => "Cursorresurrect",
-        CursorKind::Invalid => "cursortoofar",
-    }
-}
-
-const CURSOR_KINDS: [CursorKind; 10] = [
-    CursorKind::Normal,
-    CursorKind::Select,
-    CursorKind::Move,
-    CursorKind::Attack,
-    CursorKind::Guard,
-    CursorKind::Patrol,
-    CursorKind::Build,
-    CursorKind::BuildBlocked,
-    CursorKind::Cast,
-    CursorKind::Invalid,
-];
 
 #[derive(Component)]
 pub(super) struct GameCursor {
@@ -830,7 +838,7 @@ fn chip_for(art: &mut GlyphArt, images: &mut Assets<Image>, g: &Glyph) -> Handle
         .clone()
 }
 
-const HINTS: usize = 7;
+const HINTS: usize = 9;
 
 #[derive(Component)]
 pub(super) struct HintBar;
@@ -959,6 +967,7 @@ pub(super) fn hints_system(
         .collect();
     let cx = feel::HintCx {
         has_units: !sel.is_empty(),
+        has_healer: !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty(),
         has_builder: sel.iter().any(|u| {
             w.defs()
                 .get(u.def)
@@ -1062,6 +1071,8 @@ const WHEEL_CLEAR: f32 = 26.0;
 const WHEEL_MIN_R: f32 = 64.0;
 /// Build portraits on wheel slots (`anims/buildpic` is 64x48).
 const SLOT_PIC: [f32; 2] = [48.0, 36.0];
+/// Weapon pictures are square; do not stretch them like build portraits.
+const SPELL_PIC: [f32; 2] = [32.0, 32.0];
 
 #[derive(Component)]
 pub(super) struct WheelRoot;
@@ -1251,6 +1262,8 @@ struct SlotView {
     short: bool,
     /// A unit portrait (build options).
     unit: Option<tak_commands::UnitDefId>,
+    /// Caster definition and actual weapon slot, not filtered menu index.
+    spell: Option<(tak_commands::UnitDefId, tak_commands::SpellId)>,
     /// Centre panel text for the highlighted slot.
     info: String,
     /// Centre panel shortfall line (red).
@@ -1263,12 +1276,14 @@ fn wheel_slot_view(
     s: &Session,
     w: &tak_sim::World,
     sel: &tak_commands::UnitSet,
+    order_prompt: &str,
 ) -> SlotView {
     let mut v = SlotView {
         label: feel::action_label(a),
         usable: true,
         short: false,
         unit: None,
+        spell: None,
         info: String::new(),
         shortfall: String::new(),
     };
@@ -1296,19 +1311,15 @@ fn wheel_slot_view(
             }
         }
         Action::CastSpell { index } => {
-            if let Some(sp) = crate::view::caster_spells(w, s.local, sel)
-                .and_then(|(_, sp)| sp.get(usize::from(*index)).cloned())
+            if let Some((caster, sp)) = crate::view::caster_spells(w, s.local, sel)
+                .and_then(|(id, sp)| sp.get(usize::from(*index)).cloned().map(|sp| (id, sp)))
             {
                 v.label = format!("{} ({})", sp.name, sp.cost);
+                v.spell = w.unit(caster).map(|u| (u.def, sp.id));
                 v.usable = sp.ready;
                 v.short = !sp.ready;
-                v.info = format!("{}\n{} mana", sp.name, sp.cost);
-                if !sp.ready {
-                    let own = crate::view::caster_spells(w, s.local, sel)
-                        .and_then(|(id, _)| tak_sim::economy::unit_mana(w, id))
-                        .map_or(0.0, |m| f(m.mana));
-                    v.shortfall = format!("short {:.0} mana", sp.cost as f32 - own);
-                }
+                v.info = format!("{}\n{}", sp.name, sp.mana_text());
+                v.shortfall = sp.shortfall_text().unwrap_or_default();
             } else {
                 v.usable = false;
             }
@@ -1318,10 +1329,17 @@ fn wheel_slot_view(
                 .is_some_and(|(_, sp)| sp.first().is_some_and(|x| x.ready));
         }
         Action::OpenRing { .. } => v.info = format!("{}\nconfirm to open", v.label),
-        Action::AttackMode => v.info = "Attack\nthen X on a target".into(),
-        Action::MoveMode => v.info = "Move\nthen X on the ground".into(),
-        Action::GuardMode => v.info = "Guard\nthen X on a friend".into(),
-        Action::PatrolMode => v.info = "Patrol\nthen X on the ground".into(),
+        Action::AttackMode => v.info = format!("Attack\nthen {order_prompt} on a target"),
+        Action::AttackMoveMode => {
+            v.info = format!("Attack-move\nthen {order_prompt} on the ground")
+        }
+        Action::MoveMode => v.info = format!("Move\nthen {order_prompt} on the ground"),
+        Action::GuardMode => v.info = format!("Guard\nthen {order_prompt} on a friend"),
+        Action::HealMode => {
+            v.usable = !tak_input::healers_for(&s.view(), sel).is_empty();
+            v.info = format!("Heal / repair\nthen {order_prompt} on another own unit or frame");
+        }
+        Action::PatrolMode => v.info = format!("Patrol\nthen {order_prompt} on the ground"),
         other => v.info = feel::action_label(other),
     }
     v
@@ -1335,8 +1353,11 @@ pub(super) fn wheel_system(
     feel: Res<Feel>,
     cam: Res<CamState>,
     ground: Res<Ground>,
-    mut portraits: ResMut<Portraits>,
-    mut images: ResMut<Assets<Image>>,
+    pictures: (
+        Res<hud_view::HudArt>,
+        ResMut<Portraits>,
+        ResMut<Assets<Image>>,
+    ),
     mut root: Query<
         (&mut Node, &mut Visibility),
         (
@@ -1427,6 +1448,7 @@ pub(super) fn wheel_system(
         ),
     >,
 ) {
+    let (art, mut portraits, mut images) = pictures;
     let s = &sim.session;
     let w = s.sim.world();
     let ghost = feel.ghost.as_ref().and_then(|r| r.ghost_at(s.tick().0));
@@ -1448,9 +1470,13 @@ pub(super) fn wheel_system(
     rn.top = Val::Px(p[1]);
     let n = wh.slots.len().min(WHEEL_SLOTS);
     let sel = input.mapper.selection();
+    let order_prompt = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+        matches!(a, Action::Context { append: false })
+    })
+    .unwrap_or_else(|| "confirm".into());
     let views: Vec<SlotView> = wh.slots[..n]
         .iter()
-        .map(|a| wheel_slot_view(a, s, w, sel))
+        .map(|a| wheel_slot_view(a, s, w, sel, &order_prompt))
         .collect();
     // The centre panel (highlighted slot) and its size, so the ring clears
     // it as it clears the cursor.
@@ -1477,6 +1503,8 @@ pub(super) fn wheel_system(
             let chars = views[sl.0].label.chars().count() as f32;
             let pic = if views[sl.0].unit.is_some() {
                 SLOT_PIC[1] + 2.0
+            } else if views[sl.0].spell.is_some() {
+                SPELL_PIC[1] + 2.0
             } else {
                 0.0
             };
@@ -1534,13 +1562,28 @@ pub(super) fn wheel_system(
         }
     }
     for (sp, mut node, mut img) in &mut pics {
-        let unit = (sp.0 < n).then(|| views[sp.0].unit).flatten();
-        let handle = unit.and_then(|u| {
-            s.def(u)
-                .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+        let view = views.get(sp.0).filter(|_| sp.0 < n);
+        let handle = view.and_then(|view| {
+            if let Some((def, spell)) = view.spell {
+                let state =
+                    crate::hud::button_state(view.usable, false, wh.highlighted == Some(sp.0));
+                art.weapon_button(def, spell, state).cloned()
+            } else {
+                view.unit.and_then(|u| {
+                    s.def(u)
+                        .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+                })
+            }
         });
         match handle {
             Some(h) => {
+                let size = if view.is_some_and(|v| v.spell.is_some()) {
+                    SPELL_PIC
+                } else {
+                    SLOT_PIC
+                };
+                node.width = Val::Px(size[0]);
+                node.height = Val::Px(size[1]);
                 img.image = h;
                 img.color = if views[sp.0].short {
                     Color::srgb(0.45, 0.45, 0.45)
@@ -1596,12 +1639,28 @@ pub(super) fn wheel_system(
             }
         }
         if let Ok((mut node, mut img)) = info_pic.single_mut() {
-            let h = view.unit.and_then(|u| {
-                s.def(u)
-                    .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
-            });
+            let h = if let Some((def, spell)) = view.spell {
+                art.weapon_button(
+                    def,
+                    spell,
+                    crate::hud::button_state(view.usable, false, true),
+                )
+                .cloned()
+            } else {
+                view.unit.and_then(|u| {
+                    s.def(u)
+                        .and_then(|d| portraits.get(&content, &mut images, &d.unitname))
+                })
+            };
             match h {
                 Some(h) => {
+                    let size = if view.spell.is_some() {
+                        SPELL_PIC
+                    } else {
+                        [64.0, 48.0]
+                    };
+                    node.width = Val::Px(size[0]);
+                    node.height = Val::Px(size[1]);
                     img.image = h;
                     img.color = if view.short {
                         Color::srgb(0.5, 0.5, 0.5)
@@ -1622,7 +1681,15 @@ pub(super) fn wheel_system(
             wh.kind.title().to_string()
         };
         if wh.pages > 1 {
-            title.push_str(&format!("   page {}/{}  (RB: next)", wh.page + 1, wh.pages));
+            let next = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+                matches!(a, Action::QueueModifier)
+            })
+            .unwrap_or_else(|| "next page".into());
+            title.push_str(&format!(
+                "   page {}/{}  ({next}: next)",
+                wh.page + 1,
+                wh.pages
+            ));
         }
         if ghost.is_some() {
             title.push_str(" (ghost)");
@@ -1641,20 +1708,6 @@ pub(super) fn wheel_system(
 /// `ATTACK`, `GUARD`, `PATROL`, `STOP`), decoded by Bevy's WAV support.
 #[derive(Resource, Default)]
 pub(super) struct OrderSounds(BTreeMap<&'static str, Handle<AudioSource>>);
-
-/// The acknowledgement for an order (**Chosen** for orders without their
-/// own sound: build walks like a move, a spell attacks, a stance has none).
-pub(super) fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
-    use tak_commands::SimCommand as C;
-    Some(match c {
-        C::Move { .. } | C::Build { .. } => "MOVE",
-        C::Attack { .. } | C::CastSpell { .. } => "ATTACK",
-        C::Guard { .. } => "GUARD",
-        C::Patrol { .. } => "PATROL",
-        C::Stop { .. } => "STOP",
-        C::SetFireState { .. } => return None,
-    })
-}
 
 pub(super) fn setup_sounds(
     mut commands: Commands,

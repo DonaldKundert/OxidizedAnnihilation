@@ -15,7 +15,10 @@ use crate::hash::{LeHasher, StateHasher};
 use crate::map::MapInfo;
 use crate::scenario::{Scenario, ScenarioError};
 
-/// Most queued orders a unit keeps; further appends are dropped.
+/// Queue length checked when accepting appends; further appends are dropped.
+/// An existing temporary steering move counts toward this admission limit.
+/// Combat/construction may insert one temporary move after player orders have
+/// been accepted, without discarding those previously accepted orders.
 pub const MAX_ORDERS: usize = 256;
 
 /// Most units alive at once; spawns beyond this fail.
@@ -29,6 +32,11 @@ pub enum Order {
         /// Destination.
         to: WorldPos,
     },
+    /// Move toward a destination, temporarily engaging enemies en route.
+    AttackMove {
+        /// Durable destination, independent of combat steering.
+        to: WorldPos,
+    },
     /// Attack a unit or a ground point (combat, WP-M).
     Attack {
         /// What to attack.
@@ -37,6 +45,11 @@ pub enum Order {
     /// Follow and protect a unit (combat, WP-M).
     Guard {
         /// Unit to guard.
+        target: UnitId,
+    },
+    /// Heal an owned unit (construction lane).
+    Heal {
+        /// Unit to heal or assist.
         target: UnitId,
     },
     /// Patrol leg toward a point; re-queued at the back when reached
@@ -88,6 +101,14 @@ impl Order {
                 h.unit_def(def);
                 h.option(at, StateHasher::vec2);
             }
+            Order::AttackMove { to } => {
+                h.u8(5);
+                h.vec2(to);
+            }
+            Order::Heal { target } => {
+                h.u8(6);
+                h.unit_id(target);
+            }
         }
     }
 }
@@ -131,6 +152,22 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// Cancel accepted orders without letting stale assist steering claim a
+    /// newly queued player move at the same coordinates. Keep the assist record
+    /// so construction can still send its pending StopBuilding notification.
+    pub(crate) fn cancel_player_orders(&mut self) {
+        self.orders.clear();
+        self.combat.cancel_orders();
+        if let Some(heal) = &mut self.build.heal {
+            heal.cancelled = true;
+            heal.work.walking = false;
+        }
+        if let Some(assist) = &mut self.build.assist {
+            assist.walk_to = None;
+            assist.walking = false;
+        }
+    }
+
     /// Refresh `ground` and `terrain` from the map.
     pub(crate) fn sample_terrain(&mut self, map: &MapInfo) {
         self.ground = map.height_at(self.pos);
@@ -149,6 +186,7 @@ impl Unit {
             FireState::HoldFire => 0,
             FireState::ReturnFire => 1,
             FireState::FireAtWill => 2,
+            FireState::Defensive => 3,
         });
         h.len(self.orders.len());
         for o in &self.orders {
@@ -192,6 +230,7 @@ pub struct World {
     /// Digest of the immutable match data (map, defs), folded into every
     /// state hash.
     static_digest: u64,
+    pub(crate) initial_units: Option<Vec<crate::campaign::InitialUnit>>,
     /// Pathfinding state (WP-L).
     pub pathing: crate::pathfinding::PathState,
     /// Combat state (WP-M).
@@ -227,6 +266,13 @@ impl World {
         let mut h = StateHasher::new();
         map.hash(&mut h);
         defs.hash(&mut h);
+        if let Some(units) = &scenario.initial_units {
+            h.bytes(b"INITIAL_UNITS");
+            h.len(units.len());
+            for unit in units {
+                unit.hash(&mut h);
+            }
+        }
         let static_digest = h.finish();
         Ok(World {
             tick: Tick(0),
@@ -236,6 +282,7 @@ impl World {
             players,
             slots: Vec::new(),
             static_digest,
+            initial_units: scenario.initial_units.clone(),
             pathing: Default::default(),
             combat: Default::default(),
             economy: crate::economy::EconomyState::new(&scenario.economy, scenario.players.len()),
@@ -273,6 +320,26 @@ impl World {
     /// `true` if `p` is a player in this match.
     pub fn has_player(&self, p: PlayerId) -> bool {
         (p.0 as usize) < self.players.len()
+    }
+
+    /// Whether two valid players are the same owner or share an explicitly
+    /// configured team. Missing/`None` teams are single-player teams.
+    /// Unknown player ids are never allied, even with themselves.
+    ///
+    /// This read-only relationship controls automatic targeting and agrees
+    /// with skirmish victory. It does not grant shared control, vision,
+    /// resources or builder assistance, or prohibit explicit friendly fire.
+    pub fn are_allied(&self, a: PlayerId, b: PlayerId) -> bool {
+        self.has_player(a)
+            && self.has_player(b)
+            && self.victory.setup().team(a.0 as usize) == self.victory.setup().team(b.0 as usize)
+    }
+
+    /// Whether two valid players are on different teams. There is no
+    /// inferred campaign alliance or neutral-player exception. Unknown ids
+    /// are never hostile, so this is not `!are_allied` for invalid players.
+    pub fn are_hostile(&self, a: PlayerId, b: PlayerId) -> bool {
+        self.has_player(a) && self.has_player(b) && !self.are_allied(a, b)
     }
 
     /// A live unit, or `None` if the id is stale or out of range.
@@ -437,6 +504,7 @@ mod tests {
     fn world() -> World {
         World::new(&Scenario {
             version: SCENARIO_FORMAT_VERSION,
+            initial_units: None,
             seed: 1,
             map: MapInfo::flat(512, 512, vec![StartPos { x: 10, y: 10 }]),
             unit_defs: vec![UnitDef {

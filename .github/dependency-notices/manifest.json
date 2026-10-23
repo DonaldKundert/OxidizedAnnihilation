@@ -1,0 +1,3251 @@
+{
+  "schema_version": 1,
+  "purpose": "Exact upstream legal files omitted from published crates; no general missing-notice fallback.",
+  "packages": [
+    {
+      "name": "accesskit",
+      "version": "0.24.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/AccessKit/accesskit",
+      "vcs_revision": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+      "path_in_vcs": "common",
+      "notice_files": [
+        "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/AUTHORS",
+        "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+        "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+        "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium"
+      ]
+    },
+    {
+      "name": "accesskit_winit",
+      "version": "0.33.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "d5b41e63a69f36d9f1f41e70464c7e5f72eee485ef26aab19f0b4f86e6c0a84c",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/AccessKit/accesskit",
+      "vcs_revision": "c88605b96d04431f9c3c792464a0f2f253480e94",
+      "path_in_vcs": "platforms/winit",
+      "notice_files": [
+        "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/AUTHORS",
+        "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+        "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+        "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium"
+      ]
+    },
+    {
+      "name": "bevy_scene_macros",
+      "version": "0.20.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "d4da846d8418ca6e38943707c88075a4a0b8f6eea0fd286d33a024d0257439d0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/bevyengine/bevy",
+      "vcs_revision": "b3bdd75becaffe9a16677cf5bae5bd6d198f052b",
+      "path_in_vcs": "crates/bevy_scene/macros",
+      "notice_files": [
+        "sources/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-APACHE",
+        "sources/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "const_soft_float",
+      "version": "0.1.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "87ca1caa64ef4ed453e68bb3db612e51cf1b2f5b871337f0fcab1c8f87cc3dff",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/823984418/const_soft_float",
+      "vcs_revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+      "path_in_vcs": "",
+      "source_checks": [
+        {
+          "path": "Cargo.toml.orig",
+          "sha256": "737a39fafd2cf91c66992f570f14b4f5a7a38e39b3a81dd996ebf802be66c805"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "ed7961ae78415cd92470464f12cf846d0bf73fcb8c880970d5be3b0e591713e8"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "eaaf6f770f4e5e07ee723197abbae724b7e2152be53cc2105cc618087de7113d"
+        },
+        {
+          "path": "README.md",
+          "sha256": "2f17925d3dbdeb6404aa5214c650916761f7c015e496581b9dc48377f0385e26"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "7d4983173c4f65fb99f651a4a32d07e0232e9760e830e3b03c307f80f1c3d866"
+        },
+        {
+          "path": "src/soft_f32/add.rs",
+          "sha256": "6a1dd0c34614f08ea5ea2080eb418411bb7b2e32425621f2ff1a9b0712989f88"
+        },
+        {
+          "path": "src/soft_f32/cmp.rs",
+          "sha256": "6b6cb4ad27a6f57a12ce1019fba56bb1369731d84a5ef90b0c97c9f984329a8c"
+        },
+        {
+          "path": "src/soft_f32/const_impl_trait.rs",
+          "sha256": "ddfe5bd5c4a7cc90c701805846a3990ed288b23357a92458ac2a668e86f960e4"
+        },
+        {
+          "path": "src/soft_f32/copysign.rs",
+          "sha256": "e4310a05d82ccd64d47106fe2f6082cc137af66f75d6a1432222ecc75dabf8cb"
+        },
+        {
+          "path": "src/soft_f32/cos.rs",
+          "sha256": "759278573251d0336f0feef20b7cf4416a39a55eb505070e4b9536450e95d1fb"
+        },
+        {
+          "path": "src/soft_f32/div.rs",
+          "sha256": "c7cc636fc9385716093feb2f11e758b95ff508a8b0ded1b631e41484ab9fd11e"
+        },
+        {
+          "path": "src/soft_f32/floor.rs",
+          "sha256": "b3f8fe1fc5dd933a943a923de7a32a1551b168d6ba7c7366e05f95eda3cd17e3"
+        },
+        {
+          "path": "src/soft_f32/helpers/k_cosf.rs",
+          "sha256": "68103e3ec418131191b6229844a3df867db7d4b6bb8038d0d51b0f23caf677c9"
+        },
+        {
+          "path": "src/soft_f32/helpers/k_sinf.rs",
+          "sha256": "6bf06380ea03516a4eff0d9c4a7b2e35549890a954635de7fe3928fa15bc7de0"
+        },
+        {
+          "path": "src/soft_f32/helpers/mod.rs",
+          "sha256": "539b5ef3a102ec8521253942606ad19413846c701537723a943a57a888b51f98"
+        },
+        {
+          "path": "src/soft_f32/helpers/rem_pio2f.rs",
+          "sha256": "23df431316bf70904c147f8077417a5eb05b28c5dcdf5f95aa1137c022216d0e"
+        },
+        {
+          "path": "src/soft_f32/impl_trait.rs",
+          "sha256": "cb5a7941a4a334f96af2bf110a9d98da7714e3f91da85463486441e70ac61162"
+        },
+        {
+          "path": "src/soft_f32/mod.rs",
+          "sha256": "a4e23a0780e2ac1ea0cf5798fc1911f580ce3b2daeb062a931225ce214e7a4f2"
+        },
+        {
+          "path": "src/soft_f32/mul.rs",
+          "sha256": "5105e74500998ca8f98569457644ff71ea47fadb173141ec42242db58c10321b"
+        },
+        {
+          "path": "src/soft_f32/pow.rs",
+          "sha256": "98330d6dca4f2da2e563e64a1ef5df259e96c1e1ba136caefdd18d5bcf620c64"
+        },
+        {
+          "path": "src/soft_f32/round.rs",
+          "sha256": "71ce0a44256fb8ee85f79e7a22ce05e764df41677f1ddf2ea525e58baf6272ec"
+        },
+        {
+          "path": "src/soft_f32/sin.rs",
+          "sha256": "43fcd1b09588fbdf1c993a7fe2b2400b01388e0da5b2fb8a8a6c7b26d4b0dc27"
+        },
+        {
+          "path": "src/soft_f32/sqrt.rs",
+          "sha256": "b2b48001c03c3aa8da36142ccd469130130d3caceb8f5db3f5db216de4dfcb40"
+        },
+        {
+          "path": "src/soft_f32/trunc.rs",
+          "sha256": "228dc1253fccf3b0b5ce284eb8f2b313f8d428750102c9a839a80e6e77bf7c43"
+        },
+        {
+          "path": "src/soft_f64/add.rs",
+          "sha256": "aa4014fbf46ddfcdcefec83c38eace9875b9f3c6e200ad76d5259a59e69e6c55"
+        },
+        {
+          "path": "src/soft_f64/cmp.rs",
+          "sha256": "bb7bb39eb390d1e2cc5511a04ce2980b44b872dc5e5d13d89e6de80417092879"
+        },
+        {
+          "path": "src/soft_f64/const_impl_trait.rs",
+          "sha256": "69cc20e81950ab7317ed3862559a8e976b29ef419790c43c0b28ff3a11bba892"
+        },
+        {
+          "path": "src/soft_f64/copysign.rs",
+          "sha256": "66de6694c6c7eb105f324f36690529ca7c4af3711ad58c98dc6bc9bc4a5c670a"
+        },
+        {
+          "path": "src/soft_f64/cos.rs",
+          "sha256": "9a4fd04ae87044255a013a86a68e8ec485e7368370c55618d7b49000b81261c5"
+        },
+        {
+          "path": "src/soft_f64/div.rs",
+          "sha256": "30decf7e28999028929afdf8a64d95906cc7dc9de77fb7b7914e5365daeacc15"
+        },
+        {
+          "path": "src/soft_f64/floor.rs",
+          "sha256": "cc448f66045c3ec305c88e34491c6223ddfa9274363232139095b95f9d637d09"
+        },
+        {
+          "path": "src/soft_f64/helpers/cmp.rs",
+          "sha256": "32460142a6eadc9292e3848d030d37495c9eeec2e4ae596c2fcb2bdbf3d495ce"
+        },
+        {
+          "path": "src/soft_f64/helpers/k_cos.rs",
+          "sha256": "704b9c6ac2626ba20753759b1eb0505e341aedd8f78d2fc0b2eed3010dbcf8dc"
+        },
+        {
+          "path": "src/soft_f64/helpers/k_sin.rs",
+          "sha256": "7fde68b4384fd1a081c867bbc3d4562222b496a20f334031270926d7430a551b"
+        },
+        {
+          "path": "src/soft_f64/helpers/mod.rs",
+          "sha256": "31d77b5dde18a8a41ed3280e165b29c5cbfb0bb54627428170eaf1ff1fd0a26c"
+        },
+        {
+          "path": "src/soft_f64/helpers/rem_pio2.rs",
+          "sha256": "434482facfbf9da484d594a2537537f01c1f4ae36434953f4541a285bd995d93"
+        },
+        {
+          "path": "src/soft_f64/helpers/rem_pio2_large.rs",
+          "sha256": "e6caafc05e7def0a3bf1beaee4615a83d94a29794eb419ef8de97808380d68a9"
+        },
+        {
+          "path": "src/soft_f64/helpers/scalbn.rs",
+          "sha256": "10e909382b85fe5d04df1ea5eac9d5f34126cc23e712f794844ba76ab01d3dcd"
+        },
+        {
+          "path": "src/soft_f64/impl_trait.rs",
+          "sha256": "1bc35ab88d6ccfc4b261527a151866fc5e30f9512e24eb188505a131d61b192e"
+        },
+        {
+          "path": "src/soft_f64/mod.rs",
+          "sha256": "8fe506108771cd1afb20f86a0ac735ab7c47406d6db96d8c446b1f28e473238a"
+        },
+        {
+          "path": "src/soft_f64/mul.rs",
+          "sha256": "86e84b69ccb5165d04399eb6d028cf3430b82db62e257d07bcd756629d3825e4"
+        },
+        {
+          "path": "src/soft_f64/pow.rs",
+          "sha256": "aaead621890d7e18f516b0442dd32b77c52b4c3a7ac909fba0c6db28008cb016"
+        },
+        {
+          "path": "src/soft_f64/round.rs",
+          "sha256": "f7289d66c6f6586aa77b6e08c464b073ca55cedbd55f15b777da930a03d4ae0e"
+        },
+        {
+          "path": "src/soft_f64/sin.rs",
+          "sha256": "ad5f8c1156e8a61cee67691ec833d7f55e012d771c5f406b55a3f0b243b96813"
+        },
+        {
+          "path": "src/soft_f64/sqrt.rs",
+          "sha256": "a94f30bee2a07cc746b012c65ff0e1db2e65d90b6c914e61a9eafc672fc22872"
+        },
+        {
+          "path": "src/soft_f64/trunc.rs",
+          "sha256": "a3b5bca15416d128052f7759cdf29825f58e242757d67320d70150ce3fa8ecf5"
+        }
+      ],
+      "notice_files": [
+        "supplements/const_soft_float-0.1.4-source-notices.txt",
+        "supplements/upstream-compiler_builtins-0.1.94-LICENSE.txt",
+        "supplements/upstream-libm-0.2.6-LICENSE-APACHE.txt",
+        "supplements/upstream-libm-0.2.6-LICENSE-MIT.txt"
+      ]
+    },
+    {
+      "name": "constgebra",
+      "version": "0.1.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "e1aaf9b65849a68662ac6c0810c8893a765c960b907dd7cfab9c4a50bf764fbc",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/knickish/constgebra",
+      "vcs_revision": "eae8e094e5779f42f1db2a7adf9036aa33744bc8",
+      "path_in_vcs": "",
+      "license_choice": "Apache-2.0",
+      "source_checks": [
+        {
+          "path": "Cargo.toml.orig",
+          "sha256": "dd3370ff7a11ee8ac10e8f96f9ba599c1fb2cd73379a301f43ea056fa2e7b87c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "ca7fd771ad7ead0110483a8d3ff1afe74c9243b76cfd2d29ba3c538a86fc1ad6"
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "6619bac32b6998490128a6ba0ca0e5fb47b0d19deff0c3fff0c9479e08d57307"
+        },
+        {
+          "path": "src/comptime.rs",
+          "sha256": "1cffd04787a6e52a241cb8914d939b702613d08c265b4e1ceb7578ae977007de"
+        },
+        {
+          "path": "src/runtime.rs",
+          "sha256": "1b123a6429ec21f846fbe0a9b98fd2fd153239484b01272736f9cb93b4b8e07b"
+        }
+      ],
+      "notice_files": [
+        "canonical/Apache-2.0.txt",
+        "provenance/constgebra-0.1.4.txt"
+      ]
+    },
+    {
+      "name": "dasp_sample",
+      "version": "0.11.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rustaudio/sample.git",
+      "vcs_revision": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+      "path_in_vcs": "",
+      "notice_files": [
+        "sources/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+        "sources/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "encase_derive",
+      "version": "0.12.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "1e30d38c47336a0afbdfde297b442944041cf6dccbb1a79eceea16abfb27a92a",
+      "license": "MIT-0",
+      "repository": "https://github.com/teoxoy/encase",
+      "vcs_revision": "561121cd17298355de74c07a7206eb8329fd8347",
+      "path_in_vcs": "derive",
+      "notice_files": [
+        "sources/teoxoy/encase/561121cd17298355de74c07a7206eb8329fd8347/LICENSE"
+      ]
+    },
+    {
+      "name": "encase_derive_impl",
+      "version": "0.12.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "495d24abe406f090f2ba8fc362ecaa8a001e192522aa75eae7b144163c3235ff",
+      "license": "MIT-0",
+      "repository": "https://github.com/teoxoy/encase",
+      "vcs_revision": "561121cd17298355de74c07a7206eb8329fd8347",
+      "path_in_vcs": "derive/impl",
+      "notice_files": [
+        "sources/teoxoy/encase/561121cd17298355de74c07a7206eb8329fd8347/LICENSE"
+      ]
+    },
+    {
+      "name": "gilrs-core",
+      "version": "0.6.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "dc7f0ce6237abcc0523f2a5502b1e3fe5802daaae47ac14e166fe49551301ea9",
+      "license": "Apache-2.0/MIT",
+      "repository": "https://gitlab.com/gilrs-project/gilrs",
+      "vcs_revision": "07e286e24b046cf39e5c367daa2770b805a64692",
+      "path_in_vcs": "gilrs-core",
+      "notice_files": [
+        "sources/gilrs-project/gilrs/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-APACHE",
+        "sources/gilrs-project/gilrs/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "libm",
+      "version": "0.2.16",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "license": "MIT",
+      "repository": "https://github.com/rust-lang/compiler-builtins",
+      "package_checksum": "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
+      "vcs_revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+      "path_in_vcs": "libm",
+      "source_checks": [
+        {
+          "path": "src/lib.rs",
+          "sha256": "d565c5f29ae9f502edca78d536436e85bbc4b955595328a6cfd4a97c1dbbac9b"
+        },
+        {
+          "path": "src/libm_helper.rs",
+          "sha256": "b59f5c3e0aca4cfa6dc996ec308a8eab9102c833a9b1c5372d874fb57dd0a98e"
+        },
+        {
+          "path": "src/math/acos.rs",
+          "sha256": "efd83a6138061209867f06421c6a756b8ca3aab5c6c0a85c4aba31bedb299da5"
+        },
+        {
+          "path": "src/math/acosf.rs",
+          "sha256": "c5c9c74d267725bbe5f9319e6f4a396af6ce46c890b601d3f963a5d74d12e4c3"
+        },
+        {
+          "path": "src/math/acosh.rs",
+          "sha256": "c3d9de791399f7d6c946bee5642ac1357783eb3d1a9d226e2f514979c764bfdc"
+        },
+        {
+          "path": "src/math/acoshf.rs",
+          "sha256": "190eb2dd2ba6750d7e7a3ff97d6b3e90dc793dff8d760ece66cfcc594f69200a"
+        },
+        {
+          "path": "src/math/arch/aarch64.rs",
+          "sha256": "deb850d77df93beed6dcfcaf67c7665256ae49fc5019fdebc180714ec840cd80"
+        },
+        {
+          "path": "src/math/arch/i586.rs",
+          "sha256": "fe087a006d5efc385c3ab877cb60de7b674681760728d2ef7ca231e7c313b51b"
+        },
+        {
+          "path": "src/math/arch/mod.rs",
+          "sha256": "475d65b49fab27a20690fc5d423e83c1b0e025ae226c252e4da233f3560b5894"
+        },
+        {
+          "path": "src/math/arch/wasm32.rs",
+          "sha256": "93526505f6fbf97a5e96004fe49eb715c152948cb86e52b9f396899d3180f615"
+        },
+        {
+          "path": "src/math/arch/x86.rs",
+          "sha256": "9d305f59b9886689be7920ae1543bb588738a1d7173a9a8e5a74eae0cf3b0b2a"
+        },
+        {
+          "path": "src/math/arch/x86/detect.rs",
+          "sha256": "1595d4416936b717ab10f6010aa944f945287ff774b945e55df9efa93e70ccdf"
+        },
+        {
+          "path": "src/math/arch/x86/fma.rs",
+          "sha256": "c5fb77e560e1012f211532c5668c8b8022d04d55a2489419a32e843c16267ad9"
+        },
+        {
+          "path": "src/math/asin.rs",
+          "sha256": "9693a7cb61674ec6fe22be9db8fe20276729c48b1562fd86d5421e372a0a12e4"
+        },
+        {
+          "path": "src/math/asinf.rs",
+          "sha256": "25f6b7bbf46fc5aac4ebdd9e00118239747dcd28a79b90b858ddc4633d773d65"
+        },
+        {
+          "path": "src/math/asinh.rs",
+          "sha256": "8fd9431978e06904ed810d873f3de5bc097130d4b681a727644aa82d4f0fc627"
+        },
+        {
+          "path": "src/math/asinhf.rs",
+          "sha256": "ce78c74e4c806c68cbf974c1d2be131ce70aee6e27f178bcc9d082cfe4768799"
+        },
+        {
+          "path": "src/math/atan.rs",
+          "sha256": "54181dbddf4f77b90b32b9f6819ac989da570dc02b791f3685d20a23d51324be"
+        },
+        {
+          "path": "src/math/atan2.rs",
+          "sha256": "7d028d4d397f7484b8feed7b228eda65b84acac94d27729d236d5df95e38d8f0"
+        },
+        {
+          "path": "src/math/atan2f.rs",
+          "sha256": "b9497b5adb75e2788c404fd121aa64dcfa0e9357b67af3b3e7e6d4624dae1ca1"
+        },
+        {
+          "path": "src/math/atanf.rs",
+          "sha256": "197762f16ed5951236e17d0869c529e857acc329cc287df019ff69e5401f3b4d"
+        },
+        {
+          "path": "src/math/atanh.rs",
+          "sha256": "84d3fe8b2674a9681f553b7afd950bea47f498c38f81af9d58115d52e833178e"
+        },
+        {
+          "path": "src/math/atanhf.rs",
+          "sha256": "3a0643b0a4c7a112c0069f2ed455c7f295df88eef01bc76327173e74b0870d0c"
+        },
+        {
+          "path": "src/math/cbrt.rs",
+          "sha256": "1ed98a0943c46ca48e32af54b6baeb80b6e8da5dda550005711fcb26bfcf12c2"
+        },
+        {
+          "path": "src/math/cbrtf.rs",
+          "sha256": "7a2b4f190e8618c52cb23b47c040a4b4eacca739c68393cf14fb3f5d73988127"
+        },
+        {
+          "path": "src/math/ceil.rs",
+          "sha256": "5a1442f99be963722f222c211f03d2e018832f1ec2e309375cd26ece268d70d2"
+        },
+        {
+          "path": "src/math/copysign.rs",
+          "sha256": "40e2d5e1dcfaad56bcfce1d708ed929c3130411faf4f95477a0eedcd4cbb21a8"
+        },
+        {
+          "path": "src/math/cos.rs",
+          "sha256": "6e81752899c471bd42d04bdf08e0b22bc10a29f92fa2a343281b995fd342f035"
+        },
+        {
+          "path": "src/math/cosf.rs",
+          "sha256": "f48aa954f199fe4f54fd73b4e7886a75f2c08afba7fc31c6a36db5b5f90ced69"
+        },
+        {
+          "path": "src/math/cosh.rs",
+          "sha256": "71aed40077a04e659c15c2d2cc6e4faba89a89957e61ecacb7f6f5516bed1753"
+        },
+        {
+          "path": "src/math/coshf.rs",
+          "sha256": "fdf0524d221c62ecaa0b4e2fdaa3eb5194c4d84f0c1e3afaa04dc58cd3692834"
+        },
+        {
+          "path": "src/math/erf.rs",
+          "sha256": "5a69f440d5ca88a5c4a45119837c45b14238836a036675230e10fec41d293a3b"
+        },
+        {
+          "path": "src/math/erff.rs",
+          "sha256": "62c30876390e532d7dc9ac1f1f1c1f654065fba2b2e534e531964d79e1766196"
+        },
+        {
+          "path": "src/math/exp.rs",
+          "sha256": "1d486e847e1752fb9ce74a714096a11adcac935dacd4f17625ff63819103a80d"
+        },
+        {
+          "path": "src/math/exp10.rs",
+          "sha256": "44a819a0b1c1f61abfb365e0e034756bca2d5a613718c6379693230ac03c8b74"
+        },
+        {
+          "path": "src/math/exp10f.rs",
+          "sha256": "812119a900ccc1119c67597867d44d391b71ff3facdfb15776aa7016210ffa82"
+        },
+        {
+          "path": "src/math/exp2.rs",
+          "sha256": "e7270f15a682b69a49e042c80503c206d37c6c895f2c63da59a5e2431fa5fedc"
+        },
+        {
+          "path": "src/math/exp2f.rs",
+          "sha256": "3b4b5cb2e5674e1ce66a6051710738c1a6edc1d1638686fe9c78f0af4792a634"
+        },
+        {
+          "path": "src/math/expf.rs",
+          "sha256": "33b01180ebd01bb2911379476c5411fd05b066f2e17ef66e48c4dde83a7f01c0"
+        },
+        {
+          "path": "src/math/expm1.rs",
+          "sha256": "6cc612ca7cf1384dc15f541b301a1f176efbc79536aff1293408b3121cc30ad3"
+        },
+        {
+          "path": "src/math/expm1f.rs",
+          "sha256": "2b517f1bcb6279c906aad737f08c83ac30d7871e3beff266ea50a01fa18ccc81"
+        },
+        {
+          "path": "src/math/expo2.rs",
+          "sha256": "abd80ec291bebe24d3e0401f5600469f6248052be97f06885c32451fae57d3a8"
+        },
+        {
+          "path": "src/math/fabs.rs",
+          "sha256": "17bcbb25ac98e6b2ebc10c5eb39bda7590825b66d484c36f2ef74dce2a8a69dd"
+        },
+        {
+          "path": "src/math/fdim.rs",
+          "sha256": "2531e8f3537ecd75c773fa6b036a2f1988c62946acfa597678e65c4679998300"
+        },
+        {
+          "path": "src/math/floor.rs",
+          "sha256": "a9824d7c14b0850f088192305364a36f7ae59e06075ae4232e5fbb871bcff3bc"
+        },
+        {
+          "path": "src/math/fma.rs",
+          "sha256": "16e72470f5c4407c44183cf06f5868f216c92e0532f3fb387b57dbccf815e2a7"
+        },
+        {
+          "path": "src/math/fmin_fmax.rs",
+          "sha256": "ff112ea9cbb537a47721c51f318a874acbfe1e62e3037f709f209d69b5e8e624"
+        },
+        {
+          "path": "src/math/fminimum_fmaximum.rs",
+          "sha256": "cb7fa3b3826b95e257e6fd570dd240ee3270dc92e1d0aa04dcb5b44f21e4a23e"
+        },
+        {
+          "path": "src/math/fminimum_fmaximum_num.rs",
+          "sha256": "6a25d758b76c5e1b5946945f9b175dbf687d1065186f5deb72d5a9395b0ba65c"
+        },
+        {
+          "path": "src/math/fmod.rs",
+          "sha256": "8f4ca9162b8520e9b4b3e7fca6284b4c43573136b36e2edeb06faa45d606bf81"
+        },
+        {
+          "path": "src/math/frexp.rs",
+          "sha256": "8cb5eab9fc57ce798b5c4cea5532fccd31b7e875cf188c97623eb143aecf0116"
+        },
+        {
+          "path": "src/math/frexpf.rs",
+          "sha256": "1a6160faf0b8537c5fe3f7f63d15c29c6b4818803ef9a656a66e955e6188d262"
+        },
+        {
+          "path": "src/math/generic/ceil.rs",
+          "sha256": "66b3def2b00ed9dd6a4f59c73765a050853dfe06c828fdf731987ac99e7c2a88"
+        },
+        {
+          "path": "src/math/generic/copysign.rs",
+          "sha256": "c3fac45e8d84876204e5b11363ec77d6fc30010e0c32ab7558f2da538747e9d3"
+        },
+        {
+          "path": "src/math/generic/fabs.rs",
+          "sha256": "1381a8807d2c27b76996248bfcce6a2dc8982bdceee26febb15218e571b87908"
+        },
+        {
+          "path": "src/math/generic/fdim.rs",
+          "sha256": "5fbb1f6a4022aeb8989967e7957b82ef589875ec09860027c241c4083e2b3525"
+        },
+        {
+          "path": "src/math/generic/floor.rs",
+          "sha256": "7d4f15369abefa27645d6deda51d30febbe60ee9dca76e72a9364d574d0711c0"
+        },
+        {
+          "path": "src/math/generic/fma.rs",
+          "sha256": "ba44930a56d7c1953ab0c96c7c767911c9dc6967083700c8ef02f43672c8482f"
+        },
+        {
+          "path": "src/math/generic/fma_wide.rs",
+          "sha256": "2cf995ff5646c019b46661061c13b42ed3409ff3ce406782c94e2183245bd7d3"
+        },
+        {
+          "path": "src/math/generic/fmax.rs",
+          "sha256": "68d923950c3f1eab68baeab24679ab50918b663904839bc349ef666d9467518f"
+        },
+        {
+          "path": "src/math/generic/fmaximum.rs",
+          "sha256": "c4b8b7080821a2dc65d0a50baf717ccd9ee20b813ce6d6d3f9f01b5700b674fa"
+        },
+        {
+          "path": "src/math/generic/fmaximum_num.rs",
+          "sha256": "2f2d41e1f0160eb73469fa63db27d881b5b8eabc6d62fae7ca1b4b03eb35c5d5"
+        },
+        {
+          "path": "src/math/generic/fmin.rs",
+          "sha256": "9bbdece9606e5eac57f3a91a5db7aab814c8e2b28b6df1813723c6b5715efc55"
+        },
+        {
+          "path": "src/math/generic/fminimum.rs",
+          "sha256": "a6a33085356610eced23957ca86456b7dbe95e0f9d916298d59ce8bd90076b02"
+        },
+        {
+          "path": "src/math/generic/fminimum_num.rs",
+          "sha256": "f5db65654e690adea16da83839d62a707cc814c998fd4a77e63caaaea1472256"
+        },
+        {
+          "path": "src/math/generic/fmod.rs",
+          "sha256": "11aae62d08d656d815184eafd78a3b2d5764b6ce308b89e3819cd049bc491fe7"
+        },
+        {
+          "path": "src/math/generic/mod.rs",
+          "sha256": "4220c6f8114bfc0a34df44f597d9f7f5c3cc5b64644aebb89689a25c496551e1"
+        },
+        {
+          "path": "src/math/generic/rint.rs",
+          "sha256": "deec183fd0da6c0a47ab272a256990cea4f9231db7faff314697886457d6841a"
+        },
+        {
+          "path": "src/math/generic/round.rs",
+          "sha256": "eee638a88d4ff90bbcb779f37761a4335a3ef5878ae67391bb653990c9792c5f"
+        },
+        {
+          "path": "src/math/generic/scalbn.rs",
+          "sha256": "986e37f19c6cdf76867a365e1bc936050c238accda3fb327abccc488551ebf28"
+        },
+        {
+          "path": "src/math/generic/sqrt.rs",
+          "sha256": "c58e48ec07404d618109ad45332efe46c5246f42a2ddefdf5b25ba19e4ca9a0f"
+        },
+        {
+          "path": "src/math/generic/trunc.rs",
+          "sha256": "46dd2cc35f6da25099ea2202264d8da3330b5ff1a962a8afb671b54b6ef6002d"
+        },
+        {
+          "path": "src/math/hypot.rs",
+          "sha256": "411edd6d95d4d5efc4b0ebfcd97820e337f4c8108dfea53957258cd411c7cd58"
+        },
+        {
+          "path": "src/math/hypotf.rs",
+          "sha256": "285a8b7e7d2869d5068857637b934dd237684b6c493a0535064d6537559a87a1"
+        },
+        {
+          "path": "src/math/ilogb.rs",
+          "sha256": "1cd9a43b70af7b6a55bccd5e3fc5021569fbc22fe5b8a4ae7fbd5ea62bffab89"
+        },
+        {
+          "path": "src/math/ilogbf.rs",
+          "sha256": "1d52c89413383899abb9500d22d6437b15b4764d7ea89ab66fa51063552f1ed7"
+        },
+        {
+          "path": "src/math/j0.rs",
+          "sha256": "1cb991f0151a626744ad1832d4aedfaca681bcfcecc797de5ac5e9baf2342006"
+        },
+        {
+          "path": "src/math/j0f.rs",
+          "sha256": "de97374b6a0019fd8b3d1f553be1708018546491d3b4a5fc650ee2dcdfc9620e"
+        },
+        {
+          "path": "src/math/j1.rs",
+          "sha256": "e0a10746fd11a458d55ee61e758d9f016ff0f2203a07eb9907b5aca709a40469"
+        },
+        {
+          "path": "src/math/j1f.rs",
+          "sha256": "27b586c94d510aa653923b6b83cfec174e1f5da326d9120b0a0135b1190e32dc"
+        },
+        {
+          "path": "src/math/jn.rs",
+          "sha256": "ba36d25d4bbada83aadb3b2986879b7d88b91adb7b502061d21bf96ff3942194"
+        },
+        {
+          "path": "src/math/jnf.rs",
+          "sha256": "b3861e19644ae669fe17db81d91aeaee9c9f9051b59957ab674017684c98fe32"
+        },
+        {
+          "path": "src/math/k_cos.rs",
+          "sha256": "d4867527877c846aa8e2a0b43cf06f03e2d94c321a548acaf8d5171c09ff4057"
+        },
+        {
+          "path": "src/math/k_cosf.rs",
+          "sha256": "8f76089d014e217b96c9eca520271e64d467dc0d6542bf313dd70eb96c040f7f"
+        },
+        {
+          "path": "src/math/k_expo2.rs",
+          "sha256": "0e08b00b774731da6f16fd3ac8282a727a493e47b7a7292172b6136c04bd5dd4"
+        },
+        {
+          "path": "src/math/k_expo2f.rs",
+          "sha256": "bdbde40f3a4bd0bee11f7d8bcbba2f5df2dbf6378f0eec7a54de4e03c3d00828"
+        },
+        {
+          "path": "src/math/k_sin.rs",
+          "sha256": "dfe6524cb2d530ec51eb1a2ab233aeb65b3f12177c1fb2f50f044ea41170f5d8"
+        },
+        {
+          "path": "src/math/k_sinf.rs",
+          "sha256": "cf0e8bbe8d73a6704b7f1f710f5b9d31f190f1c633e894d4f69c4e3bc359eba3"
+        },
+        {
+          "path": "src/math/k_tan.rs",
+          "sha256": "dc3f8ece9187bbd65792a7d1068e676092e9c2a0886f28c80579f9bd94d744b7"
+        },
+        {
+          "path": "src/math/k_tanf.rs",
+          "sha256": "3381d2d4865bfc98e87aadb96bd8986f7691a389569a58fb1cb8db74fb5d9c20"
+        },
+        {
+          "path": "src/math/ldexp.rs",
+          "sha256": "8d1a7e01d36fd1ce08810d90d011c357cf2a71eeba8a57b1ac762322828323a3"
+        },
+        {
+          "path": "src/math/lgamma.rs",
+          "sha256": "669b3da03c58ffbe702f18c0fd99dc9e7226049ec84b92c8f1cb92a28c3991b7"
+        },
+        {
+          "path": "src/math/lgamma_r.rs",
+          "sha256": "5d56169c077b5b9f88902e2d243a7a4b4d06b89295aa84283d6fa15d9c244032"
+        },
+        {
+          "path": "src/math/lgammaf.rs",
+          "sha256": "9f0dcde424de7f678208b0c8a1f63b6574d2abbf9e335c926cd6b027ec9ac3db"
+        },
+        {
+          "path": "src/math/lgammaf_r.rs",
+          "sha256": "0bc2b5e0eec7666973adaca536f4d5fe978c8793bb340484fff9e5e7abb425f0"
+        },
+        {
+          "path": "src/math/log.rs",
+          "sha256": "df5f4d1325e89621bfcd9cf7788d0d7e20a6ef7f429110fe35b370b3c9362615"
+        },
+        {
+          "path": "src/math/log10.rs",
+          "sha256": "4a96dd2b6a2a505497f2bb7ea956a50491d068dab1b6055a573aec1724a52e40"
+        },
+        {
+          "path": "src/math/log10f.rs",
+          "sha256": "784a576dd4a4071f4f67c670eb9b221cb03014818c4b2d71afbcbd2211431caf"
+        },
+        {
+          "path": "src/math/log1p.rs",
+          "sha256": "bb8ce741e54d8f001d9c12450a14a663bd413014da2ade9ba1f5fbc9ff0c9a88"
+        },
+        {
+          "path": "src/math/log1pf.rs",
+          "sha256": "8736222a9b9004b061f1339bb819c63c6b54414d4a01ef79d5f5a5f0a70677b5"
+        },
+        {
+          "path": "src/math/log2.rs",
+          "sha256": "1ec0cdd94bf4435ff0402d209089b1bdbcb1ba9a4cd5f77807f9c84cf534f980"
+        },
+        {
+          "path": "src/math/log2f.rs",
+          "sha256": "7b3b17ba08df6b5a57dacf6f945bfe1a3c088bee0eb11e201ac5affc7f65925a"
+        },
+        {
+          "path": "src/math/logf.rs",
+          "sha256": "c7dfa5e89fcca0411624fdc594f64c62d5dfa3b91f061fcb7ac3aea18414f238"
+        },
+        {
+          "path": "src/math/mod.rs",
+          "sha256": "c4ae2e62996ac9d7d6fdc0f7cb57ac0a815e639374b24068516ae3f092b0c59e"
+        },
+        {
+          "path": "src/math/modf.rs",
+          "sha256": "4bbf583606b7a2da0ddab13092c23e561daae87c4940cb059beae4e9a365edbd"
+        },
+        {
+          "path": "src/math/modff.rs",
+          "sha256": "b5dc061b852f8dc84a45ec4269f596a07606a3eaba86ad254897199c7aebc860"
+        },
+        {
+          "path": "src/math/nextafter.rs",
+          "sha256": "7fed9cbc58b41ef391a016ee361d3c3f315cc7e12c2d35d46bbeed832f2519e4"
+        },
+        {
+          "path": "src/math/nextafterf.rs",
+          "sha256": "d3b2b7bd9bc2f762408d1231ae3e7a2a059668918cd4bcc519b04b5d36c81e6a"
+        },
+        {
+          "path": "src/math/pow.rs",
+          "sha256": "c5566d0f48682d107e8803b0ed204ff3521503348f18a4f26cbe3f47fef15192"
+        },
+        {
+          "path": "src/math/powf.rs",
+          "sha256": "819971cb8e927d80113aded3cfe90dcd501c031e0eb1c562b58842fddd1751be"
+        },
+        {
+          "path": "src/math/rem_pio2.rs",
+          "sha256": "5a040ab09dc356bca6d57712327151ed43003e2bac156553e3eb87d1cdefd2d1"
+        },
+        {
+          "path": "src/math/rem_pio2_large.rs",
+          "sha256": "986b5b9ad2c8fba828aee47bf198eab97fab243359ab03eb09783d98ca5847b5"
+        },
+        {
+          "path": "src/math/rem_pio2f.rs",
+          "sha256": "fb34bab63f8d143dfefa4ef2e31e8166bf21f3c67f1519bfc3ca4fb8eb28cafe"
+        },
+        {
+          "path": "src/math/remainder.rs",
+          "sha256": "23584372f9438cf02d163d48ce24d64b2d2151f2a2c5e5ef949cd8ad4b8832c2"
+        },
+        {
+          "path": "src/math/remainderf.rs",
+          "sha256": "0e3cc8ae3f8143eaab628e1c647267dc8d20c1e70d2a1534a3f109e974cae4e8"
+        },
+        {
+          "path": "src/math/remquo.rs",
+          "sha256": "e1739d4247337aab9924e5e5c3488ffff11f39a22699531b20237f22f08c8cfb"
+        },
+        {
+          "path": "src/math/remquof.rs",
+          "sha256": "e957bd96aa7c4e8a26b6959743fb22d24f2822715d7bbaf974b67b7a8ae3a197"
+        },
+        {
+          "path": "src/math/rint.rs",
+          "sha256": "78e325106c309d416ae2ef0705f778fea3efefead7b0b51a731ed9207b0d35a1"
+        },
+        {
+          "path": "src/math/round.rs",
+          "sha256": "dfb932a15ec18de57126740cb3c4f04cd7244078b80491e992385898e8a2c75b"
+        },
+        {
+          "path": "src/math/roundeven.rs",
+          "sha256": "918301bc7297371c1d01b5d4e05146cf997ad902fd50f39cae89ac5142d6e9af"
+        },
+        {
+          "path": "src/math/scalbn.rs",
+          "sha256": "9b0297d108a8dcc38abf8c10d391d990bca7a503e3cfcb7afd66378541125c05"
+        },
+        {
+          "path": "src/math/sin.rs",
+          "sha256": "b48cebd120fc2ac93a6563059cabda28a72c8680304eb8335b92b412235cc232"
+        },
+        {
+          "path": "src/math/sincos.rs",
+          "sha256": "a9c414e828c2e78b6bce4d5e4237b1baa93e81d78421aed5cedeab43df64067f"
+        },
+        {
+          "path": "src/math/sincosf.rs",
+          "sha256": "c39b6e3b52be83ccf4015ff105dab55e693577ebfc43745881750e73eebc6fa6"
+        },
+        {
+          "path": "src/math/sinf.rs",
+          "sha256": "b17db34d5da39a0f336d831abcb700fab69402c915321823870f1845e66c03d2"
+        },
+        {
+          "path": "src/math/sinh.rs",
+          "sha256": "95cb1019a76c82312a5a65b3dd5f8a6a8b9b77aed1934c7254eafb94604b94a0"
+        },
+        {
+          "path": "src/math/sinhf.rs",
+          "sha256": "bc447f1b913c90de2b7d3ca58c0734992e8d932a4a0f1525288bbe24888fabdd"
+        },
+        {
+          "path": "src/math/sqrt.rs",
+          "sha256": "a9a82063eba9cd3467a9b37a1caf13b14106570f03a28e12419a4957f9b705eb"
+        },
+        {
+          "path": "src/math/support/big.rs",
+          "sha256": "b10d80297257afc1fe2554d52197d017e4f9c32cad32c40323ed6d1a1c649530"
+        },
+        {
+          "path": "src/math/support/big/tests.rs",
+          "sha256": "5875b857ddcc2e32be02c0326789cc8221e4127a77b96c2d42342f8650b4d509"
+        },
+        {
+          "path": "src/math/support/env.rs",
+          "sha256": "e8bd76e77f562926bf4570352bb7ab91038be7703984619a2472683feafb268e"
+        },
+        {
+          "path": "src/math/support/feature_detect.rs",
+          "sha256": "a1d08bbc2db9fcfe7e9ad94f11ccebf79841826f9315b0ecb43d851c658cbf98"
+        },
+        {
+          "path": "src/math/support/float_traits.rs",
+          "sha256": "510b4eb2f3c226eb78e332fe25060fc1d535da4c9f58ca0e047eff51c41da29b"
+        },
+        {
+          "path": "src/math/support/hex_float.rs",
+          "sha256": "d9c9503a61d72123ea41c418672fa906103d24d93f278f6076fb99ea000a22b1"
+        },
+        {
+          "path": "src/math/support/int_traits.rs",
+          "sha256": "a48183da0f12c68a44ad664fb52fb0ddaa0e1b2437cb171d05eafd9e700355eb"
+        },
+        {
+          "path": "src/math/support/int_traits/narrowing_div.rs",
+          "sha256": "5f5378e33f1da56090d0dce2514926ab465dce65b89ad4ee2f7da07a92f8d5de"
+        },
+        {
+          "path": "src/math/support/macros.rs",
+          "sha256": "cf162c2cb6c2db5b0959e800116290f5c8b60c6bbccfc64651444713fa2d16c1"
+        },
+        {
+          "path": "src/math/support/mod.rs",
+          "sha256": "cb55f78a408dc5b736435354a8de620e0a2d02820e931b9845a28fce043a5f9e"
+        },
+        {
+          "path": "src/math/support/modular.rs",
+          "sha256": "cf6a562d6bdf16336f31d41c59e828ad47f85388849d20d6d3b59fc1c3e388a2"
+        },
+        {
+          "path": "src/math/tan.rs",
+          "sha256": "2ea87ca18526753db6d149635ed6c895c8fbafd1e0fa7a9c04f7dc44b4eae986"
+        },
+        {
+          "path": "src/math/tanf.rs",
+          "sha256": "f7140c4193a57709acde5d290c8f83435562da42924c54cab0aa3a4f26095190"
+        },
+        {
+          "path": "src/math/tanh.rs",
+          "sha256": "c81ff9f4aa902d8fc63922f17d7d9e395983a6582c4587cbbeb194b613dd90c6"
+        },
+        {
+          "path": "src/math/tanhf.rs",
+          "sha256": "41f6703a0ad8f032b0468fbd70c9ebc470fc6a6b3fd190522cca4cb34eeb4d9a"
+        },
+        {
+          "path": "src/math/tgamma.rs",
+          "sha256": "c6c1ab4951d58dc4999f4302274ef155e34b419b09b9d406fda0c299fd0f07fb"
+        },
+        {
+          "path": "src/math/tgammaf.rs",
+          "sha256": "9bca4ea70be9fa1d8088e7dee325c15ca611c48f33fe0942b01b64a26aee5763"
+        },
+        {
+          "path": "src/math/trunc.rs",
+          "sha256": "d86a5bc12daa2dee89ee9c8b7457016b34b30ab300fd97187045095a858b5226"
+        },
+        {
+          "path": "Cargo.toml.orig",
+          "sha256": "5cef83cc9b297dcf1b6853237371d839a8c3ece4adb0e7fe9f7ba8958f319b0e"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa3f1ab09e50179c981d6373624d5e363ae429f75f1c6103db39db143057a4c4"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+        }
+      ],
+      "notice_files": [
+        "supplements/libm-0.2.16-source-notices.txt"
+      ]
+    },
+    {
+      "name": "mutants",
+      "version": "0.0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126",
+      "license": "MIT",
+      "repository": "https://github.com/sourcefrog/cargo-mutants",
+      "vcs_revision": "9685de346012afb9c379432eaf9c6960e22185df",
+      "path_in_vcs": "mutants_attrs",
+      "notice_files": [
+        "sources/sourcefrog/cargo-mutants/9685de346012afb9c379432eaf9c6960e22185df/LICENSE"
+      ]
+    },
+    {
+      "name": "profiling",
+      "version": "1.0.18",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/aclysma/profiling",
+      "vcs_revision": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "path_in_vcs": "profiling",
+      "notice_files": [
+        "sources/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+        "sources/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "spirv",
+      "version": "0.4.0+sdk-1.4.341.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/gfx-rs/rspirv",
+      "vcs_revision": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4",
+      "path_in_vcs": "spirv",
+      "notice_files": [
+        "sources/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE"
+      ]
+    },
+    {
+      "name": "taffy",
+      "version": "0.14.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "639627c87f43b9181c811f40a6296409e093a17bc761214cba3c15df74f86b99",
+      "license": "MIT",
+      "repository": "https://github.com/DioxusLabs/taffy",
+      "vcs_revision": "77f385683c1d698c91a23a259f87fdddf26925fb",
+      "path_in_vcs": "",
+      "notice_files": [
+        "sources/DioxusLabs/taffy/77f385683c1d698c91a23a259f87fdddf26925fb/LICENSE"
+      ]
+    },
+    {
+      "name": "wesl",
+      "version": "0.6.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "fdd8f9619baa4c7bde4df0899d6f626b70ee92d6e9c18c5f74473419b5bb6fa6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/webgpu-tools/wesl-rs",
+      "vcs_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "path_in_vcs": "crates/wesl",
+      "notice_files": [
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wesl-core",
+      "version": "0.1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "84dd3e600497eda0b47afcd21bd84c8953a9dfce7e93ed27a38ba97ac0747e03",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/webgpu-tools/wesl-rs",
+      "vcs_revision": "3840691945a378d433c7d8653da9cf03e5ff8a81",
+      "path_in_vcs": "crates/wesl-core",
+      "notice_files": [
+        "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/COPYRIGHT",
+        "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-APACHE",
+        "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wesl-macros",
+      "version": "0.6.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "ac8767ec26e75262a8e581d5f188b1f63a288baaf885bb33c9f4f73a693e06fc",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/webgpu-tools/wesl-rs",
+      "vcs_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "path_in_vcs": "crates/wesl-macros",
+      "notice_files": [
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wgsl-parse",
+      "version": "0.6.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "37cee524ba5cfabfd65d10a316b646f8a4c50f3663e7e787471f21b783261f47",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/webgpu-tools/wesl-rs",
+      "vcs_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "path_in_vcs": "crates/wgsl-parse",
+      "notice_files": [
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wgsl-types",
+      "version": "0.6.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "package_checksum": "e119dd12e57d937397535201959ddddb5dbf26505402db5ef305ebb1ca9a7e5f",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/webgpu-tools/wesl-rs",
+      "vcs_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "path_in_vcs": "crates/wgsl-types",
+      "notice_files": [
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+        "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "canonical/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280,
+      "kind": "canonical-license-text-not-upstream-crate-file",
+      "source_url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/Apache-2.0.txt",
+      "source_repository": "spdx/license-list-data",
+      "source_revision": "31ba1a50e5397e00a304dbadc76531740e89ee48",
+      "source_path": "text/Apache-2.0.txt",
+      "git_blob_sha1": "137069b823873b8bcf42979bcf8e9371052d26a2"
+    },
+    {
+      "path": "provenance/constgebra-0.1.4.txt",
+      "sha256": "2ed13077a7e07718d075a1f3873082cd7d814969b3a206404819dd55217be2c3",
+      "bytes": 1538,
+      "kind": "distributor-provenance-not-upstream-notice",
+      "source_url": "https://github.com/knickish/constgebra/tree/eae8e094e5779f42f1db2a7adf9036aa33744bc8"
+    },
+    {
+      "path": "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/AUTHORS",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/AUTHORS",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+      "source_path": "AUTHORS",
+      "git_blob_sha1": "432f1b7bb779a9082fd10a4ef1e4f29c44b512c3",
+      "sha256": "3bab8c36f6a85657504aaefb37c7ff34e29b8c917290f3d28a1f0920c992e502",
+      "bytes": 346
+    },
+    {
+      "path": "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723
+    },
+    {
+      "path": "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "31aa79387f27e730e33d871925e152e35e428031",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023
+    },
+    {
+      "path": "sources/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+      "source_path": "LICENSE.chromium",
+      "git_blob_sha1": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "bytes": 1559
+    },
+    {
+      "path": "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/AUTHORS",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/AUTHORS",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "c88605b96d04431f9c3c792464a0f2f253480e94",
+      "source_path": "AUTHORS",
+      "git_blob_sha1": "432f1b7bb779a9082fd10a4ef1e4f29c44b512c3",
+      "sha256": "3bab8c36f6a85657504aaefb37c7ff34e29b8c917290f3d28a1f0920c992e502",
+      "bytes": 346
+    },
+    {
+      "path": "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "c88605b96d04431f9c3c792464a0f2f253480e94",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723
+    },
+    {
+      "path": "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "c88605b96d04431f9c3c792464a0f2f253480e94",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "31aa79387f27e730e33d871925e152e35e428031",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023
+    },
+    {
+      "path": "sources/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "source_repository": "AccessKit/accesskit",
+      "source_revision": "c88605b96d04431f9c3c792464a0f2f253480e94",
+      "source_path": "LICENSE.chromium",
+      "git_blob_sha1": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "bytes": 1559
+    },
+    {
+      "path": "sources/DioxusLabs/taffy/77f385683c1d698c91a23a259f87fdddf26925fb/LICENSE",
+      "source_url": "https://raw.githubusercontent.com/DioxusLabs/taffy/77f385683c1d698c91a23a259f87fdddf26925fb/LICENSE",
+      "source_repository": "DioxusLabs/taffy",
+      "source_revision": "77f385683c1d698c91a23a259f87fdddf26925fb",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "f6b3d8f95569d0dfca076b6b24901b2a4a89aca8",
+      "sha256": "f97daf1a0124413dccf399a4e6626b4b74acd05282f80b6d64ac82225650b77a",
+      "bytes": 1100
+    },
+    {
+      "path": "sources/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+      "source_repository": "RustAudio/dasp",
+      "source_revision": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "74c4f492b303bec6da5ec6af182865f664a4c4c0",
+      "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512",
+      "bytes": 561
+    },
+    {
+      "path": "sources/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+      "source_repository": "RustAudio/dasp",
+      "source_revision": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "b35b54912ac435a64227b09c9347475caefa1cbd",
+      "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0",
+      "bytes": 1087
+    },
+    {
+      "path": "sources/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "source_repository": "aclysma/profiling",
+      "source_revision": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "139dce95d473c201a8561ef17536314d8b8cda65",
+      "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551",
+      "bytes": 10818
+    },
+    {
+      "path": "sources/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "source_repository": "aclysma/profiling",
+      "source_revision": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "6a84e059ad8b43e03c2b06bc2af4dc1d8442808d",
+      "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333",
+      "bytes": 1093
+    },
+    {
+      "path": "sources/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-APACHE",
+      "source_repository": "bevyengine/bevy",
+      "source_revision": "b3bdd75becaffe9a16677cf5bae5bd6d198f052b",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "d9a10c0d8e868ebf8da0b3dc95bb0be634c34bfe",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "bytes": 10173
+    },
+    {
+      "path": "sources/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/bevyengine/bevy/b3bdd75becaffe9a16677cf5bae5bd6d198f052b/LICENSE-MIT",
+      "source_repository": "bevyengine/bevy",
+      "source_revision": "b3bdd75becaffe9a16677cf5bae5bd6d198f052b",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "9cf106272ac3b56b0c4c80218e8fc10a664ca5f4",
+      "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+      "bytes": 1036
+    },
+    {
+      "path": "sources/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "source_url": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "source_repository": "gfx-rs/rspirv",
+      "source_revision": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "sources/gilrs-project/gilrs/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-APACHE",
+      "source_url": "https://gitlab.com/gilrs-project/gilrs/-/raw/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-APACHE",
+      "source_repository": "gilrs-project/gilrs",
+      "source_revision": "07e286e24b046cf39e5c367daa2770b805a64692",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "16fe87b06e802f094b3fbb0894b137bca2b16ef1",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847
+    },
+    {
+      "path": "sources/gilrs-project/gilrs/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-MIT",
+      "source_url": "https://gitlab.com/gilrs-project/gilrs/-/raw/07e286e24b046cf39e5c367daa2770b805a64692/LICENSE-MIT",
+      "source_repository": "gilrs-project/gilrs",
+      "source_revision": "07e286e24b046cf39e5c367daa2770b805a64692",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "8494e600cfa902c94ef917335f612ac1a8efd1e6",
+      "sha256": "74497fa3c93ebb5ec32d85de117469cb3fab3276f7c02426f14c0f19f31f4424",
+      "bytes": 1091
+    },
+    {
+      "path": "sources/sourcefrog/cargo-mutants/9685de346012afb9c379432eaf9c6960e22185df/LICENSE",
+      "source_url": "https://raw.githubusercontent.com/sourcefrog/cargo-mutants/9685de346012afb9c379432eaf9c6960e22185df/LICENSE",
+      "source_repository": "sourcefrog/cargo-mutants",
+      "source_revision": "9685de346012afb9c379432eaf9c6960e22185df",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "ca4e06058707e187b049ee4da06ed553b1854243",
+      "sha256": "479cbeb2506157776cf80abe31df18065d0fe50b5816ff77bfd75d5deb04ab5c",
+      "bytes": 1068
+    },
+    {
+      "path": "sources/teoxoy/encase/561121cd17298355de74c07a7206eb8329fd8347/LICENSE",
+      "source_url": "https://raw.githubusercontent.com/teoxoy/encase/561121cd17298355de74c07a7206eb8329fd8347/LICENSE",
+      "source_repository": "teoxoy/encase",
+      "source_revision": "561121cd17298355de74c07a7206eb8329fd8347",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "30c629513b36dd916fdb64fadf182f407aa3caec",
+      "sha256": "8876cdca96eb380d16d5ea32bf4529d85e87dedc7765ae2861a9bec7f34acbed",
+      "bytes": 878
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/COPYRIGHT",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/COPYRIGHT",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3840691945a378d433c7d8653da9cf03e5ff8a81",
+      "source_path": "COPYRIGHT",
+      "git_blob_sha1": "806620bce9847e5fd822a178f86c127851ba6e50",
+      "sha256": "ccef2f8fb35b3f36bc94b4084a188f7a20243c6eb6f94f48be9767115cbb763d",
+      "bytes": 599
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-APACHE",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3840691945a378d433c7d8653da9cf03e5ff8a81",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "2bb9ad240fa04c8cf706a4901c4807878e90c2dc",
+      "sha256": "59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b",
+      "bytes": 10172
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3840691945a378d433c7d8653da9cf03e5ff8a81/LICENSE-MIT",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3840691945a378d433c7d8653da9cf03e5ff8a81",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "6802bc4b80c0f8df1413d55b16267c0969e352c9",
+      "sha256": "1847e0e0698142ed4347c1441a9fa81c8fbddd44b1d8bbcd5e3647f991759d7f",
+      "bytes": 1035
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/COPYRIGHT",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "source_path": "COPYRIGHT",
+      "git_blob_sha1": "806620bce9847e5fd822a178f86c127851ba6e50",
+      "sha256": "ccef2f8fb35b3f36bc94b4084a188f7a20243c6eb6f94f48be9767115cbb763d",
+      "bytes": 599
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-APACHE",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "2bb9ad240fa04c8cf706a4901c4807878e90c2dc",
+      "sha256": "59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b",
+      "bytes": 10172
+    },
+    {
+      "path": "sources/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT",
+      "source_url": "https://raw.githubusercontent.com/webgpu-tools/wesl-rs/3ab716c0910e77f30c20415c9263cfaf6994f777/LICENSE-MIT",
+      "source_repository": "webgpu-tools/wesl-rs",
+      "source_revision": "3ab716c0910e77f30c20415c9263cfaf6994f777",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "6802bc4b80c0f8df1413d55b16267c0969e352c9",
+      "sha256": "1847e0e0698142ed4347c1441a9fa81c8fbddd44b1d8bbcd5e3647f991759d7f",
+      "bytes": 1035
+    },
+    {
+      "path": "supplements/const_soft_float-0.1.4-source-notices.txt",
+      "sha256": "b8b29b7a39d1b5ddefec27ae479d3588278b6e9b3303f5313bd6b5b9ac99574c",
+      "bytes": 14620,
+      "kind": "unchanged-legal-excerpts-with-distributor-provenance",
+      "sources": [
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/cos.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/cos.rs#L1-L15",
+          "source_git_blob_sha1": "3a1977d17bba0fed3bfcb8dcbb086e47c0d5d161",
+          "source_sha256": "759278573251d0336f0feef20b7cf4416a39a55eb505070e4b9536450e95d1fb",
+          "source_bytes": 2748,
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "header_sha256": "716b05f780529420c7865d540eb90defe63a33e337c734b23f5d02f230cdc919",
+          "header_bytes": 548,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/helpers/k_cosf.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/k_cosf.rs#L1-L15",
+          "source_git_blob_sha1": "2a1417342192733ac9a3a2a500feb549ce0de4eb",
+          "source_sha256": "68103e3ec418131191b6229844a3df867db7d4b6bb8038d0d51b0f23caf677c9",
+          "source_bytes": 1303,
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            561
+          ],
+          "header_sha256": "77e4f4050a0eb9480af78f84e28b427ffd71a173abcfc4f658c05f359e16718e",
+          "header_bytes": 561,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/helpers/rem_pio2f.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/rem_pio2f.rs#L1-L15",
+          "source_git_blob_sha1": "d00d8b7db67eb854c17eb43433bf0b3c7d7a066c",
+          "source_sha256": "23df431316bf70904c147f8077417a5eb05b28c5dcdf5f95aa1137c022216d0e",
+          "source_bytes": 2316,
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            566
+          ],
+          "header_sha256": "76fe740be2b0cb832ab7b6cd4ceece6579207e9b8457d08958c8cd0224dbc50f",
+          "header_bytes": 566,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/sin.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/sin.rs#L1-L15",
+          "source_git_blob_sha1": "b59606a681f2666d683e70181d71a09a2e8dda37",
+          "source_sha256": "43fcd1b09588fbdf1c993a7fe2b2400b01388e0da5b2fb8a8a6c7b26d4b0dc27",
+          "source_bytes": 3172,
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "header_sha256": "30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c",
+          "header_bytes": 548,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/cos.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/cos.rs#L1-L11",
+          "source_git_blob_sha1": "ab52d4ffcea2bb359f90723e762162f675bd8aa5",
+          "source_sha256": "9a4fd04ae87044255a013a86a68e8ec485e7368370c55618d7b49000b81261c5",
+          "source_bytes": 2570,
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            528
+          ],
+          "header_sha256": "44d9aabf6e914b85fde530b8ecde0c5e0fd077e67f645767d57551d7d20ca3a3",
+          "header_bytes": 528,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/helpers/k_cos.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/k_cos.rs#L1-L11",
+          "source_git_blob_sha1": "86fe938395aebd871b2a4c4a9f70f9437a3dd873",
+          "source_sha256": "704b9c6ac2626ba20753759b1eb0505e341aedd8f78d2fc0b2eed3010dbcf8dc",
+          "source_bytes": 3257,
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            528
+          ],
+          "header_sha256": "a3655b5fbbdd8b90bdb6fba0bc132bdff4f82fa70181d5c82769e4201e43b34d",
+          "header_bytes": 528,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/helpers/k_sin.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/k_sin.rs#L1-L11",
+          "source_git_blob_sha1": "c183c699ae675d19dec843f90c79571032e86098",
+          "source_sha256": "7fde68b4384fd1a081c867bbc3d4562222b496a20f334031270926d7430a551b",
+          "source_bytes": 2788,
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            528
+          ],
+          "header_sha256": "274fba85b079bf6eb3337aff5494ee2f25eeda037c69f8d275f7ccb9145053fb",
+          "header_bytes": 528,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/helpers/rem_pio2.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/rem_pio2.rs#L3-L14",
+          "source_git_blob_sha1": "56ccda776ea99a72da596acb336e4cf9c3539f46",
+          "source_sha256": "434482facfbf9da484d594a2537537f01c1f4ae36434953f4541a285bd995d93",
+          "source_bytes": 8346,
+          "lines_1based_inclusive": [
+            3,
+            14
+          ],
+          "bytes_0based_half_open": [
+            46,
+            514
+          ],
+          "header_sha256": "da28bd93659d512cba362af000b10121e71e63ef135f3ba398a05f376e90bc7e",
+          "header_bytes": 468,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/helpers/rem_pio2_large.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/rem_pio2_large.rs#L2-L12",
+          "source_git_blob_sha1": "01cd3b96e9e00528107a936b974fb5745eda2aa9",
+          "source_sha256": "e6caafc05e7def0a3bf1beaee4615a83d94a29794eb419ef8de97808380d68a9",
+          "source_bytes": 22022,
+          "lines_1based_inclusive": [
+            2,
+            12
+          ],
+          "bytes_0based_half_open": [
+            25,
+            463
+          ],
+          "header_sha256": "529554d11bbde6d2a93d9b19938270a4edb47065d7661fec422fad9b9054d7cf",
+          "header_bytes": 438,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/sin.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/sin.rs#L1-L10",
+          "source_git_blob_sha1": "d4f987d8d72da63ca11bc9f2bbe29d94f58f3c28",
+          "source_sha256": "ad5f8c1156e8a61cee67691ec833d7f55e012d771c5f406b55a3f0b243b96813",
+          "source_bytes": 3031,
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            525
+          ],
+          "header_sha256": "2fed8cd67086f037fee678d0be8b4602e1eedf7413652c7d870ff929ed9dc8f6",
+          "header_bytes": 525,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f64/sqrt.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/sqrt.rs#L1-L11",
+          "source_git_blob_sha1": "19f676e783ddc046f937588fc67bfddbf8f9826e",
+          "source_sha256": "a94f30bee2a07cc746b012c65ff0e1db2e65d90b6c914e61a9eafc672fc22872",
+          "source_bytes": 7467,
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "header_sha256": "5113e4434f625306a6075b053d8119fe32b2356680c2be47b2744b6f538c4932",
+          "header_bytes": 434,
+          "kind": "embedded_copyright_permission_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/sqrt.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/sqrt.rs#L1-L5",
+          "source_git_blob_sha1": "24e9da9a8dc0125a1d998d8c58884000a71e63c9",
+          "source_sha256": "b2b48001c03c3aa8da36142ccd469130130d3caceb8f5db3f5db216de4dfcb40",
+          "source_bytes": 3325,
+          "lines_1based_inclusive": [
+            1,
+            5
+          ],
+          "bytes_0based_half_open": [
+            0,
+            259
+          ],
+          "header_sha256": "60e7b76297e0ca493e12832114b01e84c91f5cbe0c856813519cbce432fca86e",
+          "header_bytes": 259,
+          "kind": "explicit_provenance_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "src/soft_f32/helpers/k_sinf.rs",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/k_sinf.rs#L3-L3",
+          "source_git_blob_sha1": "db8743d91f6bb215c79503c3f3ed2bf25b8b1f9b",
+          "source_sha256": "6bf06380ea03516a4eff0d9c4a7b2e35549890a954635de7fe3928fa15bc7de0",
+          "source_bytes": 745,
+          "lines_1based_inclusive": [
+            3,
+            3
+          ],
+          "bytes_0based_half_open": [
+            52,
+            155
+          ],
+          "header_sha256": "cb4813a11ddee0fac8f2eaed809c2da49167c5034fa070ed08b6eaab1d5ca2e0",
+          "header_bytes": 103,
+          "kind": "explicit_provenance_attribution"
+        },
+        {
+          "repository": "823984418/const_soft_float",
+          "revision": "723b63e489c55359012b0c5c793b897c494c0bfa",
+          "path": "README.md",
+          "pinned_url": "https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/README.md#L3-L3",
+          "source_git_blob_sha1": "24f488fbcf8f7cc01ca468d57a7ebae780827237",
+          "source_sha256": "2f17925d3dbdeb6404aa5214c650916761f7c015e496581b9dc48377f0385e26",
+          "source_bytes": 1219,
+          "lines_1based_inclusive": [
+            3,
+            3
+          ],
+          "bytes_0based_half_open": [
+            40,
+            176
+          ],
+          "header_sha256": "09d8338a57ee31ac89540004e1a5181d224746b1298bbb4825dc20c2917362a9",
+          "header_bytes": 136,
+          "kind": "explicit_provenance_attribution"
+        },
+        {
+          "repository": "rust-lang/libm",
+          "revision": "4c8a973741c014b11ce7f1477693a3e5d4ef9609",
+          "path": "src/math/sqrtf.rs",
+          "pinned_url": "https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/sqrtf.rs#L1-L14",
+          "source_git_blob_sha1": "00b20e578be9140b8bcb1a6d776d44f7e2b140ef",
+          "source_sha256": "4cf418d74f7751d522a642a9a8d6b86ee3472c6aaef44f0eb1bc26f4d8a90985",
+          "source_bytes": 4418,
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            517
+          ],
+          "header_sha256": "e6e1b6ab267506f0d2d8f948c3190989370d266a0210a5ae0e5395a3ffb7b677",
+          "header_bytes": 517,
+          "kind": "original_libm_header_omitted_from_port"
+        },
+        {
+          "repository": "rust-lang/libm",
+          "revision": "4c8a973741c014b11ce7f1477693a3e5d4ef9609",
+          "path": "src/math/k_sinf.rs",
+          "pinned_url": "https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/k_sinf.rs#L1-L15",
+          "source_git_blob_sha1": "88d10cababc5dae97344b55ba7ba8c4ec2e81190",
+          "source_sha256": "2775fcc710807164e6f37a4f8da3c8143cd5f16e19ce7c31c5591522151d7a96",
+          "source_bytes": 1137,
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "header_sha256": "1650039295219ae4abba67f75f78a982557364a3424b22f3c2cc1f4b49335f63",
+          "header_bytes": 548,
+          "kind": "original_libm_header_omitted_from_port"
+        }
+      ]
+    },
+    {
+      "path": "supplements/libm-0.2.16-source-notices.txt",
+      "sha256": "165093af1d0c8ca40e76e3d6f789128c82dbc660aa69df170e650c85f153a440",
+      "bytes": 56073,
+      "kind": "unchanged-legal-excerpts-with-distributor-provenance",
+      "sources": [
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/acos.rs",
+          "repository_relative_path": "libm/src/math/acos.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/acos.rs#L1-L11",
+          "source_sha256": "efd83a6138061209867f06421c6a756b8ca3aab5c6c0a85c4aba31bedb299da5",
+          "source_bytes": 3799,
+          "git_blob_sha1": "89b2e7c5f30e101a2889da58784aa519d137e81f",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "8c04acaa6a190fcc00982b96535b1c8e5b9a6ba6704d67939ce6850d2714f84a",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/acosf.rs",
+          "repository_relative_path": "libm/src/math/acosf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/acosf.rs#L1-L14",
+          "source_sha256": "c5c9c74d267725bbe5f9319e6f4a396af6ce46c890b601d3f963a5d74d12e4c3",
+          "source_bytes": 2206,
+          "git_blob_sha1": "d263b3f2ce33cb2b60ae1dca8b3219e297efca12",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            517
+          ],
+          "excerpt_sha256": "45260f53ace77c98c966e57f7fee35e85f3af9376e5320bb9017caca08ba6388",
+          "excerpt_bytes": 517,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/asin.rs",
+          "repository_relative_path": "libm/src/math/asin.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/asin.rs#L1-L11",
+          "source_sha256": "9693a7cb61674ec6fe22be9db8fe20276729c48b1562fd86d5421e372a0a12e4",
+          "source_bytes": 4256,
+          "git_blob_sha1": "9554a3eacc2421721ae8b5bcb566fb638c08cc79",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "8ec02af578a383d92ac01f5ffc0ab73a5bd888636016cdb6f84638d49d8770d5",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/asinf.rs",
+          "repository_relative_path": "libm/src/math/asinf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/asinf.rs#L1-L14",
+          "source_sha256": "25f6b7bbf46fc5aac4ebdd9e00118239747dcd28a79b90b858ddc4633d773d65",
+          "source_bytes": 2025,
+          "git_blob_sha1": "2dfe2a6d486d60ec83fffb439acfd23dc674cc0a",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            517
+          ],
+          "excerpt_sha256": "4d883695a193d68437dce3c3239958e7b4b342c1f5ecc0ef17af9c3becfc1b68",
+          "excerpt_bytes": 517,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/atan.rs",
+          "repository_relative_path": "libm/src/math/atan.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan.rs#L1-L11",
+          "source_sha256": "54181dbddf4f77b90b32b9f6819ac989da570dc02b791f3685d20a23d51324be",
+          "source_bytes": 5693,
+          "git_blob_sha1": "a303ebd42f0d2fdf7ccc30815c49e459bf5f0169",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            433
+          ],
+          "excerpt_sha256": "75fd89bb2462276f18a117755c5bc833c419949c933b483db1290415526fe323",
+          "excerpt_bytes": 433,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/atan2.rs",
+          "repository_relative_path": "libm/src/math/atan2.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan2.rs#L1-L12",
+          "source_sha256": "7d028d4d397f7484b8feed7b228eda65b84acac94d27729d236d5df95e38d8f0",
+          "source_bytes": 4498,
+          "git_blob_sha1": "51456e409b8cc889d4428029e73edf4f77094b9d",
+          "lines_1based_inclusive": [
+            1,
+            12
+          ],
+          "bytes_0based_half_open": [
+            0,
+            438
+          ],
+          "excerpt_sha256": "86b0ae215fd2bdad2d9926ec91f9dcdad93849f06398761ed2485f9bc5e6f78b",
+          "excerpt_bytes": 438,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/atan2f.rs",
+          "repository_relative_path": "libm/src/math/atan2f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan2f.rs#L1-L14",
+          "source_sha256": "b9497b5adb75e2788c404fd121aa64dcfa0e9357b67af3b3e7e6d4624dae1ca1",
+          "source_bytes": 2836,
+          "git_blob_sha1": "0f46c9f3906be4bc78d2fa89a67791f9506f20b9",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            518
+          ],
+          "excerpt_sha256": "674767bc817058e254fc2f7c222c2e5abf60a78bf1eb130de3216872d4c83b58",
+          "excerpt_bytes": 518,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/atanf.rs",
+          "repository_relative_path": "libm/src/math/atanf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atanf.rs#L1-L14",
+          "source_sha256": "197762f16ed5951236e17d0869c529e857acc329cc287df019ff69e5401f3b4d",
+          "source_bytes": 3114,
+          "git_blob_sha1": "58568d9a81f24fbeb9786427f6b2ee4045264798",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            517
+          ],
+          "excerpt_sha256": "c34b276efc0c815ca0b74ee4b0ee1e96c91432c89c591ac099e6a71210aef79d",
+          "excerpt_bytes": 517,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/cbrt.rs",
+          "repository_relative_path": "libm/src/math/cbrt.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cbrt.rs#L1-L5",
+          "source_sha256": "1ed98a0943c46ca48e32af54b6baeb80b6e8da5dda550005711fcb26bfcf12c2",
+          "source_bytes": 7528,
+          "git_blob_sha1": "e905e15f13fbeedc259d1d90c99980cc009c4ca9",
+          "lines_1based_inclusive": [
+            1,
+            5
+          ],
+          "bytes_0based_half_open": [
+            0,
+            173
+          ],
+          "excerpt_sha256": "f117f16ae37d151238cfc1a3030f060b06f9045ed0298cbdddbdf1ae0b8c0487",
+          "excerpt_bytes": 173,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/cbrtf.rs",
+          "repository_relative_path": "libm/src/math/cbrtf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cbrtf.rs#L1-L15",
+          "source_sha256": "7a2b4f190e8618c52cb23b47c040a4b4eacca739c68393cf14fb3f5d73988127",
+          "source_bytes": 2122,
+          "git_blob_sha1": "6916ca6735b63f40fe446c80924e071f704cf8de",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            562
+          ],
+          "excerpt_sha256": "16b0492375ade32c0f036c7a0628506034139f332181c281b07897f996f2679d",
+          "excerpt_bytes": 562,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/cos.rs",
+          "repository_relative_path": "libm/src/math/cos.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cos.rs#L1-L10",
+          "source_sha256": "6e81752899c471bd42d04bdf08e0b22bc10a29f92fa2a343281b995fd342f035",
+          "source_bytes": 2311,
+          "git_blob_sha1": "b2f786323f4d79b8259c49f7d1b5c8512b7e9983",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            428
+          ],
+          "excerpt_sha256": "78faf2571fe417f3bcd7b38798c4d9ddf499ca43d1ede6fa44992ba75445bff7",
+          "excerpt_bytes": 428,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/cosf.rs",
+          "repository_relative_path": "libm/src/math/cosf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cosf.rs#L1-L15",
+          "source_sha256": "f48aa954f199fe4f54fd73b4e7886a75f2c08afba7fc31c6a36db5b5f90ced69",
+          "source_bytes": 2493,
+          "git_blob_sha1": "bf5cb9196a3673779f66290abde792eeaf87f5bb",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "excerpt_sha256": "716b05f780529420c7865d540eb90defe63a33e337c734b23f5d02f230cdc919",
+          "excerpt_bytes": 548,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/erf.rs",
+          "repository_relative_path": "libm/src/math/erf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/erf.rs#L2-L12",
+          "source_sha256": "5a69f440d5ca88a5c4a45119837c45b14238836a036675230e10fec41d293a3b",
+          "source_bytes": 12612,
+          "git_blob_sha1": "6c78440afcf547a6990aea2d9fdd1b54e36cece3",
+          "lines_1based_inclusive": [
+            2,
+            12
+          ],
+          "bytes_0based_half_open": [
+            58,
+            490
+          ],
+          "excerpt_sha256": "92c3aefd412c9f97ba07a9a3c1c6201723a487c5828b124c6cb2d6e23e5c443f",
+          "excerpt_bytes": 432,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/erff.rs",
+          "repository_relative_path": "libm/src/math/erff.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/erff.rs#L1-L14",
+          "source_sha256": "62c30876390e532d7dc9ac1f1f1c1f654065fba2b2e534e531964d79e1766196",
+          "source_bytes": 7565,
+          "git_blob_sha1": "2a7680275b9fe78273568e98e0aa250a1576a72a",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            516
+          ],
+          "excerpt_sha256": "6c047eb102c5630d46169a6efb439835c4d0b87b2afad8eb86b6594d15df7f1c",
+          "excerpt_bytes": 516,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/exp.rs",
+          "repository_relative_path": "libm/src/math/exp.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp.rs#L1-L10",
+          "source_sha256": "1d486e847e1752fb9ce74a714096a11adcac935dacd4f17625ff63819103a80d",
+          "source_bytes": 5179,
+          "git_blob_sha1": "cb939ad5d8bf201b00074050c731235f68d334f9",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            373
+          ],
+          "excerpt_sha256": "8348f5e3b843c9ea4707e2598dbb696730438a2474c6ef37988aebee90395504",
+          "excerpt_bytes": 373,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/exp2.rs",
+          "repository_relative_path": "libm/src/math/exp2.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp2.rs#L1-L25",
+          "source_sha256": "e7270f15a682b69a49e042c80503c206d37c6c895f2c63da59a5e2431fa5fedc",
+          "source_bytes": 16525,
+          "git_blob_sha1": "08b71587f6de5d04be8c001431e69ff85688bc0e",
+          "lines_1based_inclusive": [
+            1,
+            25
+          ],
+          "bytes_0based_half_open": [
+            0,
+            1422
+          ],
+          "excerpt_sha256": "2728151294eb93196ab6dd7cb28ddc6e9ab76bf7ebf8c2e1a15f0d2221c98c76",
+          "excerpt_bytes": 1422,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/exp2f.rs",
+          "repository_relative_path": "libm/src/math/exp2f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp2f.rs#L1-L25",
+          "source_sha256": "3b4b5cb2e5674e1ce66a6051710738c1a6edc1d1638686fe9c78f0af4792a634",
+          "source_bytes": 4827,
+          "git_blob_sha1": "ceff6822c59695428266f00f2d82713c73ee4446",
+          "lines_1based_inclusive": [
+            1,
+            25
+          ],
+          "bytes_0based_half_open": [
+            0,
+            1420
+          ],
+          "excerpt_sha256": "d9d31636bf6dc09dbbe83abe0514e8d867f635bf3ef99b5163b54c56e6524077",
+          "excerpt_bytes": 1420,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/expf.rs",
+          "repository_relative_path": "libm/src/math/expf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expf.rs#L1-L14",
+          "source_sha256": "33b01180ebd01bb2911379476c5411fd05b066f2e17ef66e48c4dde83a7f01c0",
+          "source_bytes": 3113,
+          "git_blob_sha1": "5541ab79a9c144aec5f395498fe0cf13a088d3f9",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            516
+          ],
+          "excerpt_sha256": "738139255471d9eeebd57f9b8941953f88d2bedba1f8b19fd1b66b2159a1b142",
+          "excerpt_bytes": 516,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/expm1.rs",
+          "repository_relative_path": "libm/src/math/expm1.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expm1.rs#L1-L11",
+          "source_sha256": "6cc612ca7cf1384dc15f541b301a1f176efbc79536aff1293408b3121cc30ad3",
+          "source_bytes": 4301,
+          "git_blob_sha1": "3ce1d886bb1940ea09de06c89184e5e0da205707",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "3ba10cd82fbae064287ee39dc35eac5bbfe75eec6fa2d0b9ce946bc224b793f1",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/expm1f.rs",
+          "repository_relative_path": "libm/src/math/expm1f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expm1f.rs#L1-L14",
+          "source_sha256": "2b517f1bcb6279c906aad737f08c83ac30d7871e3beff266ea50a01fa18ccc81",
+          "source_bytes": 3918,
+          "git_blob_sha1": "388da3f30173d821d32f5d28472e832354684f83",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            518
+          ],
+          "excerpt_sha256": "cce13b8786574f070d06de60e6f4263dcd21cffd67c6112b061eeb262b9fb71d",
+          "excerpt_bytes": 518,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/fma.rs",
+          "repository_relative_path": "libm/src/math/fma.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/fma.rs#L1-L2",
+          "source_sha256": "16e72470f5c4407c44183cf06f5868f216c92e0532f3fb387b57dbccf815e2a7",
+          "source_bytes": 5190,
+          "git_blob_sha1": "70e6de768fab0b7c9bef39de575bdcf232a9f6dc",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            123
+          ],
+          "excerpt_sha256": "57831bc0962edac1eecbd6877f93c4452a6651b37bb96b540cae36b1331237d2",
+          "excerpt_bytes": 123,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/ceil.rs",
+          "repository_relative_path": "libm/src/math/generic/ceil.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/ceil.rs#L1-L2",
+          "source_sha256": "66b3def2b00ed9dd6a4f59c73765a050853dfe06c828fdf731987ac99e7c2a88",
+          "source_bytes": 4834,
+          "git_blob_sha1": "1072ba7c29b6344d163ff2e7c1490ecc196bf4c8",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            71
+          ],
+          "excerpt_sha256": "15997910221136fc9b2235f67365e57a26e10e635356784e1f90e305d8c25ee0",
+          "excerpt_bytes": 71,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/floor.rs",
+          "repository_relative_path": "libm/src/math/generic/floor.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/floor.rs#L1-L2",
+          "source_sha256": "7d4f15369abefa27645d6deda51d30febbe60ee9dca76e72a9364d574d0711c0",
+          "source_bytes": 4195,
+          "git_blob_sha1": "e6dfd8866a42529be4a3734509e854ef97e7da3e",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            68
+          ],
+          "excerpt_sha256": "ca254aa33491b3ee9a0a365629c5a0abda4aa71df314f122155335e394cb1173",
+          "excerpt_bytes": 68,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fma.rs",
+          "repository_relative_path": "libm/src/math/generic/fma.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fma.rs#L1-L2",
+          "source_sha256": "ba44930a56d7c1953ab0c96c7c767911c9dc6967083700c8ef02f43672c8482f",
+          "source_bytes": 9149,
+          "git_blob_sha1": "aaf459d1b6147b3cb4e059c101a6bc59401db804",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            116
+          ],
+          "excerpt_sha256": "8c0ceb8b3a85d042ee4bccf7e00f61bc72dd93cdade05a4cad9c332d555db493",
+          "excerpt_bytes": 116,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fmax.rs",
+          "repository_relative_path": "libm/src/math/generic/fmax.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmax.rs#L1-L1",
+          "source_sha256": "68d923950c3f1eab68baeab24679ab50918b663904839bc349ef666d9467518f",
+          "source_bytes": 773,
+          "git_blob_sha1": "b05804704d03e8b8294720d1b23acd14a3b7e7de",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fmaximum.rs",
+          "repository_relative_path": "libm/src/math/generic/fmaximum.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmaximum.rs#L1-L1",
+          "source_sha256": "c4b8b7080821a2dc65d0a50baf717ccd9ee20b813ce6d6d3f9f01b5700b674fa",
+          "source_bytes": 626,
+          "git_blob_sha1": "55a031e18ee8d091c0666ffc27b6e0ef4902ec11",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fmaximum_num.rs",
+          "repository_relative_path": "libm/src/math/generic/fmaximum_num.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmaximum_num.rs#L1-L1",
+          "source_sha256": "2f2d41e1f0160eb73469fa63db27d881b5b8eabc6d62fae7ca1b4b03eb35c5d5",
+          "source_bytes": 689,
+          "git_blob_sha1": "2dc60b2d237f5371d75315ed82cb95765aa8c9a5",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fmin.rs",
+          "repository_relative_path": "libm/src/math/generic/fmin.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmin.rs#L1-L1",
+          "source_sha256": "9bbdece9606e5eac57f3a91a5db7aab814c8e2b28b6df1813723c6b5715efc55",
+          "source_bytes": 773,
+          "git_blob_sha1": "e2245bf9e137b715a8526d0dba9c3dcf2cdd682e",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fminimum.rs",
+          "repository_relative_path": "libm/src/math/generic/fminimum.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fminimum.rs#L1-L1",
+          "source_sha256": "a6a33085356610eced23957ca86456b7dbe95e0f9d916298d59ce8bd90076b02",
+          "source_bytes": 626,
+          "git_blob_sha1": "aa68b1291d42b2937f30dd5e8851c194b865461c",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fminimum_num.rs",
+          "repository_relative_path": "libm/src/math/generic/fminimum_num.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fminimum_num.rs#L1-L1",
+          "source_sha256": "f5db65654e690adea16da83839d62a707cc814c998fd4a77e63caaaea1472256",
+          "source_bytes": 683,
+          "git_blob_sha1": "265bd4605ce3917ead876dde096d8e83bbd0fb5a",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/fmod.rs",
+          "repository_relative_path": "libm/src/math/generic/fmod.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmod.rs#L1-L1",
+          "source_sha256": "11aae62d08d656d815184eafd78a3b2d5764b6ce308b89e3819cd049bc491fe7",
+          "source_bytes": 3806,
+          "git_blob_sha1": "3c3fd44b27cc2b875550575f570caa9c44e1612f",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/rint.rs",
+          "repository_relative_path": "libm/src/math/generic/rint.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/rint.rs#L1-L2",
+          "source_sha256": "deec183fd0da6c0a47ab272a256990cea4f9231db7faff314697886457d6841a",
+          "source_bytes": 3748,
+          "git_blob_sha1": "c5bc27d3de6bc62cd861272550765161fe4a3a55",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            70
+          ],
+          "excerpt_sha256": "5add0c338abc2c1d2a5a00e8aa19afff5a4e93a506b8cb14011aeb57a51cf455",
+          "excerpt_bytes": 70,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/sqrt.rs",
+          "repository_relative_path": "libm/src/math/generic/sqrt.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/sqrt.rs#L1-L2",
+          "source_sha256": "c58e48ec07404d618109ad45332efe46c5246f42a2ddefdf5b25ba19e4ca9a0f",
+          "source_bytes": 18076,
+          "git_blob_sha1": "9481c4cdb7bbeaf85d8d14d08774f19cdfa7d1e9",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            117
+          ],
+          "excerpt_sha256": "2f33fc4762816d44f1a21f0c39977821d609567ba5c46faed5dc56f07ea93152",
+          "excerpt_bytes": 117,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/generic/trunc.rs",
+          "repository_relative_path": "libm/src/math/generic/trunc.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/trunc.rs#L1-L2",
+          "source_sha256": "46dd2cc35f6da25099ea2202264d8da3330b5ff1a962a8afb671b54b6ef6002d",
+          "source_bytes": 4163,
+          "git_blob_sha1": "d5b444d15dfc01fae060a77aa7d19d7d3cd2d94d",
+          "lines_1based_inclusive": [
+            1,
+            2
+          ],
+          "bytes_0based_half_open": [
+            0,
+            68
+          ],
+          "excerpt_sha256": "5c6f62056611d3f0256525565d02e2cfb48385b26812fb4d606fc7d13de1a0d3",
+          "excerpt_bytes": 68,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/j0.rs",
+          "repository_relative_path": "libm/src/math/j0.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j0.rs#L1-L11",
+          "source_sha256": "1cb991f0151a626744ad1832d4aedfaca681bcfcecc797de5ac5e9baf2342006",
+          "source_bytes": 15796,
+          "git_blob_sha1": "7b0800477b3cdcde6a1ed290332cc109ca7908a5",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            432
+          ],
+          "excerpt_sha256": "15606ccaa19a8a6b7a76cf5f4799cb15647aee6e2aafd9efa9f6463ee1ed54ba",
+          "excerpt_bytes": 432,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/j0f.rs",
+          "repository_relative_path": "libm/src/math/j0f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j0f.rs#L1-L14",
+          "source_sha256": "de97374b6a0019fd8b3d1f553be1708018546491d3b4a5fc650ee2dcdfc9620e",
+          "source_bytes": 10775,
+          "git_blob_sha1": "1c6a7c344623b1131d3ee03bbe4b2951b46a9c34",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            515
+          ],
+          "excerpt_sha256": "552822778ae113308ab6af66578cd13a79cc8cf1c1c4f3ef30329f0697da33d0",
+          "excerpt_bytes": 515,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/j1.rs",
+          "repository_relative_path": "libm/src/math/j1.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j1.rs#L1-L11",
+          "source_sha256": "e0a10746fd11a458d55ee61e758d9f016ff0f2203a07eb9907b5aca709a40469",
+          "source_bytes": 15204,
+          "git_blob_sha1": "7d304ba10b7b34923ac27816d2ddb702e04f2095",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            432
+          ],
+          "excerpt_sha256": "c8ac4d7d23983e9dc6353b8d27319394ca4f19cccb0a30ce724113337441f94d",
+          "excerpt_bytes": 432,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/j1f.rs",
+          "repository_relative_path": "libm/src/math/j1f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j1f.rs#L1-L14",
+          "source_sha256": "27b586c94d510aa653923b6b83cfec174e1f5da326d9120b0a0135b1190e32dc",
+          "source_bytes": 10840,
+          "git_blob_sha1": "cd829c1aa12134daba890f8e08430f9b0b220631",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            515
+          ],
+          "excerpt_sha256": "1fa702ca6b20a78db417bf396f128c7dade6123c58195ec6a32eb0f026d1eed8",
+          "excerpt_bytes": 515,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/jn.rs",
+          "repository_relative_path": "libm/src/math/jn.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/jn.rs#L1-L11",
+          "source_sha256": "ba36d25d4bbada83aadb3b2986879b7d88b91adb7b502061d21bf96ff3942194",
+          "source_bytes": 9986,
+          "git_blob_sha1": "b87aeaf1cc3d6d69712e90d2cd27eba53050b05c",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            432
+          ],
+          "excerpt_sha256": "1d68a500d21b4d22f84c3bfaad3d819082322b29c90ab999dd585e94ce1db148",
+          "excerpt_bytes": 432,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/jnf.rs",
+          "repository_relative_path": "libm/src/math/jnf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/jnf.rs#L1-L14",
+          "source_sha256": "b3861e19644ae669fe17db81d91aeaee9c9f9051b59957ab674017684c98fe32",
+          "source_bytes": 6706,
+          "git_blob_sha1": "34fdc5112dce01d4fb374f9fe5f90ec7b2332cae",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            515
+          ],
+          "excerpt_sha256": "a205aafe4140f090e72903ce746946a84a1110e5fb03b3b8d1f78469d25e5eb9",
+          "excerpt_bytes": 515,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_cos.rs",
+          "repository_relative_path": "libm/src/math/k_cos.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_cos.rs#L1-L10",
+          "source_sha256": "d4867527877c846aa8e2a0b43cf06f03e2d94c321a548acaf8d5171c09ff4057",
+          "source_bytes": 2974,
+          "git_blob_sha1": "1a2ebabe334372becd20b0a531398dc5269d036c",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            426
+          ],
+          "excerpt_sha256": "cd052f4fc22d6625c9f4439c66d4512a9011446d3f2dff15842925b024821cbb",
+          "excerpt_bytes": 426,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_cosf.rs",
+          "repository_relative_path": "libm/src/math/k_cosf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_cosf.rs#L1-L15",
+          "source_sha256": "8f76089d014e217b96c9eca520271e64d467dc0d6542bf313dd70eb96c040f7f",
+          "source_bytes": 1121,
+          "git_blob_sha1": "68f568c2425743ca588020779d304736da9d3e22",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            561
+          ],
+          "excerpt_sha256": "77e4f4050a0eb9480af78f84e28b427ffd71a173abcfc4f658c05f359e16718e",
+          "excerpt_bytes": 561,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_sin.rs",
+          "repository_relative_path": "libm/src/math/k_sin.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_sin.rs#L1-L10",
+          "source_sha256": "dfe6524cb2d530ec51eb1a2ab233aeb65b3f12177c1fb2f50f044ea41170f5d8",
+          "source_bytes": 2459,
+          "git_blob_sha1": "2f8542945136ed6a73adf03a361c7e4853e53a4a",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            426
+          ],
+          "excerpt_sha256": "e00a06f546cd736ac64d82d5c88c23810aec69eec0f61cc64705ea57693e6049",
+          "excerpt_bytes": 426,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_sinf.rs",
+          "repository_relative_path": "libm/src/math/k_sinf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_sinf.rs#L1-L15",
+          "source_sha256": "cf0e8bbe8d73a6704b7f1f710f5b9d31f190f1c633e894d4f69c4e3bc359eba3",
+          "source_bytes": 1126,
+          "git_blob_sha1": "297d88bbbbe12722e85bca9a672c340dbf1449d1",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "excerpt_sha256": "1650039295219ae4abba67f75f78a982557364a3424b22f3c2cc1f4b49335f63",
+          "excerpt_bytes": 548,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_tan.rs",
+          "repository_relative_path": "libm/src/math/k_tan.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_tan.rs#L1-L9",
+          "source_sha256": "dc3f8ece9187bbd65792a7d1068e676092e9c2a0886f28c80579f9bd94d744b7",
+          "source_bytes": 4225,
+          "git_blob_sha1": "ac48d661fd620cec021245e5f35fb288ac039532",
+          "lines_1based_inclusive": [
+            1,
+            9
+          ],
+          "bytes_0based_half_open": [
+            0,
+            363
+          ],
+          "excerpt_sha256": "ae36b8732e1a0fd7cf1b44f0840d2fca6e15432a92e6c1a1d7ef4bd5b5d83bc6",
+          "excerpt_bytes": 363,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/k_tanf.rs",
+          "repository_relative_path": "libm/src/math/k_tanf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_tanf.rs#L1-L10",
+          "source_sha256": "3381d2d4865bfc98e87aadb96bd8986f7691a389569a58fb1cb8db74fb5d9c20",
+          "source_bytes": 1913,
+          "git_blob_sha1": "79382f57bf68f724f94b3ad8e461956c99348144",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            367
+          ],
+          "excerpt_sha256": "97ab5732059ae18470b58c9d6af2e8b0f99645bc048d8e5a48e04580ae829981",
+          "excerpt_bytes": 367,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/lgamma_r.rs",
+          "repository_relative_path": "libm/src/math/lgamma_r.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/lgamma_r.rs#L1-L12",
+          "source_sha256": "5d56169c077b5b9f88902e2d243a7a4b4d06b89295aa84283d6fa15d9c244032",
+          "source_bytes": 12705,
+          "git_blob_sha1": "38eb270f683905178f86c86ce9b88a50ede67152",
+          "lines_1based_inclusive": [
+            1,
+            12
+          ],
+          "bytes_0based_half_open": [
+            0,
+            441
+          ],
+          "excerpt_sha256": "14dde229cf697a0e11ae7b91726e5a322c75248397f4e538747a81a77b235f57",
+          "excerpt_bytes": 441,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/lgammaf_r.rs",
+          "repository_relative_path": "libm/src/math/lgammaf_r.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/lgammaf_r.rs#L1-L14",
+          "source_sha256": "0bc2b5e0eec7666973adaca536f4d5fe978c8793bb340484fff9e5e7abb425f0",
+          "source_bytes": 8571,
+          "git_blob_sha1": "a0b6a678a67097118d2e22c6d5af6903f828194d",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            521
+          ],
+          "excerpt_sha256": "8936b74f7b254b0f97694856a89b1015aee5175d95834bff1248b923c9cdc8ac",
+          "excerpt_bytes": 521,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log.rs",
+          "repository_relative_path": "libm/src/math/log.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log.rs#L1-L11",
+          "source_sha256": "df5f4d1325e89621bfcd9cf7788d0d7e20a6ef7f429110fe35b370b3c9362615",
+          "source_bytes": 4581,
+          "git_blob_sha1": "9499c56d8adea904daab8e35fc1f902406a83416",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            433
+          ],
+          "excerpt_sha256": "25fecc3f4cf39ddbef3592cdb68b7c4445013992a88d3fb07b22c941810df9d3",
+          "excerpt_bytes": 433,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log10.rs",
+          "repository_relative_path": "libm/src/math/log10.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log10.rs#L1-L11",
+          "source_sha256": "4a96dd2b6a2a505497f2bb7ea956a50491d068dab1b6055a573aec1724a52e40",
+          "source_bytes": 3782,
+          "git_blob_sha1": "228c00a5b2ffb71d3c54ac2999373b5b4919aeb1",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            435
+          ],
+          "excerpt_sha256": "4ca5949c235812a9a84ce7abfc7267bb2d8e243ee718465e598ed9824fc75f44",
+          "excerpt_bytes": 435,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log10f.rs",
+          "repository_relative_path": "libm/src/math/log10f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log10f.rs#L1-L11",
+          "source_sha256": "784a576dd4a4071f4f67c670eb9b221cb03014818c4b2d71afbcbd2211431caf",
+          "source_bytes": 2574,
+          "git_blob_sha1": "f72fcf9e1e27c9582d760668b02edc5fc98bf0e1",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            435
+          ],
+          "excerpt_sha256": "bb9077840c38cb3ec78f36360077226586f0379dbbec6f4feb12de409b3f21e8",
+          "excerpt_bytes": 435,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log1p.rs",
+          "repository_relative_path": "libm/src/math/log1p.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log1p.rs#L1-L11",
+          "source_sha256": "bb8ce741e54d8f001d9c12450a14a663bd413014da2ade9ba1f5fbc9ff0c9a88",
+          "source_bytes": 4786,
+          "git_blob_sha1": "c2f9eb89be609f13594740698ce392368da9c679",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "f7d1768c7288ffc2fc29739de0facd139e7b7b7abe240a1ddca5d86fa76cb834",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log1pf.rs",
+          "repository_relative_path": "libm/src/math/log1pf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log1pf.rs#L1-L11",
+          "source_sha256": "8736222a9b9004b061f1339bb819c63c6b54414d4a01ef79d5f5a5f0a70677b5",
+          "source_bytes": 2851,
+          "git_blob_sha1": "2e4775b8de9042bdaa0e61ba33764902c9b05b9c",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            435
+          ],
+          "excerpt_sha256": "4a505f94994e4cff4684ea764b1112bdc7c02d6ebcc3d04f67300fa19c1f6426",
+          "excerpt_bytes": 435,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log2.rs",
+          "repository_relative_path": "libm/src/math/log2.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log2.rs#L1-L11",
+          "source_sha256": "1ec0cdd94bf4435ff0402d209089b1bdbcb1ba9a4cd5f77807f9c84cf534f980",
+          "source_bytes": 3239,
+          "git_blob_sha1": "0f72fe0b84dc97a24e505e3866fe507760769d9b",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "7c7c66bfcef7789a2c743ed6208e460c361e8ccc56609a24efe69b330849c90a",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/log2f.rs",
+          "repository_relative_path": "libm/src/math/log2f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log2f.rs#L1-L11",
+          "source_sha256": "7b3b17ba08df6b5a57dacf6f945bfe1a3c088bee0eb11e201ac5affc7f65925a",
+          "source_bytes": 2390,
+          "git_blob_sha1": "78673675a915b5d1c5238b34f9367cec9a8067b7",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            434
+          ],
+          "excerpt_sha256": "a51b9bbd3fcd0cedfcdc25402d5ee6d92c9912bab7c8b824af75d8ad6ecd290e",
+          "excerpt_bytes": 434,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/logf.rs",
+          "repository_relative_path": "libm/src/math/logf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/logf.rs#L1-L14",
+          "source_sha256": "c7dfa5e89fcca0411624fdc594f64c62d5dfa3b91f061fcb7ac3aea18414f238",
+          "source_bytes": 2105,
+          "git_blob_sha1": "cd7a7b0ba00d4f67734b1915db1fe74b41b67480",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            516
+          ],
+          "excerpt_sha256": "408e470dd9e98fd8b8186c97ef645084b81380fb401510749f111f28bd09da0f",
+          "excerpt_bytes": 516,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/pow.rs",
+          "repository_relative_path": "libm/src/math/pow.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/pow.rs#L1-L10",
+          "source_sha256": "c5566d0f48682d107e8803b0ed204ff3521503348f18a4f26cbe3f47fef15192",
+          "source_bytes": 21449,
+          "git_blob_sha1": "914d68cfce1a2b625893b37cedf8f013bfabb7c0",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            373
+          ],
+          "excerpt_sha256": "603e6e96737605b0a0f38955dd07cba7b4dd8b5d6661924d539499b498654313",
+          "excerpt_bytes": 373,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/powf.rs",
+          "repository_relative_path": "libm/src/math/powf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/powf.rs#L1-L14",
+          "source_sha256": "819971cb8e927d80113aded3cfe90dcd501c031e0eb1c562b58842fddd1751be",
+          "source_bytes": 10108,
+          "git_blob_sha1": "17772ae872d3373ab1aa2fb60c8fd1ee519b4f8f",
+          "lines_1based_inclusive": [
+            1,
+            14
+          ],
+          "bytes_0based_half_open": [
+            0,
+            516
+          ],
+          "excerpt_sha256": "6082fa0a02b0148774d8740bf988cf5f3da117801db565f725269b047170c855",
+          "excerpt_bytes": 516,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/rem_pio2.rs",
+          "repository_relative_path": "libm/src/math/rem_pio2.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2.rs#L1-L12",
+          "source_sha256": "5a040ab09dc356bca6d57712327151ed43003e2bac156553e3eb87d1cdefd2d1",
+          "source_bytes": 7573,
+          "git_blob_sha1": "61b1030275a228f8f221e231660f5b0992c7b60a",
+          "lines_1based_inclusive": [
+            1,
+            12
+          ],
+          "bytes_0based_half_open": [
+            0,
+            468
+          ],
+          "excerpt_sha256": "da28bd93659d512cba362af000b10121e71e63ef135f3ba398a05f376e90bc7e",
+          "excerpt_bytes": 468,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/rem_pio2_large.rs",
+          "repository_relative_path": "libm/src/math/rem_pio2_large.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2_large.rs#L2-L12",
+          "source_sha256": "986b5b9ad2c8fba828aee47bf198eab97fab243359ab03eb09783d98ca5847b5",
+          "source_bytes": 20544,
+          "git_blob_sha1": "bb2c532916b2a69d1981c9a6c58bae0aa87c453d",
+          "lines_1based_inclusive": [
+            2,
+            12
+          ],
+          "bytes_0based_half_open": [
+            25,
+            463
+          ],
+          "excerpt_sha256": "529554d11bbde6d2a93d9b19938270a4edb47065d7661fec422fad9b9054d7cf",
+          "excerpt_bytes": 438,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/rem_pio2f.rs",
+          "repository_relative_path": "libm/src/math/rem_pio2f.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2f.rs#L1-L15",
+          "source_sha256": "fb34bab63f8d143dfefa4ef2e31e8166bf21f3c67f1519bfc3ca4fb8eb28cafe",
+          "source_bytes": 2296,
+          "git_blob_sha1": "481f7ee830bbb9f68926e13f5d943d026d699d04",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            566
+          ],
+          "excerpt_sha256": "76fe740be2b0cb832ab7b6cd4ceece6579207e9b8457d08958c8cd0224dbc50f",
+          "excerpt_bytes": 566,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/sin.rs",
+          "repository_relative_path": "libm/src/math/sin.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sin.rs#L1-L10",
+          "source_sha256": "b48cebd120fc2ac93a6563059cabda28a72c8680304eb8335b92b412235cc232",
+          "source_bytes": 2878,
+          "git_blob_sha1": "5378a7bc3874a411e23aa042e23bd76148084852",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            428
+          ],
+          "excerpt_sha256": "0beade56a930d1c1a35daa8cd5bbe8350757c3b38ac025a553f7db8bdfaf9e16",
+          "excerpt_bytes": 428,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/sincos.rs",
+          "repository_relative_path": "libm/src/math/sincos.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sincos.rs#L1-L11",
+          "source_sha256": "a9c414e828c2e78b6bce4d5e4237b1baa93e81d78421aed5cedeab43df64067f",
+          "source_bytes": 3679,
+          "git_blob_sha1": "a364f73759d5411e9c8c21eb035494530839032d",
+          "lines_1based_inclusive": [
+            1,
+            11
+          ],
+          "bytes_0based_half_open": [
+            0,
+            432
+          ],
+          "excerpt_sha256": "421d333a961cbe6d0a8586bc90ad996363ea529b912c90ab80983f3f5d9ad95e",
+          "excerpt_bytes": 432,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/sincosf.rs",
+          "repository_relative_path": "libm/src/math/sincosf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sincosf.rs#L1-L15",
+          "source_sha256": "c39b6e3b52be83ccf4015ff105dab55e693577ebfc43745881750e73eebc6fa6",
+          "source_bytes": 5087,
+          "git_blob_sha1": "c4beb5267f280527f3096e2c85278d6821cce5d3",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "excerpt_sha256": "30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c",
+          "excerpt_bytes": 548,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/sinf.rs",
+          "repository_relative_path": "libm/src/math/sinf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sinf.rs#L1-L15",
+          "source_sha256": "b17db34d5da39a0f336d831abcb700fab69402c915321823870f1845e66c03d2",
+          "source_bytes": 2700,
+          "git_blob_sha1": "b4edf6769d30a2bc16903902369b81eb9737e561",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "excerpt_sha256": "30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c",
+          "excerpt_bytes": 548,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/support/int_traits/narrowing_div.rs",
+          "repository_relative_path": "libm/src/math/support/int_traits/narrowing_div.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/support/int_traits/narrowing_div.rs#L1-L1",
+          "source_sha256": "5f5378e33f1da56090d0dce2514926ab465dce65b89ad4ee2f7da07a92f8d5de",
+          "source_bytes": 6246,
+          "git_blob_sha1": "e76fc5ae9f4ca76cf7f42cc7b4bd75505849ac5c",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/support/modular.rs",
+          "repository_relative_path": "libm/src/math/support/modular.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/support/modular.rs#L1-L1",
+          "source_sha256": "cf6a562d6bdf16336f31d41c59e828ad47f85388849d20d6d3b59fc1c3e388a2",
+          "source_bytes": 10419,
+          "git_blob_sha1": "cc0edf2f2bc040d9584c2484ccd2aa28efebccac",
+          "lines_1based_inclusive": [
+            1,
+            1
+          ],
+          "bytes_0based_half_open": [
+            0,
+            49
+          ],
+          "excerpt_sha256": "e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5",
+          "excerpt_bytes": 49,
+          "kind": "unchanged_spdx_and_origin_attribution_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/tan.rs",
+          "repository_relative_path": "libm/src/math/tan.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/tan.rs#L1-L10",
+          "source_sha256": "2ea87ca18526753db6d149635ed6c895c8fbafd1e0fa7a9c04f7dc44b4eae986",
+          "source_bytes": 2305,
+          "git_blob_sha1": "79c1bad563e2f2fc5c630083f9600b6ebdc4d83f",
+          "lines_1based_inclusive": [
+            1,
+            10
+          ],
+          "bytes_0based_half_open": [
+            0,
+            428
+          ],
+          "excerpt_sha256": "59ee71a59035c18a5043881ef760e797cc17dc0cfd65eb43075f72a0ecf8292a",
+          "excerpt_bytes": 428,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        },
+        {
+          "repository": "rust-lang/compiler-builtins",
+          "revision": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+          "path_in_vcs": "libm",
+          "package_relative_path": "src/math/tanf.rs",
+          "repository_relative_path": "libm/src/math/tanf.rs",
+          "pinned_url": "https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/tanf.rs#L1-L15",
+          "source_sha256": "f7140c4193a57709acde5d290c8f83435562da42924c54cab0aa3a4f26095190",
+          "source_bytes": 2467,
+          "git_blob_sha1": "a615573d87a5cc0f739f280ae89d23f4a6ffd1f4",
+          "lines_1based_inclusive": [
+            1,
+            15
+          ],
+          "bytes_0based_half_open": [
+            0,
+            548
+          ],
+          "excerpt_sha256": "04db4bc1fedba0faa65f176d5fa383f2b61e569d7660c707b6de237829ee0f88",
+          "excerpt_bytes": 548,
+          "kind": "unchanged_legal_and_attribution_comment_header"
+        }
+      ]
+    },
+    {
+      "path": "supplements/upstream-compiler_builtins-0.1.94-LICENSE.txt",
+      "sha256": "0e13fed90654e0bc677d624a2d770833a09541fe0c0bdb3d051b3d081207393a",
+      "bytes": 4299,
+      "kind": "inherited-upstream-license",
+      "source_url": "https://github.com/rust-lang/compiler-builtins/blob/417a45ae20e5f742b28d42b3de93d1d2838d4841/LICENSE.txt",
+      "source_repository": "rust-lang/compiler-builtins",
+      "source_revision": "417a45ae20e5f742b28d42b3de93d1d2838d4841",
+      "source_path": "LICENSE.txt",
+      "git_blob_sha1": "92bbe113ab2a1920974b07ce253f811cc58acf52"
+    },
+    {
+      "path": "supplements/upstream-libm-0.2.6-LICENSE-APACHE.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "kind": "inherited-upstream-license",
+      "source_url": "https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/LICENSE-APACHE",
+      "source_repository": "rust-lang/libm",
+      "source_revision": "4c8a973741c014b11ce7f1477693a3e5d4ef9609",
+      "source_path": "LICENSE-APACHE",
+      "git_blob_sha1": "16fe87b06e802f094b3fbb0894b137bca2b16ef1"
+    },
+    {
+      "path": "supplements/upstream-libm-0.2.6-LICENSE-MIT.txt",
+      "sha256": "c986bcdb83103d4ddf58aeb7b5302359782e54dc4eea14a0cc27c62dcbd50729",
+      "bytes": 1058,
+      "kind": "inherited-upstream-license",
+      "source_url": "https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/LICENSE-MIT",
+      "source_repository": "rust-lang/libm",
+      "source_revision": "4c8a973741c014b11ce7f1477693a3e5d4ef9609",
+      "source_path": "LICENSE-MIT",
+      "git_blob_sha1": "432fbea04d382a6fcac7c64c796c55f83966236c"
+    }
+  ]
+}

@@ -68,6 +68,8 @@ pub enum Action {
         #[serde(default)]
         append: bool,
     },
+    /// Attack-move to the current cursor immediately (console hold-X).
+    AttackMove,
     /// Close a wheel, abort a brush, clear the order mode, or deselect.
     Cancel,
     /// Select own units sharing a type with the selection.
@@ -114,6 +116,8 @@ pub enum Action {
     PatrolMode,
     /// Next context order is a guard.
     GuardMode,
+    /// Next context order heals an owned unit or assists its construction.
+    HealMode,
     /// Next context order casts the selection's first spell.
     CastSpellMode,
     /// Next context order casts spell `index` of the selection's first
@@ -165,6 +169,8 @@ pub enum Action {
     /// Next context order attacks the unit or ground under the cursor
     /// (TA A, then click).
     AttackMode,
+    /// Next context order attack-moves to the cursor (distinct from force-fire).
+    AttackMoveMode,
     /// Next context order moves, even over a unit (TA M, then click).
     MoveMode,
     /// Select every own unit of a category on the map (TA Ctrl+letter;
@@ -286,13 +292,14 @@ pub enum Ring {
 }
 
 /// Orders the design reserves a place for but the sim cannot carry out yet
-/// (design system section 9, plus TA's Clear).
+/// (design system section 9, plus TA's Clear). Legacy saved-profile tags
+/// remain here when a supported action replaces their reserved slot.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReservedOrder {
     /// Cancel queued orders (TA C).
     Clear,
-    /// Heal / repair (TA H).
+    /// Legacy reserved Heal / repair slot; new profiles use [`Action::HealMode`].
     Heal,
     /// Load into a transport (TA L).
     Load,

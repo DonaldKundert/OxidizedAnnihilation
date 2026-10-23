@@ -1,0 +1,4 @@
+# Preserve exact legal inputs, including existing trailing blanks/empty final lines.
+supplements/const_soft_float-0.1.4-source-notices.txt whitespace=-blank-at-eol,-blank-at-eof
+supplements/libm-0.2.16-source-notices.txt whitespace=-blank-at-eof
+supplements/upstream-compiler_builtins-0.1.94-LICENSE.txt whitespace=-blank-at-eof

@@ -1,8 +1,8 @@
 //! The virtual filesystem: an ordered stack of mounts with case-insensitive
 //! lookup. Later mounts override earlier ones.
 
-use crate::hapi::{Archive, Entry, HapiError};
-use crate::source::FileSource;
+use crate::hapi::{Archive, Entry, HapiError, Limits};
+use crate::source::{FileSource, read_to_end_bounded};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +19,12 @@ pub enum VfsError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("{path}: file requires at least {size} bytes, limit is {limit}")]
+    LimitExceeded {
+        path: PathBuf,
+        size: u64,
+        limit: u64,
     },
     #[error("not found: {0}")]
     NotFound(String),
@@ -76,11 +82,20 @@ pub struct Vfs {
     mounts: Vec<Mount>,
     /// Normalized path -> origins, lowest priority first.
     index: BTreeMap<String, Vec<Origin>>,
+    limits: Limits,
 }
 
 impl Vfs {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the policy for all archive mounts and loose-file reads in this VFS.
+    pub fn with_limits(limits: Limits) -> Self {
+        Self {
+            limits,
+            ..Self::default()
+        }
     }
 
     /// Mounts a HAPI archive on top of everything mounted so far.
@@ -89,10 +104,11 @@ impl Vfs {
             path: path.into(),
             source,
         })?;
-        let archive = Archive::open(source).map_err(|source| VfsError::Archive {
-            path: path.into(),
-            source,
-        })?;
+        let archive =
+            Archive::open_with_limits(source, self.limits).map_err(|source| VfsError::Archive {
+                path: path.into(),
+                source,
+            })?;
         let mount = self.mounts.len();
         for (i, e) in archive.entries().iter().enumerate() {
             self.index
@@ -206,37 +222,82 @@ impl Vfs {
             .collect()
     }
 
-    /// Reads the winning version of a file.
+    /// Reads the winning version of a file, subject to the VFS resource policy.
     pub fn read(&self, path: &str) -> Result<Vec<u8>> {
+        self.read_bounded(path, self.limits.max_file_bytes)
+    }
+
+    /// Reads at most `max_bytes` decoded bytes. Archive reads validate SQSH
+    /// header claims before payload allocation; loose reads remain bounded even
+    /// if the file grows after metadata is checked. Also honors the VFS policy.
+    pub fn read_bounded(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>> {
         let key = normalize(path);
         let origin = self
             .index
             .get(&key)
             .and_then(|v| v.last())
             .ok_or_else(|| VfsError::NotFound(path.to_string()))?;
-        self.read_origin(&key, *origin)
+        self.read_origin_bounded(&key, *origin, max_bytes)
     }
 
     /// Reads a specific origin (for comparing shadowed versions).
-    pub fn read_origin(&self, _path: &str, origin: Origin) -> Result<Vec<u8>> {
+    pub fn read_origin(&self, path: &str, origin: Origin) -> Result<Vec<u8>> {
+        self.read_origin_bounded(path, origin, self.limits.max_file_bytes)
+    }
+
+    /// Bounded equivalent of [`Self::read_origin`].
+    pub fn read_origin_bounded(
+        &self,
+        _path: &str,
+        origin: Origin,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>> {
+        let max_bytes = max_bytes.min(self.limits.max_file_bytes);
         match self.mounts.get(origin.mount) {
             Some(Mount::Archive { path: ap, archive }) => {
                 let e: &Entry = archive
                     .entries()
                     .get(origin.entry)
                     .ok_or(VfsError::BadOrigin(origin))?;
-                archive.read(e).map_err(|source| VfsError::Archive {
-                    path: ap.clone(),
-                    source,
-                })
+                archive
+                    .read_bounded(e, max_bytes)
+                    .map_err(|source| VfsError::Archive {
+                        path: ap.clone(),
+                        source,
+                    })
             }
             Some(Mount::Dir { root, files }) => {
                 let full = root.join(files.get(origin.entry).ok_or(VfsError::BadOrigin(origin))?);
-                std::fs::read(&full).map_err(|source| VfsError::Io { path: full, source })
+                read_loose_bounded(&full, max_bytes)
             }
             None => Err(VfsError::BadOrigin(origin)),
         }
     }
+}
+
+fn read_loose_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    let io = |source| VfsError::Io {
+        path: path.into(),
+        source,
+    };
+    let mut file = std::fs::File::open(path).map_err(io)?;
+    let size = file.metadata().map_err(io)?.len();
+    if size > max_bytes {
+        return Err(VfsError::LimitExceeded {
+            path: path.into(),
+            size,
+            limit: max_bytes,
+        });
+    }
+    let (out, exceeded) = read_to_end_bounded(&mut file, max_bytes).map_err(io)?;
+    if exceeded {
+        return Err(VfsError::LimitExceeded {
+            path: path.into(),
+            size: max_bytes.saturating_add(1),
+            limit: max_bytes,
+        });
+    }
+    Ok(out)
 }
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
@@ -359,6 +420,75 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn bounded_reads_apply_to_archives_and_shadowed_origins() {
+        let scratch = Scratch::new("bounded-archive");
+        let path = scratch.write(
+            "a.hpi",
+            &HapiBuilder::new().file("x", b"data", true).build(),
+        );
+        let mut vfs = Vfs::new();
+        vfs.mount_archive(&path).unwrap();
+        assert_eq!(vfs.read_bounded("X", 4).unwrap(), b"data");
+        assert!(matches!(
+            vfs.read_bounded("x", 3),
+            Err(VfsError::Archive {
+                source: HapiError::LimitExceeded {
+                    size: 4,
+                    limit: 3,
+                    ..
+                },
+                ..
+            })
+        ));
+        let origin = vfs.origins("x")[0];
+        assert!(vfs.read_origin_bounded("x", origin, 3).is_err());
+        assert!(matches!(
+            vfs.read_origin_bounded(
+                "x",
+                Origin {
+                    mount: 99,
+                    entry: 0
+                },
+                3
+            ),
+            Err(VfsError::BadOrigin(_))
+        ));
+    }
+
+    #[test]
+    fn bounded_loose_reads_recheck_current_size() {
+        let scratch = Scratch::new("bounded-loose");
+        scratch.write("x", b"a");
+        scratch.write("empty", b"");
+        let mut vfs = Vfs::with_limits(Limits {
+            max_file_bytes: 4,
+            ..Limits::default()
+        });
+        vfs.mount_dir(&scratch.0).unwrap();
+        assert_eq!(vfs.stat("x").unwrap().size, 1);
+        scratch.write("x", b"data");
+        assert_eq!(vfs.read_bounded("x", 4).unwrap(), b"data");
+        assert_eq!(vfs.read_bounded("empty", 0).unwrap(), b"");
+        assert!(matches!(
+            vfs.read_bounded("x", 3),
+            Err(VfsError::LimitExceeded {
+                size: 4,
+                limit: 3,
+                ..
+            })
+        ));
+        scratch.write("x", b"larger");
+        assert!(matches!(
+            vfs.read("x"),
+            Err(VfsError::LimitExceeded {
+                size: 6,
+                limit: 4,
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -18,6 +18,9 @@
 
 use std::path::Path;
 
+pub mod bot;
+pub mod campaign;
+pub mod checkpoint;
 pub mod economy_report;
 
 use tak_commands::{CommandLog, LogError};
@@ -35,6 +38,9 @@ pub const MAX_TICKS: u32 = 1 << 24;
 /// Errors from the runner.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Replay checkpoint validation or restore failure.
+    #[error("{0}")]
+    Checkpoint(#[from] checkpoint::CheckpointError),
     /// File I/O.
     #[error("{path}: {source}")]
     Io {

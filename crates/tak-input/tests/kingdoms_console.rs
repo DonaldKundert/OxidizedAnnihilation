@@ -183,12 +183,12 @@ fn kingdoms_console_session_exercises_every_binding() {
                 assert_eq!(m.selection(), &units(&[2, 3, 4]), "{ctx}");
                 assert!(m.sub_select().is_none());
             }
-            "x_press_attacks_enemy_under_reticle" => {
+            "x_tap_attacks_enemy_under_reticle" => {
                 assert_eq!(m.cursor_world(), pos(800, 480), "{ctx}");
                 assert_eq!(
                     out,
                     vec![sim(
-                        3600,
+                        3650,
                         SimCommand::Attack {
                             units: units(&[2, 3, 4]),
                             target: Target::Unit(uid(6)),
@@ -202,7 +202,7 @@ fn kingdoms_console_session_exercises_every_binding() {
                 assert_eq!(
                     out,
                     vec![sim(
-                        3850,
+                        3900,
                         SimCommand::Attack {
                             units: units(&[2, 3, 4]),
                             target: Target::Unit(uid(6)),
@@ -265,7 +265,7 @@ fn kingdoms_console_session_exercises_every_binding() {
                 assert_eq!(
                     out,
                     vec![sim(
-                        7700,
+                        7750,
                         SimCommand::Build {
                             units: units(&[7]),
                             def: UnitDefId(22),
@@ -345,12 +345,12 @@ fn kingdoms_console_session_exercises_every_binding() {
                 assert!(radius > Fx::from_int(16) && !additive, "{ctx}");
                 assert_eq!(m.selection(), &units(&[1]));
             }
-            "x_hold_attack_move_is_reserved" => {
+            "x_hold_attack_moves_without_plain_context_order" => {
                 assert_eq!(
                     out,
                     vec![sim(
-                        13600,
-                        SimCommand::Move {
+                        13900,
+                        SimCommand::AttackMove {
                             units: units(&[1]),
                             to: pos(640, 480),
                             queue: QueueMode::Replace,
@@ -359,11 +359,12 @@ fn kingdoms_console_session_exercises_every_binding() {
                     "{ctx}"
                 );
                 assert!(
-                    fb.contains(&Feedback::Refused {
+                    !fb.contains(&Feedback::Refused {
                         reason: Refusal::Unsupported
                     }),
                     "{fb:?}"
                 );
+                assert_eq!(m.mode(), Mode::None);
             }
             "rt_hold_fast_pan" => {
                 // 60 ms at 1000 px/s, zoom 0.5, fast pan 200 %: 60 units.

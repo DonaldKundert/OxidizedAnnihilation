@@ -11,10 +11,9 @@
 //! `SQSH` chunk. Every offset and size read from the file is bounds-checked;
 //! malformed input yields an error, never a panic.
 
-use crate::source::Source;
+use crate::source::{Source, read_to_end_bounded};
 use flate2::read::ZlibDecoder;
 use std::collections::HashSet;
-use std::io::Read;
 
 pub const MAGIC: [u8; 4] = *b"HAPI";
 pub const VERSION_2: u32 = 0x0002_0000;
@@ -28,6 +27,36 @@ const MAX_DEPTH: usize = 64;
 const MAX_PATH_LEN: usize = 1024;
 /// zlib cannot expand data by more than about 1032:1.
 const MAX_ZLIB_RATIO: u64 = 1032;
+const DEFAULT_STORED_OVERHEAD_BYTES: u64 = 1 << 20;
+
+/// Resource policy, not a format limit. Applies separately to each archive and
+/// each read; callers must account for aggregate/nested-archive usage themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Maximum decoded bytes returned by a file read (including raw files).
+    pub max_file_bytes: u64,
+    /// Maximum decoded bytes in each names or directory block.
+    pub max_metadata_bytes: u64,
+    /// Maximum stored bytes in a single SQSH chunk, including its header.
+    pub max_stored_bytes: u64,
+    /// Maximum excess of stored SQSH bytes (including its header) over the
+    /// declared decoded size; allows framing but bounds oversized/junk payloads.
+    pub max_stored_overhead_bytes: u64,
+    /// Maximum combined directory and file records visited during indexing.
+    pub max_directory_records: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: 512 << 20,
+            max_metadata_bytes: 16 << 20,
+            max_stored_bytes: (512 << 20) + DEFAULT_STORED_OVERHEAD_BYTES,
+            max_stored_overhead_bytes: DEFAULT_STORED_OVERHEAD_BYTES,
+            max_directory_records: 65_536,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HapiError {
@@ -42,6 +71,12 @@ pub enum HapiError {
         what: &'static str,
         offset: u64,
         len: u64,
+        limit: u64,
+    },
+    #[error("{what} requires {size} bytes/records, limit is {limit}")]
+    LimitExceeded {
+        what: &'static str,
+        size: u64,
         limit: u64,
     },
     #[error("bad SQSH chunk at {offset}: {reason}")]
@@ -103,10 +138,17 @@ pub struct Archive<S> {
     len: u64,
     header: Header,
     entries: Vec<Entry>,
+    limits: Limits,
 }
 
 impl<S: Source> Archive<S> {
     pub fn open(source: S) -> Result<Self> {
+        Self::open_with_limits(source, Limits::default())
+    }
+
+    /// Opens an archive with an explicit resource policy. Nested archives are
+    /// independent: pass the policy again and maintain any aggregate budget.
+    pub fn open_with_limits(source: S, limits: Limits) -> Result<Self> {
         let len = source.len()?;
         let mut h = [0u8; HEADER_LEN];
         read_checked(&source, len, 0, &mut h, "header")?;
@@ -133,6 +175,7 @@ impl<S: Source> Archive<S> {
             header.names_offset,
             header.names_size,
             "names",
+            limits,
         )?;
         let dir = read_block(
             &source,
@@ -140,13 +183,15 @@ impl<S: Source> Archive<S> {
             header.dir_offset,
             header.dir_size,
             "directory",
+            limits,
         )?;
-        let entries = parse_directory(&dir, &names)?;
+        let entries = parse_directory(&dir, &names, limits.max_directory_records)?;
         Ok(Archive {
             source,
             len,
             header,
             entries,
+            limits,
         })
     }
 
@@ -159,40 +204,56 @@ impl<S: Source> Archive<S> {
         &self.entries
     }
 
-    /// Reads and decompresses one file.
+    /// Reads and decompresses one file, subject to the archive's resource policy.
     pub fn read(&self, entry: &Entry) -> Result<Vec<u8>> {
-        let out = if entry.is_compressed() {
-            let (data, used) = read_sqsh(&self.source, self.len, u64::from(entry.data_offset))?;
-            if used != u64::from(entry.stored_size) {
-                return Err(HapiError::BadChunk {
-                    offset: entry.data_offset.into(),
-                    reason: format!(
-                        "chunk is {used} bytes, directory says {}",
-                        entry.stored_size
-                    ),
-                });
-            }
-            data
-        } else {
-            let mut buf = vec![0u8; checked_alloc(entry.size.into(), self.len, "file")?];
-            read_checked(
+        self.read_bounded(entry, self.limits.max_file_bytes)
+    }
+
+    /// Reads at most `max_bytes` decoded bytes, also honoring the archive policy.
+    /// Rejects oversize directory/header claims before reading the payload.
+    /// Stored chunks are additionally capped by the archive's stored-byte and
+    /// stored-overhead limits (defaults: 513 MiB and decoded size + 1 MiB).
+    pub fn read_bounded(&self, entry: &Entry, max_bytes: u64) -> Result<Vec<u8>> {
+        let max_bytes = max_bytes.min(self.limits.max_file_bytes);
+        check_limit(u64::from(entry.size), max_bytes, "file decoded bytes")?;
+        if entry.is_compressed() {
+            read_sqsh(
                 &self.source,
                 self.len,
-                entry.data_offset.into(),
-                &mut buf,
-                "file data",
-            )?;
-            buf
-        };
-        if out.len() as u64 != u64::from(entry.size) {
-            return Err(HapiError::SizeMismatch {
-                path: entry.path.clone(),
-                got: out.len() as u64,
-                expected: entry.size.into(),
-            });
+                u64::from(entry.data_offset),
+                ChunkBounds {
+                    stored: u64::from(entry.stored_size),
+                    decoded: Some(u64::from(entry.size)),
+                    max_decoded: max_bytes,
+                    max_stored: self.limits.max_stored_bytes,
+                    max_overhead: self.limits.max_stored_overhead_bytes,
+                },
+            )
+        } else {
+            let offset = u64::from(entry.data_offset);
+            let size = u64::from(entry.size);
+            check_range(self.len, offset, size, "file data")?;
+            let mut buf = zeroed(size, "file data")?;
+            self.source.read_exact_at(offset, &mut buf)?;
+            Ok(buf)
         }
-        Ok(out)
     }
+}
+
+fn check_limit(size: u64, limit: u64, what: &'static str) -> Result<()> {
+    if size > limit {
+        return Err(HapiError::LimitExceeded { what, size, limit });
+    }
+    Ok(())
+}
+
+fn zeroed(size: u64, what: &'static str) -> Result<Vec<u8>> {
+    let count = checked_alloc(size, isize::MAX as u64, what)?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(count)
+        .map_err(std::io::Error::other)?;
+    out.resize(count, 0);
+    Ok(out)
 }
 
 fn checked_alloc(want: u64, limit: u64, what: &'static str) -> Result<usize> {
@@ -219,16 +280,20 @@ fn read_checked<S: Source>(
     buf: &mut [u8],
     what: &'static str,
 ) -> Result<()> {
-    let n = buf.len() as u64;
-    if offset.checked_add(n).is_none_or(|end| end > len) {
+    check_range(len, offset, buf.len() as u64, what)?;
+    src.read_exact_at(offset, buf)?;
+    Ok(())
+}
+
+fn check_range(len: u64, offset: u64, size: u64, what: &'static str) -> Result<()> {
+    if offset.checked_add(size).is_none_or(|end| end > len) {
         return Err(HapiError::OutOfBounds {
             what,
             offset,
-            len: n,
+            len: size,
             limit: len,
         });
     }
-    src.read_exact_at(offset, buf)?;
     Ok(())
 }
 
@@ -241,15 +306,28 @@ fn read_block<S: Source>(
     offset: u32,
     size: u32,
     what: &'static str,
+    limits: Limits,
 ) -> Result<Vec<u8>> {
     let offset = u64::from(offset);
     let mut magic = [0u8; 4];
     read_checked(src, len, offset, &mut magic, what)?;
     if magic == SQSH_MAGIC {
-        return Ok(read_sqsh(src, len, offset)?.0);
+        return read_sqsh(
+            src,
+            len,
+            offset,
+            ChunkBounds {
+                stored: u64::from(size),
+                decoded: None,
+                max_decoded: limits.max_metadata_bytes,
+                max_stored: limits.max_stored_bytes,
+                max_overhead: limits.max_stored_overhead_bytes,
+            },
+        );
     }
     let size = u64::from(size).min(len - offset);
-    let mut buf = vec![0u8; checked_alloc(size, len, what)?];
+    check_limit(size, limits.max_metadata_bytes, what)?;
+    let mut buf = zeroed(size, what)?;
     read_checked(src, len, offset, &mut buf, what)?;
     Ok(buf)
 }
@@ -270,9 +348,21 @@ pub fn obfuscate(buf: &mut [u8]) {
     }
 }
 
-/// Reads one SQSH chunk; returns the decoded bytes and the chunk's total size.
-fn read_sqsh<S: Source>(src: &S, len: u64, offset: u64) -> Result<(Vec<u8>, u64)> {
+struct ChunkBounds {
+    /// Authoritative size from the archive header or directory record.
+    stored: u64,
+    decoded: Option<u64>,
+    max_decoded: u64,
+    max_stored: u64,
+    max_overhead: u64,
+}
+
+/// Validates all header claims before allocating/reading the stored payload.
+fn read_sqsh<S: Source>(src: &S, len: u64, offset: u64, bounds: ChunkBounds) -> Result<Vec<u8>> {
     let bad = |reason: String| HapiError::BadChunk { offset, reason };
+    if bounds.stored < SQSH_HEADER_LEN as u64 {
+        return Err(bad("declared chunk is shorter than its header".into()));
+    }
     let mut h = [0u8; SQSH_HEADER_LEN];
     read_checked(src, len, offset, &mut h, "SQSH header")?;
     if h[..4] != SQSH_MAGIC {
@@ -281,15 +371,44 @@ fn read_sqsh<S: Source>(src: &S, len: u64, offset: u64) -> Result<(Vec<u8>, u64)
     let (compression, obfuscated) = (h[5], h[6] != 0);
     let w = |i: usize| u32::from_le_bytes(h[i..i + 4].try_into().expect("4"));
     let (stored, size, checksum) = (u64::from(w(7)), u64::from(w(11)), w(15));
-
-    let mut payload = vec![0u8; checked_alloc(stored, len, "SQSH payload")?];
-    read_checked(
-        src,
-        len,
-        offset + SQSH_HEADER_LEN as u64,
-        &mut payload,
-        "SQSH payload",
+    let total = SQSH_HEADER_LEN as u64 + stored;
+    if total != bounds.stored {
+        return Err(bad(format!(
+            "chunk is {total} bytes, directory/header says {}",
+            bounds.stored
+        )));
+    }
+    if let Some(expected) = bounds.decoded {
+        if size != expected {
+            return Err(bad(format!(
+                "header claims {size} decoded bytes, directory says {expected}"
+            )));
+        }
+    }
+    check_limit(size, bounds.max_decoded, "SQSH decoded bytes")?;
+    check_limit(
+        total,
+        bounds
+            .max_stored
+            .min(size.saturating_add(bounds.max_overhead)),
+        "SQSH stored bytes",
     )?;
+    check_range(len, offset, total, "SQSH chunk")?;
+    match compression {
+        0 if size != stored => {
+            return Err(bad(format!(
+                "raw payload is {stored} bytes, header says {size}"
+            )));
+        }
+        0 => (),
+        2 if size > stored.saturating_mul(MAX_ZLIB_RATIO) => {
+            return Err(bad(format!("claims {size} bytes from {stored}")));
+        }
+        2 => (),
+        c => return Err(HapiError::UnsupportedCompression(c)),
+    }
+    let mut payload = zeroed(stored, "SQSH payload")?;
+    src.read_exact_at(offset + SQSH_HEADER_LEN as u64, &mut payload)?;
     let sum = payload.iter().fold(0u32, |a, &b| a.wrapping_add(b.into()));
     if sum != checksum {
         return Err(bad(format!("checksum {sum:#010x} != {checksum:#010x}")));
@@ -297,24 +416,18 @@ fn read_sqsh<S: Source>(src: &S, len: u64, offset: u64) -> Result<(Vec<u8>, u64)
     if obfuscated {
         deobfuscate(&mut payload);
     }
-    let out = match compression {
-        0 => payload,
-        2 => {
-            if size > stored.saturating_mul(MAX_ZLIB_RATIO) {
-                return Err(bad(format!("claims {size} bytes from {stored}")));
-            }
-            // Never trust the claimed size for the up-front reservation; let
-            // the buffer grow as real output arrives (still capped by take()).
-            let mut out = Vec::with_capacity(
-                usize::try_from(size.min(stored.saturating_mul(4)).min(1 << 20)).unwrap_or(0),
-            );
-            ZlibDecoder::new(&payload[..])
-                .take(size + 1)
-                .read_to_end(&mut out)
-                .map_err(|e| bad(format!("zlib: {e}")))?;
-            out
+    let out = if compression == 0 {
+        payload
+    } else {
+        // Grow only as real output arrives. A one-byte stack probe detects an
+        // overrun without appending it or growing the vector past the budget.
+        let mut decoder = ZlibDecoder::new(&payload[..]);
+        let (out, exceeded) =
+            read_to_end_bounded(&mut decoder, size).map_err(|e| bad(format!("zlib: {e}")))?;
+        if exceeded {
+            return Err(bad(format!("decoded more than the declared {size} bytes")));
         }
-        c => return Err(HapiError::UnsupportedCompression(c)),
+        out
     };
     if out.len() as u64 != size {
         return Err(bad(format!(
@@ -322,7 +435,7 @@ fn read_sqsh<S: Source>(src: &S, len: u64, offset: u64) -> Result<(Vec<u8>, u64)
             out.len()
         )));
     }
-    Ok((out, SQSH_HEADER_LEN as u64 + stored))
+    Ok(out)
 }
 
 fn u32_at(buf: &[u8], off: usize) -> Option<u32> {
@@ -335,19 +448,29 @@ fn name_at(names: &[u8], off: u32) -> Result<String> {
     let rest = names
         .get(start..)
         .ok_or_else(|| HapiError::BadDirectory(format!("name offset {off} past names block")))?;
-    let end = rest
+    let end = rest[..rest.len().min(MAX_PATH_LEN + 1)]
         .iter()
         .position(|&b| b == 0)
         .ok_or_else(|| HapiError::BadDirectory(format!("name at {off} is not terminated")))?;
+    // Check UTF-8 expansion before collecting a Latin-1 name into a String.
+    let utf8_len = end + rest[..end].iter().filter(|&&b| b >= 128).count();
+    if utf8_len > MAX_PATH_LEN {
+        return Err(HapiError::BadDirectory(format!(
+            "name longer than {MAX_PATH_LEN} bytes"
+        )));
+    }
     // Names are Latin-1.
     Ok(rest[..end].iter().map(|&b| b as char).collect())
 }
 
 /// Directory entry: name, first subdir, subdir count, first file, file count.
 /// File entry: name, data offset, size, stored size, timestamp, checksum.
-fn parse_directory(dir: &[u8], names: &[u8]) -> Result<Vec<Entry>> {
+fn parse_directory(dir: &[u8], names: &[u8], max_records: usize) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
-    let mut seen = Seen::default();
+    let mut seen = Seen {
+        max_records,
+        ..Seen::default()
+    };
     walk(dir, names, 0, "", 0, &mut seen, &mut entries)?;
     Ok(entries)
 }
@@ -359,6 +482,17 @@ fn parse_directory(dir: &[u8], names: &[u8]) -> Result<Vec<Entry>> {
 struct Seen {
     dirs: HashSet<usize>,
     files: HashSet<usize>,
+    max_records: usize,
+}
+
+impl Seen {
+    fn check_budget(&self) -> Result<()> {
+        check_limit(
+            (self.dirs.len() + self.files.len()) as u64 + 1,
+            self.max_records as u64,
+            "directory records",
+        )
+    }
 }
 
 fn walk(
@@ -374,6 +508,7 @@ fn walk(
     if depth > MAX_DEPTH {
         return Err(bad("directory nesting too deep".into()));
     }
+    seen.check_budget()?;
     if !seen.dirs.insert(at) {
         return Err(bad(format!("directory entry at {at} visited twice")));
     }
@@ -408,6 +543,7 @@ fn walk(
     span(sub_at, sub_n, DIR_ENTRY_LEN)?;
     for i in 0..file_n as usize {
         let base = file_at as usize + i * FILE_ENTRY_LEN;
+        seen.check_budget()?;
         if !seen.files.insert(base) {
             return Err(bad(format!("file record at {base} listed twice")));
         }
@@ -466,6 +602,316 @@ mod tests {
             )
             .file("readme.txt", b"stored raw", false)
             .file("empty.txt", b"", false)
+    }
+
+    #[derive(Default)]
+    struct TrackingSource {
+        bytes: Vec<u8>,
+        reads: std::cell::RefCell<Vec<(u64, usize)>>,
+    }
+
+    impl Source for TrackingSource {
+        fn len(&self) -> std::io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+
+        fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+            self.reads.borrow_mut().push((offset, buf.len()));
+            self.bytes.read_exact_at(offset, buf)
+        }
+    }
+
+    #[test]
+    fn file_header_mismatch_rejects_before_payload_read() {
+        let bytes = HapiBuilder::new().file("bomb", &[0; 100_000], true).build();
+        let archive = Archive::open(TrackingSource {
+            bytes,
+            ..TrackingSource::default()
+        })
+        .unwrap();
+        let mut entry = archive.entries()[0].clone();
+        entry.size = 1;
+        archive.source.reads.borrow_mut().clear();
+        let err = archive.read(&entry).unwrap_err();
+        assert!(
+            matches!(err, HapiError::BadChunk { ref reason, .. } if reason.contains("directory says 1"))
+        );
+        assert_eq!(
+            *archive.source.reads.borrow(),
+            [(u64::from(entry.data_offset), SQSH_HEADER_LEN)]
+        );
+    }
+
+    #[test]
+    fn file_stored_size_mismatch_rejects_before_payload_read() {
+        let bytes = HapiBuilder::new().file("x", b"data", true).build();
+        let archive = Archive::open(TrackingSource {
+            bytes,
+            ..TrackingSource::default()
+        })
+        .unwrap();
+        let mut entry = archive.entries()[0].clone();
+        entry.stored_size += 1;
+        archive.source.reads.borrow_mut().clear();
+        assert!(matches!(
+            archive.read(&entry),
+            Err(HapiError::BadChunk { .. })
+        ));
+        assert_eq!(
+            *archive.source.reads.borrow(),
+            [(u64::from(entry.data_offset), SQSH_HEADER_LEN)]
+        );
+    }
+
+    #[test]
+    fn bounded_file_read_checks_claim_before_header_read() {
+        for compressed in [false, true] {
+            let bytes = HapiBuilder::new().file("x", b"data", compressed).build();
+            let archive = Archive::open(TrackingSource {
+                bytes,
+                ..TrackingSource::default()
+            })
+            .unwrap();
+            let entry = &archive.entries()[0];
+            assert_eq!(archive.read_bounded(entry, 4).unwrap(), b"data");
+            archive.source.reads.borrow_mut().clear();
+            assert!(matches!(
+                archive.read_bounded(entry, 3),
+                Err(HapiError::LimitExceeded {
+                    size: 4,
+                    limit: 3,
+                    ..
+                })
+            ));
+            assert!(archive.source.reads.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn stored_payload_budget_is_checked_before_payload_read() {
+        let bytes = HapiBuilder::new().file("x", &[0; 2000], true).build();
+        let mut archive = Archive::open(TrackingSource {
+            bytes,
+            ..TrackingSource::default()
+        })
+        .unwrap();
+        let entry = archive.entries()[0].clone();
+        archive.limits.max_stored_bytes = u64::from(entry.stored_size) - 1;
+        archive.source.reads.borrow_mut().clear();
+        assert!(matches!(
+            archive.read(&entry),
+            Err(HapiError::LimitExceeded {
+                what: "SQSH stored bytes",
+                ..
+            })
+        ));
+        assert_eq!(
+            *archive.source.reads.borrow(),
+            [(u64::from(entry.data_offset), SQSH_HEADER_LEN)]
+        );
+    }
+
+    #[test]
+    fn stored_overhead_budget_prevents_tiny_output_huge_input() {
+        let bytes = HapiBuilder::new().file("x", b"x", true).build();
+        let mut archive = Archive::open(TrackingSource {
+            bytes,
+            ..TrackingSource::default()
+        })
+        .unwrap();
+        let entry = archive.entries()[0].clone();
+        archive.limits.max_stored_overhead_bytes = u64::from(entry.stored_size - entry.size) - 1;
+        archive.source.reads.borrow_mut().clear();
+        assert!(matches!(
+            archive.read(&entry),
+            Err(HapiError::LimitExceeded {
+                what: "SQSH stored bytes",
+                ..
+            })
+        ));
+        assert_eq!(
+            *archive.source.reads.borrow(),
+            [(u64::from(entry.data_offset), SQSH_HEADER_LEN)]
+        );
+    }
+
+    #[test]
+    fn uncompressed_sqsh_still_obeys_exact_sizes_and_budgets() {
+        let payload = b"raw";
+        let mut bytes = SQSH_MAGIC.to_vec();
+        bytes.extend([2, 0, 0]);
+        for word in [
+            payload.len() as u32,
+            payload.len() as u32,
+            payload.iter().map(|&b| u32::from(b)).sum(),
+        ] {
+            bytes.extend(word.to_le_bytes());
+        }
+        bytes.extend(payload);
+        let bounds = || ChunkBounds {
+            stored: bytes.len() as u64,
+            decoded: Some(3),
+            max_decoded: 3,
+            max_stored: 100,
+            max_overhead: 100,
+        };
+        assert_eq!(
+            read_sqsh(&bytes, bytes.len() as u64, 0, bounds()).unwrap(),
+            payload
+        );
+        let mut bad_size = bytes.clone();
+        bad_size[11..15].copy_from_slice(&2u32.to_le_bytes());
+        let bad = ChunkBounds {
+            decoded: None,
+            ..bounds()
+        };
+        assert!(matches!(
+            read_sqsh(&bad_size, bad_size.len() as u64, 0, bad),
+            Err(HapiError::BadChunk { .. })
+        ));
+        let tiny = ChunkBounds {
+            max_decoded: 2,
+            ..bounds()
+        };
+        assert!(matches!(
+            read_sqsh(&bytes, bytes.len() as u64, 0, tiny),
+            Err(HapiError::LimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn payload_source_range_is_checked_before_allocation() {
+        let bytes = HapiBuilder::new().file("x", b"data", true).build();
+        let archive = Archive::open(bytes).unwrap();
+        let mut entry = archive.entries()[0].clone();
+        entry.data_offset = u32::MAX;
+        assert!(matches!(
+            archive.read(&entry),
+            Err(HapiError::OutOfBounds { .. })
+        ));
+        entry.stored_size = 0;
+        assert!(matches!(
+            archive.read(&entry),
+            Err(HapiError::OutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn actual_zlib_output_cannot_exceed_matching_header_claims() {
+        let mut bytes = HapiBuilder::new()
+            .file("x", &[0; 100_000], true)
+            .raw_dir(true)
+            .build();
+        let original = Archive::open(bytes.clone()).unwrap();
+        let entry = &original.entries()[0];
+        let header_size = entry.data_offset as usize + 11;
+        bytes[header_size..header_size + 4].copy_from_slice(&3u32.to_le_bytes());
+        let directory = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        bytes[directory + DIR_ENTRY_LEN + 8..directory + DIR_ENTRY_LEN + 12]
+            .copy_from_slice(&3u32.to_le_bytes());
+        let archive = Archive::open(bytes).unwrap();
+        let err = archive.read(&archive.entries()[0]).unwrap_err();
+        assert!(
+            matches!(err, HapiError::BadChunk { ref reason, .. } if reason.contains("more than the declared 3 bytes"))
+        );
+    }
+
+    #[test]
+    fn compressed_metadata_claims_and_stored_sizes_are_bounded() {
+        for offset_word in [8, 16] {
+            let mut bytes = HapiBuilder::new().file("x", b"data", false).build();
+            let block = u32::from_le_bytes(bytes[offset_word..offset_word + 4].try_into().unwrap())
+                as usize;
+            bytes[block + 11..block + 15].copy_from_slice(&(17u32 << 20).to_le_bytes());
+            assert!(matches!(
+                Archive::open(bytes),
+                Err(HapiError::LimitExceeded {
+                    what: "SQSH decoded bytes",
+                    ..
+                })
+            ));
+        }
+        for size_word in [12, 20] {
+            let mut bytes = HapiBuilder::new().file("x", b"data", false).build();
+            let declared = u32::from_le_bytes(bytes[size_word..size_word + 4].try_into().unwrap());
+            bytes[size_word..size_word + 4].copy_from_slice(&(declared + 1).to_le_bytes());
+            assert!(matches!(
+                Archive::open(bytes),
+                Err(HapiError::BadChunk { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn raw_metadata_and_directory_records_honor_explicit_limits() {
+        let bytes = HapiBuilder::new()
+            .file("x", b"data", false)
+            .raw_dir(true)
+            .raw_names(true)
+            .build();
+        let limits = Limits {
+            max_metadata_bytes: 4,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            Archive::open_with_limits(bytes.clone(), limits),
+            Err(HapiError::LimitExceeded { .. })
+        ));
+        let limits = Limits {
+            max_directory_records: 1,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            Archive::open_with_limits(bytes.clone(), limits),
+            Err(HapiError::LimitExceeded {
+                what: "directory records",
+                size: 2,
+                limit: 1
+            })
+        ));
+        let limits = Limits {
+            max_directory_records: 2,
+            ..Limits::default()
+        };
+        assert!(Archive::open_with_limits(bytes, limits).is_ok());
+    }
+
+    #[test]
+    fn oversize_names_are_rejected_before_string_allocation() {
+        let bytes = vec![b'x'; MAX_PATH_LEN + 2];
+        assert!(matches!(
+            name_at(&bytes, 0),
+            Err(HapiError::BadDirectory(_))
+        ));
+        let mut latin1 = vec![255; MAX_PATH_LEN / 2 + 1];
+        latin1.push(0);
+        assert!(matches!(
+            name_at(&latin1, 0),
+            Err(HapiError::BadDirectory(_))
+        ));
+        assert_eq!(name_at(&[255, 0], 0).unwrap(), "ÿ");
+    }
+
+    #[test]
+    fn nested_archive_requires_its_own_resource_policy() {
+        let inner = HapiBuilder::new().file("x", b"data", true).build();
+        let outer = Archive::open(HapiBuilder::new().file("inner", &inner, true).build()).unwrap();
+        let bytes = outer
+            .read_bounded(&outer.entries()[0], inner.len() as u64)
+            .unwrap();
+        let limits = Limits {
+            max_file_bytes: 3,
+            ..Limits::default()
+        };
+        let archive = Archive::open_with_limits(bytes, limits).unwrap();
+        assert!(matches!(
+            archive.read(&archive.entries()[0]),
+            Err(HapiError::LimitExceeded {
+                size: 4,
+                limit: 3,
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -62,12 +62,11 @@ impl WorldView for SimView<'_> {
             if !self.sees(u.owner, u.pos) {
                 continue;
             }
-            let builder =
-                (d.build.builder && !d.build.canbuild.is_empty()).then_some(if d.build.mobile {
-                    BuilderKind::Mobile
-                } else {
-                    BuilderKind::Factory
-                });
+            let builder = d.build.builder.then_some(if d.build.mobile {
+                BuilderKind::Mobile
+            } else {
+                BuilderKind::Factory
+            });
             let r = pick_radius(d.footprintx, d.footprintz);
             f(&UnitInfo {
                 id,
@@ -84,6 +83,11 @@ impl WorldView for SimView<'_> {
 
     fn is_enemy(&self, owner: PlayerId) -> bool {
         owner != self.local
+    }
+
+    fn can_heal(&self, unit: UnitId) -> bool {
+        self.world.unit(unit).is_some_and(|u| u.owner == self.local)
+            && tak_sim::construction::can_heal(self.world, unit)
     }
 
     fn build_options(&self, unit: UnitId) -> Vec<UnitDefId> {
@@ -143,11 +147,8 @@ impl WorldView for SimView<'_> {
         let monarch = self.monarch() == Some(unit) || has("Monarch");
         let armed = !d.combat.weapons.is_empty();
         match category {
-            Category::Builder => d.build.builder && d.build.mobile && !d.build.canbuild.is_empty(),
-            Category::Factory => {
-                has("FACTORY")
-                    || (d.build.builder && !d.build.mobile && !d.build.canbuild.is_empty())
-            }
+            Category::Builder => d.build.builder && d.build.mobile,
+            Category::Factory => has("FACTORY") || (d.build.builder && !d.build.mobile),
             Category::Monarch => monarch,
             Category::Naval => has("BOAT") || has("NAVAL"),
             Category::Troops => {
@@ -173,8 +174,32 @@ pub struct SpellInfo {
     pub name: String,
     /// `manapershot`.
     pub cost: i32,
+    /// Mana in this caster's own pool, not the player's build resource.
+    pub mana: Fx,
     /// The caster's own mana covers the cost now.
     pub ready: bool,
+}
+
+impl SpellInfo {
+    /// The whole mana still needed, rounded up so an almost-ready spell
+    /// never misleadingly says "short 0 mana".
+    pub fn shortfall(&self) -> i32 {
+        Fx::from_int(self.cost)
+            .saturating_sub(self.mana)
+            .max(Fx::ZERO)
+            .to_int_ceil()
+    }
+
+    /// Shared detail for mouse help and the controller wheel.
+    pub fn mana_text(&self) -> String {
+        let have = self.mana.max(Fx::ZERO).to_int_floor();
+        format!("{} mana (have {have})", self.cost)
+    }
+
+    /// Shared shortage text; a ready spell has no warning.
+    pub fn shortfall_text(&self) -> Option<String> {
+        (!self.ready).then(|| format!("short {} mana", self.shortfall()))
+    }
 }
 
 /// `unit`'s spells in weapon-slot order (the menu order `tak-input` uses).
@@ -192,6 +217,7 @@ pub fn unit_spells(world: &World, unit: UnitId) -> Vec<SpellInfo> {
             id: SpellId(slot as u32),
             name: w.name.clone(),
             cost: w.mana_per_shot,
+            mana,
             ready: mana >= Fx::from_int(w.mana_per_shot),
         })
         .collect()
@@ -495,6 +521,63 @@ pub fn f(v: Fx) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spell_menu_keeps_weapon_slots_and_the_actual_casters_mana() {
+        use tak_sim::combat::WeaponStats;
+        let mut scenario = tak_sim::testing::example_scenario(1, 2);
+        scenario.players[0].monarch = UnitDefId(1);
+        scenario.unit_defs[0].economy.maxmana = 100;
+        let spell = |name: &str, cost| WeaponStats {
+            name: name.into(),
+            mana_per_shot: cost,
+            ..Default::default()
+        };
+        scenario.unit_defs[0].combat.weapons = vec![
+            spell("ordinary", 0),
+            spell("first spell", 50),
+            spell("another ordinary", 0),
+            spell("second spell", 100),
+        ];
+        let mut world = World::new(&scenario).unwrap();
+        tak_sim::systems::spawn_start_units(&mut world);
+        let noncaster = world.players()[0].monarch.unwrap();
+        let enemy = world.players()[1].monarch.unwrap();
+        let caster = world
+            .spawn(
+                UnitDefId(0),
+                PlayerId(0),
+                Vec2::from_ints(300, 300),
+                tak_math::Angle::ZERO,
+            )
+            .unwrap();
+        tak_sim::economy::set_unit_mana_percent(&mut world, caster, 100);
+        assert!(tak_sim::economy::spend_unit_mana(
+            &mut world,
+            caster,
+            Fx::from_ratio(1, 2).unwrap()
+        ));
+        let selection = tak_commands::UnitSet::from(vec![noncaster, enemy, caster]);
+        let (id, spells) = caster_spells(&world, PlayerId(0), &selection).unwrap();
+        assert_eq!(id, caster);
+        assert_eq!(
+            spells.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![SpellId(1), SpellId(3)]
+        );
+        assert!(spells[0].ready);
+        assert_eq!(spells[0].shortfall(), 0);
+        assert_eq!(spells[0].shortfall_text(), None);
+        assert!(!spells[1].ready);
+        assert_eq!(spells[1].shortfall(), 1, "fractional shortage rounds up");
+        assert_eq!(spells[1].mana_text(), "100 mana (have 99)");
+        assert_eq!(spells[1].shortfall_text().as_deref(), Some("short 1 mana"));
+        assert!(
+            caster_spells(&world, PlayerId(0), &tak_commands::UnitSet::single(enemy)).is_none()
+        );
+        assert!(unit_spells(&world, noncaster).is_empty());
+        tak_sim::economy::set_unit_mana_percent(&mut world, caster, 100);
+        assert!(unit_spells(&world, caster).iter().all(|s| s.ready));
+    }
 
     fn geom() -> ViewGeom {
         ViewGeom {

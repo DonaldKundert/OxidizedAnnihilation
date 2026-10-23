@@ -88,6 +88,7 @@ pub fn scenario(seed: u64) -> Scenario {
     target.maxvelocity = Fx::ZERO;
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed,
         economy: Default::default(),
         features: Default::default(),

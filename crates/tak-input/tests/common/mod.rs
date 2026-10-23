@@ -40,6 +40,9 @@ pub struct UnitSpec {
     pub idle: bool,
     #[serde(default = "yes")]
     pub selectable: bool,
+    /// A construction frame rather than a completed unit.
+    #[serde(default)]
+    pub under_construction: bool,
     /// The local player's monarch.
     #[serde(default)]
     pub monarch: bool,
@@ -74,7 +77,7 @@ impl UnitSpec {
             def: UnitDefId(self.def),
             selectable: self.selectable,
             builder: self.builder,
-            under_construction: false,
+            under_construction: self.under_construction,
         }
     }
 }

@@ -16,10 +16,14 @@ pub enum Mode {
     Patrol,
     /// Guard the unit under the cursor.
     Guard,
+    /// Heal an owned unit, or assist its construction.
+    Heal,
     /// Cast this spell at the cursor.
     CastSpell(SpellId),
     /// Attack the unit under the cursor, or the ground (TA A).
     Attack,
+    /// Move to the cursor, engaging enemies and resuming the destination.
+    AttackMove,
     /// Move to the cursor, even over a unit (TA M).
     Move,
 }
@@ -76,6 +80,24 @@ pub fn builders_for<W: WorldView + ?Sized>(
         .collect()
 }
 
+/// Complete, selectable mobile builders of the local player that can heal.
+/// Missing units and adapter-specific capability failures are excluded.
+pub fn healers_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> UnitSet {
+    let me = world.local_player();
+    units
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world.unit(id).is_some_and(|u| {
+                u.owner == me
+                    && u.selectable
+                    && !u.under_construction
+                    && u.builder == Some(BuilderKind::Mobile)
+            }) && world.can_heal(id)
+        })
+        .collect()
+}
+
 /// Units of `units` that can cast `spell`.
 pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: SpellId) -> UnitSet {
     units
@@ -93,11 +115,15 @@ pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: Spe
 /// - `Mode::Patrol`: `Patrol { to: cursor }`.
 /// - `Mode::Guard`: `Guard` the hovered non-enemy unit; nothing over ground
 ///   or an enemy.
+/// - `Mode::Heal`: heal an owned hovered unit (including unfinished frames),
+///   by complete mobile builders other than the target; nothing over ground,
+///   another player's unit or the only selected healer itself.
 /// - `Mode::CastSpell(s)`: `CastSpell` at the hovered unit or the ground, by
 ///   units that know `s`.
 /// - `Mode::Attack`: `Attack` the hovered unit (outside the selection), or
 ///   the ground under the cursor.
 /// - `Mode::Move`: `Move { to: cursor }`, whatever is under it.
+/// - `Mode::AttackMove`: `AttackMove { to: cursor }`, whatever is under it.
 /// - No mode: hovered enemy → `Attack`; hovered friendly unit outside the
 ///   selection → `Guard`; otherwise → `Move { to: cursor }`.
 ///
@@ -134,6 +160,24 @@ pub fn resolve_context<W: WorldView + ?Sized>(
                 queue,
             })
         }
+        Mode::Heal => {
+            // Resolve the handle again so direct callers cannot target a stale
+            // snapshot that has disappeared or changed ownership.
+            let h = world.unit(hovered?.id)?;
+            if h.owner != world.local_player() || !h.selectable {
+                return None;
+            }
+            let healers = healers_for(world, units)
+                .iter()
+                .copied()
+                .filter(|&id| id != h.id)
+                .collect();
+            Some(SimCommand::Heal {
+                units: nonempty(healers)?,
+                target: h.id,
+                queue,
+            })
+        }
         Mode::CastSpell(spell) => Some(SimCommand::CastSpell {
             units: nonempty(casters_for(world, units, spell))?,
             spell,
@@ -152,6 +196,11 @@ pub fn resolve_context<W: WorldView + ?Sized>(
             queue,
         }),
         Mode::Move => Some(SimCommand::Move {
+            units: units.clone(),
+            to: cursor,
+            queue,
+        }),
+        Mode::AttackMove => Some(SimCommand::AttackMove {
             units: units.clone(),
             to: cursor,
             queue,

@@ -505,7 +505,7 @@ pub fn apply_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             continue;
         };
         if *queue == QueueMode::Replace {
-            u.orders.clear();
+            u.cancel_player_orders();
         }
         let had_patrol = u.orders.iter().any(|o| matches!(o, Order::Patrol { .. }));
         let back_to = u
@@ -513,7 +513,7 @@ pub fn apply_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             .iter()
             .rev()
             .find_map(|o| match o {
-                Order::Move { to } | Order::Patrol { to } => Some(*to),
+                Order::Move { to } | Order::Patrol { to } | Order::AttackMove { to } => Some(*to),
                 _ => None,
             })
             .unwrap_or(u.pos);
@@ -616,9 +616,19 @@ pub fn tick(world: &mut World, _scripts: &mut dyn ScriptHost) {
 }
 
 /// The move target at the front of a unit's queue.
-fn front_target(u: &Unit) -> Option<WorldPos> {
+pub(crate) fn front_target(u: &Unit) -> Option<WorldPos> {
+    let assist_walk = crate::construction::is_work_move(u);
+    if u.combat.order.is_some() && !crate::combat::is_our_move(u) && !assist_walk {
+        return None;
+    }
     match u.orders.front() {
         Some(Order::Move { to }) | Some(Order::Patrol { to }) => Some(*to),
+        Some(Order::AttackMove { to }) => u
+            .combat
+            .attack_move
+            .as_ref()
+            .filter(|a| a.destination == *to)
+            .map_or(Some(*to), |a| a.goal),
         _ => None,
     }
 }
@@ -626,10 +636,29 @@ fn front_target(u: &Unit) -> Option<WorldPos> {
 /// Finish the front move order with `outcome` (a patrol leg rotates to
 /// the back instead of being dropped).
 fn finish(u: &mut Unit, outcome: Outcome) {
+    // Failure to reach an engagement must not finish the durable order or
+    // discard its tail. Resume the destination and avoid this failed goal.
+    if matches!(u.orders.front(), Some(Order::AttackMove { .. })) {
+        if let Some(a) = &mut u.combat.attack_move {
+            if let Some(target) = a.target.take() {
+                a.avoided.insert(target, a.goal.unwrap_or(u.pos));
+                a.goal = Some(a.destination);
+                u.path.reset();
+                u.path.outcome = outcome;
+                return;
+            }
+        }
+        u.combat.attack_move = None;
+    }
+    let combat_move = crate::combat::is_our_move(u);
+    crate::construction::consume_work_move(u);
     match u.orders.pop_front() {
         Some(o @ Order::Patrol { .. }) => u.orders.push_back(o),
         Some(_) if u.orders.is_empty() => u.speed = Fx::ZERO,
         _ => {}
+    }
+    if combat_move {
+        u.combat.goal = None;
     }
     u.path.reset();
     u.path.outcome = outcome;

@@ -4,6 +4,8 @@
 //! ```no_run
 //! let vfs = tak_vfs::open_kingdoms(std::path::Path::new("/path/to/kingdoms"))?;
 //! let bytes = vfs.read("units/ARAMON_Monarch.fbi")?; // case-insensitive
+//! // Resource-sensitive callers can supply a smaller decoded-byte budget.
+//! let bytes = vfs.read_bounded("units/ARAMON_Monarch.fbi", 128 << 20)?;
 //! # Ok::<(), tak_vfs::VfsError>(())
 //! ```
 

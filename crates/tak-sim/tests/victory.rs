@@ -40,6 +40,7 @@ fn scenario(players: usize, victory: VictorySetup) -> Scenario {
     ];
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed: 3,
         map: MapInfo::flat(2048, 2048, starts),
         unit_defs: vec![king, soldier, tower],

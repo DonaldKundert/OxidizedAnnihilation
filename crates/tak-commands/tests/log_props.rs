@@ -33,13 +33,19 @@ fn fire_state() -> impl Strategy<Value = FireState> {
     prop_oneof![
         Just(FireState::HoldFire),
         Just(FireState::ReturnFire),
-        Just(FireState::FireAtWill)
+        Just(FireState::FireAtWill),
+        Just(FireState::Defensive)
     ]
 }
 
 fn sim_command() -> impl Strategy<Value = SimCommand> {
     prop_oneof![
         (units(), pos(), queue()).prop_map(|(units, to, queue)| SimCommand::Move {
+            units,
+            to,
+            queue
+        }),
+        (units(), pos(), queue()).prop_map(|(units, to, queue)| SimCommand::AttackMove {
             units,
             to,
             queue
@@ -58,6 +64,11 @@ fn sim_command() -> impl Strategy<Value = SimCommand> {
             }
         ),
         (units(), unit_id(), queue()).prop_map(|(units, target, queue)| SimCommand::Guard {
+            units,
+            target,
+            queue
+        }),
+        (units(), unit_id(), queue()).prop_map(|(units, target, queue)| SimCommand::Heal {
             units,
             target,
             queue
@@ -275,4 +286,30 @@ fn json_shape() {
     assert_eq!(log.for_tick(Tick(3)).len(), 1);
     assert!(log.for_tick(Tick(2)).is_empty());
     assert_eq!(log.last_tick(), Some(Tick(3)));
+}
+
+#[test]
+fn fire_state_tokens_default_and_existing_variant_order_stay_compatible() {
+    assert_eq!(FireState::default(), FireState::FireAtWill);
+    for (state, token, tag) in [
+        (FireState::HoldFire, "hold_fire", 0),
+        (FireState::ReturnFire, "return_fire", 1),
+        (FireState::FireAtWill, "fire_at_will", 2),
+        (FireState::Defensive, "defensive", 3),
+    ] {
+        let json = format!("\"{token}\"");
+        assert_eq!(serde_json::to_string(&state).unwrap(), json);
+        assert_eq!(serde_json::from_str::<FireState>(&json).unwrap(), state);
+        assert_eq!(state as u8, tag);
+        let mut log = CommandLog::new();
+        log.record(
+            Tick(1),
+            PlayerId(0),
+            SimCommand::SetFireState {
+                units: UnitSet::single(UnitId::new(0, 0)),
+                state,
+            },
+        );
+        assert_eq!(CommandLog::from_json(&log.to_json()).unwrap(), log);
+    }
 }

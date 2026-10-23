@@ -643,11 +643,16 @@ name = "tak-headless"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
+ "serde_json",
  "tak-commands",
+ "tak-content",
  "tak-input",
+ "tak-math",
  "tak-sim",
  "tak-vfs",
  "thiserror",
+ "xxhash-rust",
 ]
 
 [[package]]

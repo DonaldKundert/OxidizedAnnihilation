@@ -2,6 +2,11 @@
   "name": "WP-S mouse and keyboard",
   "bindings": [
     {
+      "input": {"key": "a"},
+      "gesture": "press",
+      "action": {"type": "attack_move_mode"}
+    },
+    {
       "input": {
         "button": "mouse_left"
       },

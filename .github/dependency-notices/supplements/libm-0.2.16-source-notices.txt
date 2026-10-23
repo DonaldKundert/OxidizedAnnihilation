@@ -1,0 +1,1253 @@
+libm 0.2.16: complete unchanged legal and attribution source-header supplement
+Release revision: dfd2203a4d6110820ad7bb65cafe1bf331a03a3d; repository path: libm.
+Coverage: 69 source files total: 53 copyright/permission-header files and 16 additional SPDX/origin-attribution files.
+All 146 release source .rs files were scanned and matched exact upstream Git blobs.
+Quoted headers are unchanged source bytes, retaining copyright, permission, disclaimers, SPDX identifiers, origin, conversion, optimization and port credits.
+Separable algorithm documentation, Rust attributes, imports and executable code are excluded.
+Preserve the upstream root LICENSE.txt separately. This is not an upstream NOTICE, new grant or legal clearance.
+Byte ranges are zero-based and half-open; line ranges are one-based and inclusive.
+
+[1] src/math/acos.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/acos.rs#L1-L11
+Full source SHA256: efd83a6138061209867f06421c6a756b8ca3aab5c6c0a85c4aba31bedb299da5
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: 8c04acaa6a190fcc00982b96535b1c8e5b9a6ba6704d67939ce6850d2714f84a
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_acos.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[2] src/math/acosf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/acosf.rs#L1-L14
+Full source SHA256: c5c9c74d267725bbe5f9319e6f4a396af6ce46c890b601d3f963a5d74d12e4c3
+Range: lines 1-14; bytes [0, 517)
+Header SHA256: 45260f53ace77c98c966e57f7fee35e85f3af9376e5320bb9017caca08ba6388
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_acosf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[3] src/math/asin.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/asin.rs#L1-L11
+Full source SHA256: 9693a7cb61674ec6fe22be9db8fe20276729c48b1562fd86d5421e372a0a12e4
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: 8ec02af578a383d92ac01f5ffc0ab73a5bd888636016cdb6f84638d49d8770d5
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_asin.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[4] src/math/asinf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/asinf.rs#L1-L14
+Full source SHA256: 25f6b7bbf46fc5aac4ebdd9e00118239747dcd28a79b90b858ddc4633d773d65
+Range: lines 1-14; bytes [0, 517)
+Header SHA256: 4d883695a193d68437dce3c3239958e7b4b342c1f5ecc0ef17af9c3becfc1b68
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_asinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[5] src/math/atan.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan.rs#L1-L11
+Full source SHA256: 54181dbddf4f77b90b32b9f6819ac989da570dc02b791f3685d20a23d51324be
+Range: lines 1-11; bytes [0, 433)
+Header SHA256: 75fd89bb2462276f18a117755c5bc833c419949c933b483db1290415526fe323
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_atan.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[6] src/math/atan2.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan2.rs#L1-L12
+Full source SHA256: 7d028d4d397f7484b8feed7b228eda65b84acac94d27729d236d5df95e38d8f0
+Range: lines 1-12; bytes [0, 438)
+Header SHA256: 86b0ae215fd2bdad2d9926ec91f9dcdad93849f06398761ed2485f9bc5e6f78b
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_atan2.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ *
+ */
+END UNCHANGED NOTICE
+
+[7] src/math/atan2f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atan2f.rs#L1-L14
+Full source SHA256: b9497b5adb75e2788c404fd121aa64dcfa0e9357b67af3b3e7e6d4624dae1ca1
+Range: lines 1-14; bytes [0, 518)
+Header SHA256: 674767bc817058e254fc2f7c222c2e5abf60a78bf1eb130de3216872d4c83b58
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_atan2f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[8] src/math/atanf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/atanf.rs#L1-L14
+Full source SHA256: 197762f16ed5951236e17d0869c529e857acc329cc287df019ff69e5401f3b4d
+Range: lines 1-14; bytes [0, 517)
+Header SHA256: c34b276efc0c815ca0b74ee4b0ee1e96c91432c89c591ac099e6a71210aef79d
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_atanf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[9] src/math/cbrt.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cbrt.rs#L1-L5
+Full source SHA256: 1ed98a0943c46ca48e32af54b6baeb80b6e8da5dda550005711fcb26bfcf12c2
+Range: lines 1-5; bytes [0, 173)
+Header SHA256: f117f16ae37d151238cfc1a3030f060b06f9045ed0298cbdddbdf1ae0b8c0487
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: core-math/src/binary64/cbrt/cbrt.c
+ * Copyright (c) 2021-2022 Alexei Sibidanov.
+ * Ported to Rust in 2025 by Trevor Gross.
+ */
+END UNCHANGED NOTICE
+
+[10] src/math/cbrtf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cbrtf.rs#L1-L15
+Full source SHA256: 7a2b4f190e8618c52cb23b47c040a4b4eacca739c68393cf14fb3f5d73988127
+Range: lines 1-15; bytes [0, 562)
+Header SHA256: 16b0492375ade32c0f036c7a0628506034139f332181c281b07897f996f2679d
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_cbrtf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Debugged and optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[11] src/math/cos.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cos.rs#L1-L10
+Full source SHA256: 6e81752899c471bd42d04bdf08e0b22bc10a29f92fa2a343281b995fd342f035
+Range: lines 1-10; bytes [0, 428)
+Header SHA256: 78faf2571fe417f3bcd7b38798c4d9ddf499ca43d1ede6fa44992ba75445bff7
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_cos.c */
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[12] src/math/cosf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/cosf.rs#L1-L15
+Full source SHA256: f48aa954f199fe4f54fd73b4e7886a75f2c08afba7fc31c6a36db5b5f90ced69
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 716b05f780529420c7865d540eb90defe63a33e337c734b23f5d02f230cdc919
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_cosf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[13] src/math/erf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/erf.rs#L2-L12
+Full source SHA256: 5a69f440d5ca88a5c4a45119837c45b14238836a036675230e10fec41d293a3b
+Range: lines 2-12; bytes [58, 490)
+Header SHA256: 92c3aefd412c9f97ba07a9a3c1c6201723a487c5828b124c6cb2d6e23e5c443f
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_erf.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[14] src/math/erff.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/erff.rs#L1-L14
+Full source SHA256: 62c30876390e532d7dc9ac1f1f1c1f654065fba2b2e534e531964d79e1766196
+Range: lines 1-14; bytes [0, 516)
+Header SHA256: 6c047eb102c5630d46169a6efb439835c4d0b87b2afad8eb86b6594d15df7f1c
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_erff.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[15] src/math/exp.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp.rs#L1-L10
+Full source SHA256: 1d486e847e1752fb9ce74a714096a11adcac935dacd4f17625ff63819103a80d
+Range: lines 1-10; bytes [0, 373)
+Header SHA256: 8348f5e3b843c9ea4707e2598dbb696730438a2474c6ef37988aebee90395504
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_exp.c */
+/*
+ * ====================================================
+ * Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[16] src/math/exp2.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp2.rs#L1-L25
+Full source SHA256: e7270f15a682b69a49e042c80503c206d37c6c895f2c63da59a5e2431fa5fedc
+Range: lines 1-25; bytes [0, 1422)
+Header SHA256: 2728151294eb93196ab6dd7cb28ddc6e9ab76bf7ebf8c2e1a15f0d2221c98c76
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_exp2.c */
+//-
+// Copyright (c) 2005 David Schultz <das@FreeBSD.ORG>
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+END UNCHANGED NOTICE
+
+[17] src/math/exp2f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/exp2f.rs#L1-L25
+Full source SHA256: 3b4b5cb2e5674e1ce66a6051710738c1a6edc1d1638686fe9c78f0af4792a634
+Range: lines 1-25; bytes [0, 1420)
+Header SHA256: d9d31636bf6dc09dbbe83abe0514e8d867f635bf3ef99b5163b54c56e6524077
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_exp2f.c
+//-
+// Copyright (c) 2005 David Schultz <das@FreeBSD.ORG>
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+END UNCHANGED NOTICE
+
+[18] src/math/expf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expf.rs#L1-L14
+Full source SHA256: 33b01180ebd01bb2911379476c5411fd05b066f2e17ef66e48c4dde83a7f01c0
+Range: lines 1-14; bytes [0, 516)
+Header SHA256: 738139255471d9eeebd57f9b8941953f88d2bedba1f8b19fd1b66b2159a1b142
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_expf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[19] src/math/expm1.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expm1.rs#L1-L11
+Full source SHA256: 6cc612ca7cf1384dc15f541b301a1f176efbc79536aff1293408b3121cc30ad3
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: 3ba10cd82fbae064287ee39dc35eac5bbfe75eec6fa2d0b9ce946bc224b793f1
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_expm1.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[20] src/math/expm1f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/expm1f.rs#L1-L14
+Full source SHA256: 2b517f1bcb6279c906aad737f08c83ac30d7871e3beff266ea50a01fa18ccc81
+Range: lines 1-14; bytes [0, 518)
+Header SHA256: cce13b8786574f070d06de60e6f4263dcd21cffd67c6112b061eeb262b9fb71d
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_expm1f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[21] src/math/fma.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/fma.rs#L1-L2
+Full source SHA256: 16e72470f5c4407c44183cf06f5868f216c92e0532f3fb387b57dbccf815e2a7
+Range: lines 1-2; bytes [0, 123)
+Header SHA256: 57831bc0962edac1eecbd6877f93c4452a6651b37bb96b540cae36b1331237d2
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: musl src/math/fma.c, fmaf.c Ported to generic Rust algorithm in 2025, TG. */
+END UNCHANGED NOTICE
+
+[22] src/math/generic/ceil.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/ceil.rs#L1-L2
+Full source SHA256: 66b3def2b00ed9dd6a4f59c73765a050853dfe06c828fdf731987ac99e7c2a88
+Range: lines 1-2; bytes [0, 71)
+Header SHA256: 15997910221136fc9b2235f67365e57a26e10e635356784e1f90e305d8c25ee0
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: musl src/math/ceilf.c */
+END UNCHANGED NOTICE
+
+[23] src/math/generic/floor.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/floor.rs#L1-L2
+Full source SHA256: 7d4f15369abefa27645d6deda51d30febbe60ee9dca76e72a9364d574d0711c0
+Range: lines 1-2; bytes [0, 68)
+Header SHA256: ca254aa33491b3ee9a0a365629c5a0abda4aa71df314f122155335e394cb1173
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT
+ * origin: musl src/math/floor.c */
+END UNCHANGED NOTICE
+
+[24] src/math/generic/fma.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fma.rs#L1-L2
+Full source SHA256: ba44930a56d7c1953ab0c96c7c767911c9dc6967083700c8ef02f43672c8482f
+Range: lines 1-2; bytes [0, 116)
+Header SHA256: 8c0ceb8b3a85d042ee4bccf7e00f61bc72dd93cdade05a4cad9c332d555db493
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: musl src/math/fma.c. Ported to generic Rust algorithm in 2025, TG. */
+END UNCHANGED NOTICE
+
+[25] src/math/generic/fmax.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmax.rs#L1-L1
+Full source SHA256: 68d923950c3f1eab68baeab24679ab50918b663904839bc349ef666d9467518f
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[26] src/math/generic/fmaximum.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmaximum.rs#L1-L1
+Full source SHA256: c4b8b7080821a2dc65d0a50baf717ccd9ee20b813ce6d6d3f9f01b5700b674fa
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[27] src/math/generic/fmaximum_num.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmaximum_num.rs#L1-L1
+Full source SHA256: 2f2d41e1f0160eb73469fa63db27d881b5b8eabc6d62fae7ca1b4b03eb35c5d5
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[28] src/math/generic/fmin.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmin.rs#L1-L1
+Full source SHA256: 9bbdece9606e5eac57f3a91a5db7aab814c8e2b28b6df1813723c6b5715efc55
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[29] src/math/generic/fminimum.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fminimum.rs#L1-L1
+Full source SHA256: a6a33085356610eced23957ca86456b7dbe95e0f9d916298d59ce8bd90076b02
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[30] src/math/generic/fminimum_num.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fminimum_num.rs#L1-L1
+Full source SHA256: f5db65654e690adea16da83839d62a707cc814c998fd4a77e63caaaea1472256
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[31] src/math/generic/fmod.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/fmod.rs#L1-L1
+Full source SHA256: 11aae62d08d656d815184eafd78a3b2d5764b6ce308b89e3819cd049bc491fe7
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[32] src/math/generic/rint.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/rint.rs#L1-L2
+Full source SHA256: deec183fd0da6c0a47ab272a256990cea4f9231db7faff314697886457d6841a
+Range: lines 1-2; bytes [0, 70)
+Header SHA256: 5add0c338abc2c1d2a5a00e8aa19afff5a4e93a506b8cb14011aeb57a51cf455
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: musl src/math/rint.c */
+END UNCHANGED NOTICE
+
+[33] src/math/generic/sqrt.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/sqrt.rs#L1-L2
+Full source SHA256: c58e48ec07404d618109ad45332efe46c5246f42a2ddefdf5b25ba19e4ca9a0f
+Range: lines 1-2; bytes [0, 117)
+Header SHA256: 2f33fc4762816d44f1a21f0c39977821d609567ba5c46faed5dc56f07ea93152
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT */
+/* origin: musl src/math/sqrt.c. Ported to generic Rust algorithm in 2025, TG. */
+END UNCHANGED NOTICE
+
+[34] src/math/generic/trunc.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/generic/trunc.rs#L1-L2
+Full source SHA256: 46dd2cc35f6da25099ea2202264d8da3330b5ff1a962a8afb671b54b6ef6002d
+Range: lines 1-2; bytes [0, 68)
+Header SHA256: 5c6f62056611d3f0256525565d02e2cfb48385b26812fb4d606fc7d13de1a0d3
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT
+ * origin: musl src/math/trunc.c */
+END UNCHANGED NOTICE
+
+[35] src/math/j0.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j0.rs#L1-L11
+Full source SHA256: 1cb991f0151a626744ad1832d4aedfaca681bcfcecc797de5ac5e9baf2342006
+Range: lines 1-11; bytes [0, 432)
+Header SHA256: 15606ccaa19a8a6b7a76cf5f4799cb15647aee6e2aafd9efa9f6463ee1ed54ba
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_j0.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[36] src/math/j0f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j0f.rs#L1-L14
+Full source SHA256: de97374b6a0019fd8b3d1f553be1708018546491d3b4a5fc650ee2dcdfc9620e
+Range: lines 1-14; bytes [0, 515)
+Header SHA256: 552822778ae113308ab6af66578cd13a79cc8cf1c1c4f3ef30329f0697da33d0
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_j0f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[37] src/math/j1.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j1.rs#L1-L11
+Full source SHA256: e0a10746fd11a458d55ee61e758d9f016ff0f2203a07eb9907b5aca709a40469
+Range: lines 1-11; bytes [0, 432)
+Header SHA256: c8ac4d7d23983e9dc6353b8d27319394ca4f19cccb0a30ce724113337441f94d
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_j1.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[38] src/math/j1f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/j1f.rs#L1-L14
+Full source SHA256: 27b586c94d510aa653923b6b83cfec174e1f5da326d9120b0a0135b1190e32dc
+Range: lines 1-14; bytes [0, 515)
+Header SHA256: 1fa702ca6b20a78db417bf396f128c7dade6123c58195ec6a32eb0f026d1eed8
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_j1f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[39] src/math/jn.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/jn.rs#L1-L11
+Full source SHA256: ba36d25d4bbada83aadb3b2986879b7d88b91adb7b502061d21bf96ff3942194
+Range: lines 1-11; bytes [0, 432)
+Header SHA256: 1d68a500d21b4d22f84c3bfaad3d819082322b29c90ab999dd585e94ce1db148
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_jn.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[40] src/math/jnf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/jnf.rs#L1-L14
+Full source SHA256: b3861e19644ae669fe17db81d91aeaee9c9f9051b59957ab674017684c98fe32
+Range: lines 1-14; bytes [0, 515)
+Header SHA256: a205aafe4140f090e72903ce746946a84a1110e5fb03b3b8d1f78469d25e5eb9
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_jnf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[41] src/math/k_cos.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_cos.rs#L1-L10
+Full source SHA256: d4867527877c846aa8e2a0b43cf06f03e2d94c321a548acaf8d5171c09ff4057
+Range: lines 1-10; bytes [0, 426)
+Header SHA256: cd052f4fc22d6625c9f4439c66d4512a9011446d3f2dff15842925b024821cbb
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/k_cos.c
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[42] src/math/k_cosf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_cosf.rs#L1-L15
+Full source SHA256: 8f76089d014e217b96c9eca520271e64d467dc0d6542bf313dd70eb96c040f7f
+Range: lines 1-15; bytes [0, 561)
+Header SHA256: 77e4f4050a0eb9480af78f84e28b427ffd71a173abcfc4f658c05f359e16718e
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_cosf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Debugged and optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[43] src/math/k_sin.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_sin.rs#L1-L10
+Full source SHA256: dfe6524cb2d530ec51eb1a2ab233aeb65b3f12177c1fb2f50f044ea41170f5d8
+Range: lines 1-10; bytes [0, 426)
+Header SHA256: e00a06f546cd736ac64d82d5c88c23810aec69eec0f61cc64705ea57693e6049
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/k_sin.c
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[44] src/math/k_sinf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_sinf.rs#L1-L15
+Full source SHA256: cf0e8bbe8d73a6704b7f1f710f5b9d31f190f1c633e894d4f69c4e3bc359eba3
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 1650039295219ae4abba67f75f78a982557364a3424b22f3c2cc1f4b49335f63
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_sinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[45] src/math/k_tan.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_tan.rs#L1-L9
+Full source SHA256: dc3f8ece9187bbd65792a7d1068e676092e9c2a0886f28c80579f9bd94d744b7
+Range: lines 1-9; bytes [0, 363)
+Header SHA256: ae36b8732e1a0fd7cf1b44f0840d2fca6e15432a92e6c1a1d7ef4bd5b5d83bc6
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/k_tan.c */
+//
+// ====================================================
+// Copyright 2004 Sun Microsystems, Inc.  All Rights Reserved.
+//
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[46] src/math/k_tanf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/k_tanf.rs#L1-L10
+Full source SHA256: 3381d2d4865bfc98e87aadb96bd8986f7691a389569a58fb1cb8db74fb5d9c20
+Range: lines 1-10; bytes [0, 367)
+Header SHA256: 97ab5732059ae18470b58c9d6af2e8b0f99645bc048d8e5a48e04580ae829981
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_tan.c */
+/*
+ * ====================================================
+ * Copyright 2004 Sun Microsystems, Inc.  All Rights Reserved.
+ *
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[47] src/math/lgamma_r.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/lgamma_r.rs#L1-L12
+Full source SHA256: 5d56169c077b5b9f88902e2d243a7a4b4d06b89295aa84283d6fa15d9c244032
+Range: lines 1-12; bytes [0, 441)
+Header SHA256: 14dde229cf697a0e11ae7b91726e5a322c75248397f4e538747a81a77b235f57
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_lgamma_r.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ *
+ */
+END UNCHANGED NOTICE
+
+[48] src/math/lgammaf_r.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/lgammaf_r.rs#L1-L14
+Full source SHA256: 0bc2b5e0eec7666973adaca536f4d5fe978c8793bb340484fff9e5e7abb425f0
+Range: lines 1-14; bytes [0, 521)
+Header SHA256: 8936b74f7b254b0f97694856a89b1015aee5175d95834bff1248b923c9cdc8ac
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_lgammaf_r.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[49] src/math/log.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log.rs#L1-L11
+Full source SHA256: df5f4d1325e89621bfcd9cf7788d0d7e20a6ef7f429110fe35b370b3c9362615
+Range: lines 1-11; bytes [0, 433)
+Header SHA256: 25fecc3f4cf39ddbef3592cdb68b7c4445013992a88d3fb07b22c941810df9d3
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_log.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[50] src/math/log10.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log10.rs#L1-L11
+Full source SHA256: 4a96dd2b6a2a505497f2bb7ea956a50491d068dab1b6055a573aec1724a52e40
+Range: lines 1-11; bytes [0, 435)
+Header SHA256: 4ca5949c235812a9a84ce7abfc7267bb2d8e243ee718465e598ed9824fc75f44
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_log10.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[51] src/math/log10f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log10f.rs#L1-L11
+Full source SHA256: 784a576dd4a4071f4f67c670eb9b221cb03014818c4b2d71afbcbd2211431caf
+Range: lines 1-11; bytes [0, 435)
+Header SHA256: bb9077840c38cb3ec78f36360077226586f0379dbbec6f4feb12de409b3f21e8
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_log10f.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[52] src/math/log1p.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log1p.rs#L1-L11
+Full source SHA256: bb8ce741e54d8f001d9c12450a14a663bd413014da2ade9ba1f5fbc9ff0c9a88
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: f7d1768c7288ffc2fc29739de0facd139e7b7b7abe240a1ddca5d86fa76cb834
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_log1p.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[53] src/math/log1pf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log1pf.rs#L1-L11
+Full source SHA256: 8736222a9b9004b061f1339bb819c63c6b54414d4a01ef79d5f5a5f0a70677b5
+Range: lines 1-11; bytes [0, 435)
+Header SHA256: 4a505f94994e4cff4684ea764b1112bdc7c02d6ebcc3d04f67300fa19c1f6426
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_log1pf.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[54] src/math/log2.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log2.rs#L1-L11
+Full source SHA256: 1ec0cdd94bf4435ff0402d209089b1bdbcb1ba9a4cd5f77807f9c84cf534f980
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: 7c7c66bfcef7789a2c743ed6208e460c361e8ccc56609a24efe69b330849c90a
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_log2.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[55] src/math/log2f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/log2f.rs#L1-L11
+Full source SHA256: 7b3b17ba08df6b5a57dacf6f945bfe1a3c088bee0eb11e201ac5affc7f65925a
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: a51b9bbd3fcd0cedfcdc25402d5ee6d92c9912bab7c8b824af75d8ad6ecd290e
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_log2f.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[56] src/math/logf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/logf.rs#L1-L14
+Full source SHA256: c7dfa5e89fcca0411624fdc594f64c62d5dfa3b91f061fcb7ac3aea18414f238
+Range: lines 1-14; bytes [0, 516)
+Header SHA256: 408e470dd9e98fd8b8186c97ef645084b81380fb401510749f111f28bd09da0f
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_logf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[57] src/math/pow.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/pow.rs#L1-L10
+Full source SHA256: c5566d0f48682d107e8803b0ed204ff3521503348f18a4f26cbe3f47fef15192
+Range: lines 1-10; bytes [0, 373)
+Header SHA256: 603e6e96737605b0a0f38955dd07cba7b4dd8b5d6661924d539499b498654313
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_pow.c */
+/*
+ * ====================================================
+ * Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[58] src/math/powf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/powf.rs#L1-L14
+Full source SHA256: 819971cb8e927d80113aded3cfe90dcd501c031e0eb1c562b58842fddd1751be
+Range: lines 1-14; bytes [0, 516)
+Header SHA256: 6082fa0a02b0148774d8740bf988cf5f3da117801db565f725269b047170c855
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_powf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[59] src/math/rem_pio2.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2.rs#L1-L12
+Full source SHA256: 5a040ab09dc356bca6d57712327151ed43003e2bac156553e3eb87d1cdefd2d1
+Range: lines 1-12; bytes [0, 468)
+Header SHA256: da28bd93659d512cba362af000b10121e71e63ef135f3ba398a05f376e90bc7e
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/e_rem_pio2.c
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+//
+// Optimized by Bruce D. Evans. */
+END UNCHANGED NOTICE
+
+[60] src/math/rem_pio2_large.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2_large.rs#L2-L12
+Full source SHA256: 986b5b9ad2c8fba828aee47bf198eab97fab243359ab03eb09783d98ca5847b5
+Range: lines 2-12; bytes [25, 463)
+Header SHA256: 529554d11bbde6d2a93d9b19938270a4edb47065d7661fec422fad9b9054d7cf
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_rem_pio2.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[61] src/math/rem_pio2f.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/rem_pio2f.rs#L1-L15
+Full source SHA256: fb34bab63f8d143dfefa4ef2e31e8166bf21f3c67f1519bfc3ca4fb8eb28cafe
+Range: lines 1-15; bytes [0, 566)
+Header SHA256: 76fe740be2b0cb832ab7b6cd4ceece6579207e9b8457d08958c8cd0224dbc50f
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_rem_pio2f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Debugged and optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[62] src/math/sin.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sin.rs#L1-L10
+Full source SHA256: b48cebd120fc2ac93a6563059cabda28a72c8680304eb8335b92b412235cc232
+Range: lines 1-10; bytes [0, 428)
+Header SHA256: 0beade56a930d1c1a35daa8cd5bbe8350757c3b38ac025a553f7db8bdfaf9e16
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_sin.c */
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[63] src/math/sincos.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sincos.rs#L1-L11
+Full source SHA256: a9c414e828c2e78b6bce4d5e4237b1baa93e81d78421aed5cedeab43df64067f
+Range: lines 1-11; bytes [0, 432)
+Header SHA256: 421d333a961cbe6d0a8586bc90ad996363ea529b912c90ab80983f3f5d9ad95e
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_sin.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[64] src/math/sincosf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sincosf.rs#L1-L15
+Full source SHA256: c39b6e3b52be83ccf4015ff105dab55e693577ebfc43745881750e73eebc6fa6
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_sinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[65] src/math/sinf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/sinf.rs#L1-L15
+Full source SHA256: b17db34d5da39a0f336d831abcb700fab69402c915321823870f1845e66c03d2
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_sinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[66] src/math/support/int_traits/narrowing_div.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/support/int_traits/narrowing_div.rs#L1-L1
+Full source SHA256: 5f5378e33f1da56090d0dce2514926ab465dce65b89ad4ee2f7da07a92f8d5de
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[67] src/math/support/modular.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/support/modular.rs#L1-L1
+Full source SHA256: cf6a562d6bdf16336f31d41c59e828ad47f85388849d20d6d3b59fc1c3e388a2
+Range: lines 1-1; bytes [0, 49)
+Header SHA256: e2c5e3a74a29f6c88233646995cfe44b14516067992b9670439ffa0a595e56a5
+BEGIN UNCHANGED NOTICE
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+END UNCHANGED NOTICE
+
+[68] src/math/tan.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/tan.rs#L1-L10
+Full source SHA256: 2ea87ca18526753db6d149635ed6c895c8fbafd1e0fa7a9c04f7dc44b4eae986
+Range: lines 1-10; bytes [0, 428)
+Header SHA256: 59ee71a59035c18a5043881ef760e797cc17dc0cfd65eb43075f72a0ecf8292a
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_tan.c */
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[69] src/math/tanf.rs
+Source: https://github.com/rust-lang/compiler-builtins/blob/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/src/math/tanf.rs#L1-L15
+Full source SHA256: f7140c4193a57709acde5d290c8f83435562da42924c54cab0aa3a4f26095190
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 04db4bc1fedba0faa65f176d5fa383f2b61e569d7660c707b6de237829ee0f88
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_tanf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+

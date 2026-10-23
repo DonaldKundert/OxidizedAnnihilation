@@ -82,8 +82,8 @@ pub struct SimRes {
 }
 
 impl SimRes {
-    fn step(&mut self) {
-        self.session.step();
+    fn step(&mut self) -> Result<(), crate::game::SetupError> {
+        self.session.try_step()?;
         self.prev = std::mem::replace(&mut self.curr, self.session.snapshot());
         let w = self.session.sim.world();
         let local = self.session.local;
@@ -99,6 +99,7 @@ impl SimRes {
         let input = alert_input(&self.session);
         let new = self.alerts.update(&input);
         self.new_alerts.extend(new);
+        Ok(())
     }
 
     /// The input layer's view: what the local player can see.
@@ -193,6 +194,9 @@ struct ShotPlan {
     clicks: Vec<(f32, f32)>,
     /// Gamepad events fed to the mapper before each capture.
     pad_events: Vec<InputEvent>,
+    /// Loaded sessions may only write fresh screenshot destinations.
+    protect_existing: bool,
+    failed: bool,
 }
 
 /// Per-model render assets.
@@ -254,7 +258,7 @@ const BANNER_DELAY_TICKS: u32 = 150;
 /// wheel slot.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonKind {
-    /// `hud_view::PANEL_ACTIONS[i]` (orders, stances, spells).
+    /// `crate::hud::PANEL_ACTIONS[i]` (orders, stances, spells).
     Panel(usize),
     /// Build option `i`.
     Build(usize),
@@ -264,7 +268,7 @@ impl ButtonKind {
     /// What the button does.
     fn action(self) -> Action {
         match self {
-            ButtonKind::Panel(i) => hud_view::PANEL_ACTIONS[i],
+            ButtonKind::Panel(i) => crate::hud::PANEL_ACTIONS[i],
             ButtonKind::Build(i) => Action::BuildOption { index: i as u8 },
         }
     }
@@ -272,6 +276,8 @@ impl ButtonKind {
 
 /// Build and run the app.
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    args.validate_source()?;
+    crate::saves::protect_checkpoint_outputs(&args)?;
     let vfs = crate::game::open_vfs(&args.data)?;
     let from_file = args.input_profile.as_ref().is_some_and(|p| p.exists());
     let (mut profile, profile_mtime) = crate::feel::initial_profile(
@@ -322,24 +328,35 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         args.world_seed = gm.seed;
         ghost = Some((rec, gm.log));
     }
-    let log = match &args.log {
-        Some(p) => tak_commands::CommandLog::from_json(&std::fs::read_to_string(p)?)
-            .map_err(|e| format!("{}: {e}", p.display()))?,
-        None => tak_commands::CommandLog::new(),
-    };
+    let log = tak_headless::checkpoint::read_command_log(args.log.as_deref())?;
     let t0 = std::time::Instant::now();
-    let mut session = Session::load(&vfs, &args.map, &args.players, args.world_seed, log)?;
+    let mut session = Session::load_from_args(&vfs, &args, log)?;
+    if args.screenshot.is_some() && args.at_tick.iter().any(|&tick| tick < session.tick().0) {
+        return Err(format!(
+            "--at-tick uses absolute match ticks and cannot precede loaded next tick {}",
+            session.tick().0
+        )
+        .into());
+    }
+    if let Some(report) = session.training_report() {
+        eprintln!("{report}");
+    }
+    if let Some(report) = &session.campaign_report {
+        eprint!("{report}");
+    }
     if args.demo {
         session.log = crate::game::demo_log(&session);
     }
     if let Some((_, log)) = &ghost {
         session.log = log.clone();
     }
-    let ground = terrain::load(&vfs, &args.map, session.map.palette.as_deref())?;
+    // Authored startup and ghost playback may select a different map than the
+    // CLI's default skirmish map. Render the source actually loaded.
+    let ground = terrain::load(&vfs, &session.map_name, session.map.palette.as_deref())?;
     let tex = TextureIndex::load(&vfs);
     eprintln!(
         "loaded {} ({}x{} cells, {} defs, {} textures + {} in anims/, {} missing tile pieces) in {:.2}s",
-        args.map,
+        session.map_name,
         ground.cells.0,
         ground.cells.1,
         session.defs.len(),
@@ -358,6 +375,20 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("input profile: {e}"))?;
     let mapper = Mapper::new(profile);
     let mut feel = Feel::new(&args, profile_mtime);
+    feel.toast = session.training_report();
+    if let Ok(directory) = &feel.quick_save_dir {
+        eprintln!(
+            "quick-save (F10; F11 / pad Menu then X / Square): {} (new file each time; replay may pause the client)",
+            directory.display()
+        );
+    }
+    if args.load_checkpoint.is_some() {
+        eprintln!(
+            "restored verified checkpoint: next absolute tick {}, state {:016x}; new orders accepted",
+            session.tick().0,
+            session.sim.state_hash()
+        );
+    }
     if feel.record_path.is_some() {
         feel.recorder = Some(tak_input::Recorder::new(serde_json::Value::Null, &mapper));
     }
@@ -368,10 +399,16 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         None => Vec::new(),
     };
 
+    let training = if session.controllers().controllers.is_empty() {
+        ""
+    } else {
+        " - simple-skirmish-v1 (omniscient training)"
+    };
+    let title = format!("Oxidized Annihilation - {}{training}", session.map_name);
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: format!("Oxidized Annihilation - {}", args.map),
+            title,
             resolution: WindowResolution::new(w, h).with_scale_factor_override(1.0),
             ..default()
         }),
@@ -458,6 +495,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     controls::overlay_input_system,
                     input_system,
                     sim_driver,
+                    quick_save_system,
                     camera_system,
                     units_system,
                     features_system,
@@ -510,6 +548,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .map(|c| (c[0], c[1]))
                 .collect(),
             pad_events,
+            protect_existing: args.load_checkpoint.is_some(),
+            failed: false,
         });
     } else {
         app.insert_resource(StartFocus(focus));
@@ -595,13 +635,13 @@ fn write_outputs(
     out.done = true;
     let s = &sim.session;
     if let Some(p) = &out.record {
-        match std::fs::write(p, s.log.to_json_pretty()) {
+        match tak_headless::checkpoint::write_text_atomic(p, &s.log.to_json_pretty()) {
             Ok(()) => eprintln!("wrote {} commands to {}", s.log.len(), p.display()),
             Err(e) => eprintln!("{}: {e}", p.display()),
         }
     }
     if let Some(p) = &out.hashes {
-        match std::fs::write(p, tak_headless::format_hashes(&s.hashes)) {
+        match tak_headless::checkpoint::write_text_atomic(p, &crate::saves::format_hashes(s)) {
             Ok(()) => eprintln!("wrote {} hashes to {}", s.hashes.len(), p.display()),
             Err(e) => eprintln!("{}: {e}", p.display()),
         }
@@ -806,6 +846,9 @@ fn shot_driver(
     hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
 ) {
     let Some(mut plan) = plan else { return };
+    if plan.failed {
+        return;
+    }
     sim.paused = true;
     if plan.next >= plan.shots.len() {
         if plan.saved.load(Ordering::SeqCst) >= plan.requested {
@@ -824,7 +867,13 @@ fn shot_driver(
         let t0 = std::time::Instant::now();
         let start = sim.session.tick().0;
         while sim.session.tick().0 < tick {
-            sim.step();
+            if let Err(error) = sim.step() {
+                eprintln!("simulation paused: {error}");
+                feel.toast = Some(format!("Simulation paused: {error}"));
+                plan.failed = true;
+                exit.write(AppExit::error());
+                return;
+            }
         }
         sim.acc = TICK_DT; // alpha = 1: draw the latest state
         if let Some(p) = focus_point(&sim.session, plan.focus) {
@@ -956,6 +1005,16 @@ fn shot_driver(
     }
     // Give assets a few frames to upload before capturing.
     if plan.wait >= if plan.requested == 0 { 150 } else { 20 } {
+        if let Err(error) = crate::saves::check_screenshot_destination(plan.protect_existing, &path)
+        {
+            let message = format!("Screenshot refused: {error}");
+            eprintln!("{message}");
+            feel.status = Some((message.clone(), 12.0));
+            feel.toast = Some(message);
+            plan.failed = true;
+            exit.write(AppExit::Error(std::num::NonZeroU8::MIN));
+            return;
+        }
         let saved = plan.saved.clone();
         commands
             .spawn(Screenshot::primary_window())
@@ -1165,9 +1224,12 @@ fn input_system(
     if plan.is_some() {
         return;
     }
+    if crate::saves::quick_save_shortcut(keys.just_pressed(KeyCode::F10), false, false) {
+        feel.quick_save_requested = true;
+    }
     let ghost = feel.ghost.is_some();
     // Opening the overlay drops gestures in progress (no stuck holds).
-    let overlay = feel.overlay_open;
+    let overlay = feel.overlay_open || feel.overlay_captured_input;
     let t = time.elapsed().as_millis() as u32;
     let mut events = Vec::new();
     // Pointer: the terrain point under the mouse, as a virtual pixel.
@@ -1188,8 +1250,12 @@ fn input_system(
     if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
         && mouse.just_pressed(MouseButton::Left)
         && mg.contains(pos.x, pos.y)
+        && !overlay
     {
         minimap.mouse_drag = true;
+    }
+    if overlay {
+        minimap.mouse_drag = false;
     }
     if minimap.mouse_drag {
         if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
@@ -1205,6 +1271,7 @@ fn input_system(
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
+        && !overlay
         && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
     {
         minimap.ui_held = true;
@@ -1235,6 +1302,9 @@ fn input_system(
         }
     }
     for k in keys.get_just_pressed() {
+        if *k == KeyCode::F10 {
+            continue;
+        }
         if overlay {
             break;
         }
@@ -1243,6 +1313,9 @@ fn input_system(
         }
     }
     for k in keys.get_just_released() {
+        if *k == KeyCode::F10 {
+            continue;
+        }
         if let Some(n) = key_name(*k) {
             events.push(EventKind::KeyUp { key: Key(n) });
         }
@@ -1317,6 +1390,22 @@ fn input_system(
         events.retain(|e| matches!(e, EventKind::Scroll { .. }));
     }
     events.push(EventKind::Frame);
+    if overlay {
+        // Keep the mapper clock current and drain releases, with neutral
+        // sticks. Otherwise reopening gameplay integrates stale axes over
+        // all the time spent in the overlay. Resample real axes afterwards.
+        events.retain(|e| {
+            matches!(
+                e,
+                EventKind::KeyUp { .. } | EventKind::ButtonUp { .. } | EventKind::Frame
+            )
+        });
+        for axis in [InAxis::LeftX, InAxis::LeftY, InAxis::RightX, InAxis::RightY] {
+            events.insert(0, EventKind::Axis { axis, value: 0 });
+        }
+        input.last_axes.clear();
+        input.last_pointer = None;
+    }
 
     let tick = sim.session.tick();
     let mut outs = Vec::new();
@@ -1334,13 +1423,17 @@ fn input_system(
             outs.extend(input.mapper.perform(a, &view, tick));
         }
     }
+    if overlay {
+        // A custom release binding must not escape the overlay either.
+        outs.clear();
+    }
     let mut submitted = Vec::new();
     for o in &outs {
         match o {
             Output::Sim { command, .. } => {
                 let at = sim.session.submit(command.clone());
                 submitted.push((at.0, command.clone()));
-                feel.sounds.extend(controls::order_sound(command));
+                feel.sounds.extend(crate::hud::order_sound(command));
                 debug!("order for tick {}", at.0);
             }
             Output::ToggleOverlay => {
@@ -1411,10 +1504,13 @@ fn input_system(
     // Camera: mapper pan (right stick, edge pan, glides) and zoom (wheel,
     // RB + right stick), then the arrow keys.
     let pan = input.mapper.take_camera_pan();
-    cam.geom.target[0] += f(pan.x);
-    cam.geom.target[1] += f(pan.y);
-    if let Some(z) = input.mapper.take_camera_zoom() {
-        cam.geom.zoom = f(z);
+    let zoom = input.mapper.take_camera_zoom();
+    if !overlay {
+        cam.geom.target[0] += f(pan.x);
+        cam.geom.target[1] += f(pan.y);
+        if let Some(z) = zoom {
+            cam.geom.zoom = f(z);
+        }
     }
     // Hand the moved camera back at once, so the cursor and reticle drawn
     // this frame already ride with it.
@@ -1462,14 +1558,25 @@ fn centre_height(geom: &ViewGeom, ground: &TerrainData) -> f32 {
 }
 
 /// Fixed 30 Hz stepping on an accumulator.
-fn sim_driver(time: Res<Time>, plan: Option<Res<ShotPlan>>, mut sim: NonSendMut<SimRes>) {
+fn sim_driver(
+    time: Res<Time>,
+    plan: Option<Res<ShotPlan>>,
+    mut sim: NonSendMut<SimRes>,
+    mut feel: ResMut<Feel>,
+) {
     if plan.is_some() || sim.paused {
         return;
     }
     sim.acc += time.delta_secs() * sim.speed;
     let mut steps = 0;
     while sim.acc >= TICK_DT && steps < 8 {
-        sim.step();
+        if let Err(error) = sim.step() {
+            sim.paused = true;
+            sim.acc = 0.0;
+            eprintln!("simulation paused: {error}");
+            feel.toast = Some(format!("Simulation paused: {error}"));
+            return;
+        }
         sim.acc -= TICK_DT;
         steps += 1;
     }
@@ -2133,7 +2240,7 @@ fn sprite_assets(
                 // Shadow opacity baked into the texture (a material alpha
                 // below 0.5 did not show on lavapipe).
                 let a = (SHADOW_ALPHA * 255.0) as u8;
-                for p in px.chunks_exact_mut(4) {
+                for p in px.as_chunks_mut::<4>().0 {
                     p[3] = p[3].min(a);
                 }
             }
@@ -3239,6 +3346,67 @@ fn minimap_system(
     }
 }
 
+/// Save after this frame's ordinary sim ticks. Capture never mutates the live
+/// session, and publishes only after the replay/current-state comparison passes.
+fn quick_save_system(sim: NonSend<SimRes>, mut feel: ResMut<Feel>) {
+    if !std::mem::take(&mut feel.quick_save_requested) {
+        return;
+    }
+    eprintln!(
+        "quick-save: replaying {} elapsed ticks to verify live state (not an instant snapshot)",
+        sim.session.tick().0
+    );
+    let result = match &feel.quick_save_dir {
+        Ok(directory) => crate::saves::quick_save(&sim.session, directory),
+        Err(error) => Err(crate::game::SetupError(error.clone())),
+    };
+    let message = match result {
+        Ok(path) => {
+            let tick = sim.session.tick().0;
+            let count = sim
+                .session
+                .log
+                .iter()
+                .filter(|entry| entry.tick.0 < tick)
+                .count();
+            let budget = tak_headless::checkpoint::ReplayBudget::default();
+            let mut overrides = Vec::new();
+            if tick > budget.max_ticks {
+                overrides.push(format!("--max-replay-ticks {tick}"));
+            }
+            if count > budget.max_commands {
+                overrides.push(format!("--max-replay-commands {count}"));
+            }
+            let notice = if overrides.is_empty() {
+                String::new()
+            } else {
+                format!("; reload with {}", overrides.join(" "))
+            };
+            let pending = sim
+                .session
+                .log
+                .iter()
+                .filter(|entry| entry.tick.0 >= tick)
+                .count();
+            let pending_notice = if pending == 0 {
+                String::new()
+            } else {
+                format!(
+                    "; {pending} queued/future orders excluded (resume and save again to include pending orders)"
+                )
+            };
+            format!(
+                "Saved tick {tick}: {}{notice}{pending_notice}",
+                path.display()
+            )
+        }
+        Err(error) => format!("Quick-save failed: {error}"),
+    };
+    eprintln!("{message}");
+    feel.toast = Some(message.clone());
+    feel.status = Some((message, 12.0));
+}
+
 /// Every 10 s of wall time, log frames per second and ticks run.
 fn fps_report(sim: NonSend<SimRes>, mut acc: Local<Option<(std::time::Instant, u32, u32)>>) {
     let now = std::time::Instant::now();
@@ -3306,7 +3474,7 @@ fn hud_system(
             line.push_str(&format!("   GHOST {} frames", r.frames.len()));
         }
         line.push_str(&format!(
-            "   input: {}",
+            "   F10 quick-save | F11 / Menu settings   input: {}",
             input.mapper.tuning().preset_name().unwrap_or("custom")
         ));
         t.0 = line;
@@ -3555,23 +3723,13 @@ fn gizmo_system(
         // Order lines for own selected units.
         if selected && let Some(unit) = w.unit(u.id) {
             let mut from = Vec3::new(x, u.ground + 2.0, y);
-            for o in &unit.orders {
-                let to = match o {
-                    tak_sim::Order::Move { to } | tak_sim::Order::Patrol { to } => Some(*to),
-                    tak_sim::Order::Build { at: Some(at), .. } => Some(*at),
-                    tak_sim::Order::Attack {
-                        target: tak_commands::Target::Ground(p),
-                    } => Some(*p),
-                    tak_sim::Order::Attack {
-                        target: tak_commands::Target::Unit(id),
-                    }
-                    | tak_sim::Order::Guard { target: id } => w.unit(*id).map(|t| t.pos),
-                    _ => None,
-                };
+            for o in crate::hud::orders_for_display(unit) {
+                let to = crate::hud::order_goal(w, o);
                 if let Some(to) = to {
                     let (tx, tz) = (f(to.x), f(to.y));
                     let p = Vec3::new(tx, t.height_at(tx, tz) + 2.0, tz);
-                    g.line(from, p, Color::srgba(1.0, 1.0, 0.4, 0.6));
+                    let [r, green, b, a] = crate::hud::order_rgba(o);
+                    g.line(from, p, Color::srgba(r, green, b, a));
                     from = p;
                 }
             }
@@ -3716,3 +3874,7 @@ fn gizmo_system(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "overlay_input_tests.rs"]
+mod overlay_input_tests;

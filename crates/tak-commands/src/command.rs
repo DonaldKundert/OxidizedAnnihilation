@@ -111,7 +111,7 @@ pub enum Target {
     Unit(UnitId),
 }
 
-/// Fire state, as in TA's three-way toggle.
+/// Automatic engagement policy. Legacy TA fire states keep their tokens.
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize,
 )]
@@ -119,11 +119,14 @@ pub enum Target {
 pub enum FireState {
     /// Never fire unless ordered to attack.
     HoldFire,
-    /// Fire only at units that attack this unit.
+    /// Legacy retaliation against the last attacker, including idle pursuit.
     ReturnFire,
-    /// Fire at any enemy in range (the default).
+    /// Fire at and pursue enemies automatically (the legacy default).
     #[default]
     FireAtWill,
+    /// Kingdoms Defensive: fire at enemies in reach, without automatic pursuit.
+    /// Explicit movement, Attack and CastSpell orders still apply.
+    Defensive,
 }
 
 /// Whether an order replaces the unit's queue or is appended to it
@@ -155,6 +158,15 @@ pub enum SimCommand {
         /// Replace or append.
         queue: QueueMode,
     },
+    /// Move to a ground point, stopping to engage enemies along the way.
+    AttackMove {
+        /// Units to move.
+        units: UnitSet,
+        /// Destination to resume after each engagement.
+        to: WorldPos,
+        /// Replace or append.
+        queue: QueueMode,
+    },
     /// Attack a unit, or force-fire at a ground point.
     Attack {
         /// Attackers.
@@ -182,6 +194,15 @@ pub enum SimCommand {
         /// Guards.
         units: UnitSet,
         /// Unit to guard.
+        target: UnitId,
+        /// Replace or append.
+        queue: QueueMode,
+    },
+    /// Heal an owned unit or assist its unfinished construction frame.
+    Heal {
+        /// Complete mobile builders.
+        units: UnitSet,
+        /// Owned unit to heal; self-targeting is not supported.
         target: UnitId,
         /// Replace or append.
         queue: QueueMode,
@@ -225,9 +246,11 @@ impl SimCommand {
     pub fn units(&self) -> &UnitSet {
         match self {
             SimCommand::Move { units, .. }
+            | SimCommand::AttackMove { units, .. }
             | SimCommand::Attack { units, .. }
             | SimCommand::Build { units, .. }
             | SimCommand::Guard { units, .. }
+            | SimCommand::Heal { units, .. }
             | SimCommand::Patrol { units, .. }
             | SimCommand::CastSpell { units, .. }
             | SimCommand::Stop { units }
@@ -240,9 +263,11 @@ impl SimCommand {
     pub fn queue(&self) -> Option<QueueMode> {
         match self {
             SimCommand::Move { queue, .. }
+            | SimCommand::AttackMove { queue, .. }
             | SimCommand::Attack { queue, .. }
             | SimCommand::Build { queue, .. }
             | SimCommand::Guard { queue, .. }
+            | SimCommand::Heal { queue, .. }
             | SimCommand::Patrol { queue, .. }
             | SimCommand::CastSpell { queue, .. } => Some(*queue),
             SimCommand::Stop { .. } | SimCommand::SetFireState { .. } => None,

@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tak_commands::{CommandLog, FireState, Scope};
+use tak_commands::{CommandLog, Scope};
 use tak_input::{
     Action, Button, EventKind, FrameIo, Gesture, Input, InputEvent, Mapper, Mode, Output, Profile,
     Recorder, Recording, Tuning, WheelKind,
@@ -86,7 +86,8 @@ pub fn initial_profile(
 
 /// Write a profile (pretty JSON); returns the new mtime.
 pub fn save_profile(path: &Path, p: &Profile) -> std::io::Result<SystemTime> {
-    std::fs::write(path, p.to_json_pretty() + "\n")?;
+    tak_headless::checkpoint::write_text_atomic(path, &(p.to_json_pretty() + "\n"))
+        .map_err(std::io::Error::other)?;
     Ok(mtime(path).unwrap_or(SystemTime::UNIX_EPOCH))
 }
 
@@ -295,6 +296,22 @@ fn pad_binding(
     })
 }
 
+/// Text equivalent of a profile's gamepad glyphs, including a chord.
+/// Used beside wheel details and in the verb line, so those prompts
+/// follow both PlayStation layouts and custom bindings.
+pub fn pad_action_name(
+    p: &Profile,
+    layout: Layout,
+    want: impl Fn(&Action) -> bool,
+) -> Option<String> {
+    let (button, modifier, _) = pad_binding(p, want)?;
+    let mut names = Vec::new();
+    for b in modifier.into_iter().chain(std::iter::once(button)) {
+        names.push(glyph(layout, b)?.name);
+    }
+    Some(names.join("+"))
+}
+
 fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<Hint> {
     let (b, with, g) = pad_binding(p, want)?;
     let prefix = match g {
@@ -318,8 +335,10 @@ fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<H
 pub struct HintCx {
     /// Own units selected.
     pub has_units: bool,
-    /// A builder among them.
+    /// A builder with a nonempty build menu among them.
     pub has_builder: bool,
+    /// An operational explicit healer among them, even without a build menu.
+    pub has_healer: bool,
     /// A spellcaster among them.
     pub has_caster: bool,
     /// More than one unit type among them (the sub-select cycle applies).
@@ -380,8 +399,10 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             Mode::Build(_) => "place",
             Mode::Patrol => "patrol here",
             Mode::Guard => "guard",
+            Mode::Heal => "heal / repair",
             Mode::CastSpell(_) => "cast",
             Mode::Attack => "attack",
+            Mode::AttackMove => "attack-move here",
             Mode::Move => "move here",
             Mode::None => "",
         };
@@ -395,6 +416,9 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     } else if cx.has_units {
         v.push(hint_for(p, "move / attack", |a| {
             matches!(a, Action::Context { append: false })
+        }));
+        v.push(hint_for(p, "attack-move", |a| {
+            matches!(a, Action::AttackMove | Action::AttackMoveMode)
         }));
         v.push(hint_for(p, "orders", |a| matches!(a, Action::CommandWheel)));
         if cx.has_builder {
@@ -472,7 +496,14 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     let p = m.profile();
     let mut v: Vec<(Option<String>, &str)> = Vec::new();
     if m.mode() != Mode::None {
-        v.push((Some("LMB".into()), "confirm"));
+        v.push((
+            Some("LMB".into()),
+            if m.mode() == Mode::Heal {
+                "heal / repair"
+            } else {
+                "confirm"
+            },
+        ));
         v.push((
             key_name_for(p, |a| matches!(a, Action::QueueModifier)),
             "+ click: queue",
@@ -484,8 +515,20 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             key_name_for(p, |a| matches!(a, Action::AttackMode)),
             "attack",
         ));
+        v.push((
+            key_name_for(p, |a| {
+                matches!(a, Action::AttackMove | Action::AttackMoveMode)
+            }),
+            "attack-move",
+        ));
         v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
         v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
+        if cx.has_healer {
+            v.push((
+                key_name_for(p, |a| matches!(a, Action::HealMode)),
+                "heal / repair",
+            ));
+        }
         v.push((
             key_name_for(p, |a| matches!(a, Action::PatrolMode)),
             "patrol",
@@ -536,14 +579,10 @@ pub fn action_label(a: &Action) -> String {
         Action::Stop => "Stop".into(),
         Action::PatrolMode => "Patrol".into(),
         Action::GuardMode => "Guard".into(),
+        Action::HealMode => "Heal / repair".into(),
         Action::CastSpellMode => "Cast spell".into(),
         Action::CastSpell { index } => format!("Spell {}", index + 1),
-        // TA:K's names for the fire states.
-        Action::SetFireState { state } => match state {
-            FireState::HoldFire => "Passive".into(),
-            FireState::ReturnFire => "Defensive".into(),
-            FireState::FireAtWill => "Offensive".into(),
-        },
+        Action::SetFireState { state } => crate::hud::stance_name(*state).into(),
         Action::CycleIdleBuilder => "Idle builder".into(),
         Action::JumpToAlert => "Last alert".into(),
         Action::CenterOnMonarch => "Monarch".into(),
@@ -558,6 +597,7 @@ pub fn action_label(a: &Action) -> String {
         Action::FollowSelection => "Track".into(),
         Action::BuildOption { index } => format!("Option {}", index + 1),
         Action::AttackMode => "Attack".into(),
+        Action::AttackMove | Action::AttackMoveMode => "Attack-move".into(),
         Action::MoveMode => "Move".into(),
         Action::RecallGroup { group } => format!("Squad {}", squad_number(group.get())),
         Action::AssignGroup { group } => format!("Set squad {}", squad_number(group.get())),
@@ -776,6 +816,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn attack_move_is_distinct_from_force_attack_in_both_hint_sets() {
+        let m = Mapper::new(Profile::default_combined());
+        let cx = HintCx {
+            has_units: true,
+            ..Default::default()
+        };
+        let pad = hints(&m, cx);
+        assert!(pad.iter().any(|h| h.text == "attack-move"
+            && h.prefix == "hold"
+            && h.key == HintKey::Buttons(vec![Button::X])));
+        let classic = hints_classic(&m, cx);
+        assert!(
+            classic
+                .iter()
+                .any(|h| h.text == "attack-move" && h.key == HintKey::Text("Alt+A".into()))
+        );
+        assert!(
+            classic
+                .iter()
+                .any(|h| h.text == "attack" && h.key == HintKey::Text("A".into()))
+        );
+        assert_eq!(action_label(&Action::AttackMove), "Attack-move");
+        assert_eq!(action_label(&Action::AttackMoveMode), "Attack-move");
+        assert_eq!(action_label(&Action::AttackMode), "Attack");
+    }
+
+    #[test]
     fn layouts_detect_from_name_and_vendor() {
         assert_eq!(
             detect_layout("auto", Some("Xbox Wireless Controller"), Some(0x045e)),
@@ -838,6 +905,36 @@ mod tests {
                 .any(|h| h.key == HintKey::Text("Ctrl+1-9".into()) && h.text == "squad"),
             "{h:?}"
         );
+    }
+
+    #[test]
+    fn plain_pad_prompts_follow_layout_rebinding_and_chords() {
+        let mut p = Profile::kingdoms_console();
+        let context = |a: &Action| matches!(a, Action::Context { append: false });
+        assert_eq!(
+            pad_action_name(&p, Layout::Xbox, context).as_deref(),
+            Some("X")
+        );
+        assert_eq!(
+            pad_action_name(&p, Layout::PlayStation, context).as_deref(),
+            Some("Square")
+        );
+        for b in &mut p.bindings {
+            if context(&b.action) {
+                b.input = Input::Button(Button::Y);
+                b.with = Some(Input::Button(Button::Lb));
+            }
+        }
+        assert_eq!(
+            pad_action_name(&p, Layout::Xbox, context).as_deref(),
+            Some("LB+Y")
+        );
+        assert_eq!(
+            pad_action_name(&p, Layout::PlayStation, context).as_deref(),
+            Some("L1+Triangle")
+        );
+        p.bindings.retain(|b| !context(&b.action));
+        assert_eq!(pad_action_name(&p, Layout::Xbox, context), None);
     }
 
     #[test]

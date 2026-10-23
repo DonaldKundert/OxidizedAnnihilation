@@ -280,7 +280,7 @@
    ]
   },
   {
-   "label": "x_press_attacks_enemy_under_reticle",
+   "label": "x_tap_attacks_enemy_under_reticle",
    "events": [
     {
      "t": 3400,
@@ -943,7 +943,7 @@
    ]
   },
   {
-   "label": "x_hold_attack_move_is_reserved",
+   "label": "x_hold_attack_moves_without_plain_context_order",
    "events": [
     {
      "t": 13600,

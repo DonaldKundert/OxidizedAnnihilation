@@ -43,6 +43,7 @@ pub fn example_scenario(seed: u64, players: usize) -> Scenario {
     slow.turnrate = 400;
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed,
         map: MapInfo::flat(2048, 2048, starts),
         unit_defs: vec![monarch_def("monarch"), slow],

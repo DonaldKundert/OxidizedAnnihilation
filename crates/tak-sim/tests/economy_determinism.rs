@@ -50,6 +50,7 @@ fn scenario() -> Scenario {
     };
     Scenario {
         version: SCENARIO_FORMAT_VERSION,
+        initial_units: None,
         seed: 11,
         map: MapInfo::flat(
             2048,
