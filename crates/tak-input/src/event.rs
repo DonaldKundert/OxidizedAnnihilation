@@ -5,6 +5,8 @@
 //! the adapter must follow:
 //!
 //! - `t` is milliseconds on a monotonic clock, non-decreasing across events.
+//! - Emit axes from one device poll consecutively with the same timestamp.
+//!   Wheel steering treats those updates as one coherent stick sample.
 //! - Stick axes are `-32767..=32767` with **`+y` up** (flip if the device
 //!   reports `+y` down). `-32768` is treated as `-32767`.
 //! - Triggers are reported as buttons ([`Button::Lt`], [`Button::Rt`]) once
@@ -131,6 +133,17 @@ pub enum EventKind {
         x: i32,
         /// Pixels from the top edge.
         y: i32,
+    },
+    /// Pointer over a map surface. Screen coordinates still describe the
+    /// gesture, but orders use the exact world point, even off-camera.
+    /// Unlike a terrain pointer, this does not trigger edge panning.
+    MapPointer {
+        /// Pixels from the left edge.
+        x: i32,
+        /// Pixels from the top edge.
+        y: i32,
+        /// Ground point represented by this map pixel.
+        world: tak_commands::WorldPos,
     },
     /// Mouse wheel: thousandths of a notch, positive away from the user
     /// (zoom in).

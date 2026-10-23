@@ -223,12 +223,18 @@ pub struct Mapper {
     right: (i16, i16),
     cursor: Vec2,
     source: CursorSource,
+    /// Absolute map-surface pointer, independent of the gameplay camera.
+    map_pointer: Option<WorldPos>,
     pan: Vec2,
     selection: UnitSet,
     groups: [UnitSet; ControlGroup::COUNT as usize],
     mode: Mode,
     last_idle: Option<UnitId>,
     wheel: Option<(Input, Wheel)>,
+    /// Highlight before consecutive axis events from one device sample.
+    /// Re-steer each update from this baseline so X/Y ordering cannot latch
+    /// an intermediate cardinal direction when a diagonal returns to centre.
+    wheel_axis_sample: Option<(u32, Option<usize>)>,
     /// The open wheel stays open after its button is released.
     wheel_sticky: bool,
     /// Every item of a paged wheel (build, spell), for page turns.
@@ -290,12 +296,14 @@ impl Mapper {
             left: (0, 0),
             right: (0, 0),
             source: CursorSource::Stick,
+            map_pointer: None,
             pan: Vec2::ZERO,
             selection: UnitSet::new(),
             groups: Default::default(),
             mode: Mode::None,
             last_idle: None,
             wheel: None,
+            wheel_axis_sample: None,
             wheel_sticky: false,
             wheel_items: Vec::new(),
             wheel_parents: Vec::new(),
@@ -331,6 +339,20 @@ impl Mapper {
         &self.profile
     }
 
+    /// The press binding for an input with the currently held chord modifier.
+    /// Adapters use this to distinguish selection gestures from order buttons
+    /// on map surfaces without overriding the user's profile.
+    pub fn press_action(&self, input: &Input) -> Option<Action> {
+        let with = self
+            .inputs
+            .iter()
+            .find(|(modifier, state)| {
+                state.press.is_some() && self.profile.has_chord(input, modifier)
+            })
+            .map(|(modifier, _)| modifier);
+        self.profile.find(input, with, Gesture::Press)
+    }
+
     /// The tuning in use.
     pub fn tuning(&self) -> &Tuning {
         &self.tuning
@@ -343,6 +365,7 @@ impl Mapper {
         self.profile = profile;
         self.inputs.clear();
         self.wheel = None;
+        self.wheel_axis_sample = None;
         self.wheel_sticky = false;
         self.wheel_parents.clear();
         self.brush = None;
@@ -355,6 +378,7 @@ impl Mapper {
 
     /// Change only the tuning (live tuning overlay, presets).
     pub fn set_tuning(&mut self, tuning: Tuning) {
+        self.wheel_axis_sample = None;
         self.tuning = tuning;
         self.profile.tuning = tuning;
     }
@@ -401,6 +425,7 @@ impl Mapper {
     /// client warps it or for tests and the feel lab.
     pub fn warp_cursor(&mut self, s: Vec2) {
         self.source = CursorSource::Stick;
+        self.map_pointer = None;
         self.cursor = self.camera.clamp_screen(s);
         self.snap_target = None;
     }
@@ -408,6 +433,9 @@ impl Mapper {
     /// Cursor on the ground. In reticle mode this is the point under the
     /// screen centre, including camera motion not yet taken by the client.
     pub fn cursor_world(&self) -> WorldPos {
+        if let Some(pos) = self.map_pointer {
+            return pos;
+        }
         if self.reticle_active() {
             return sat_add(
                 self.camera.screen_to_world(self.camera.center_screen()),
@@ -613,6 +641,11 @@ impl Mapper {
             out: &mut out,
         };
         let t = event.t.max(self.now);
+        if !matches!(event.kind, EventKind::Axis { .. })
+            || self.wheel_axis_sample.is_some_and(|(at, _)| at != t)
+        {
+            self.wheel_axis_sample = None;
+        }
         self.advance_to(t, &mut cx);
         match &event.kind {
             EventKind::ButtonDown { button } => self.down(Input::Button(*button), t, &mut cx),
@@ -621,8 +654,15 @@ impl Mapper {
             EventKind::KeyUp { key } => self.up(Input::Key(key.clone()), t, &mut cx),
             EventKind::Axis { axis, value } => self.axis(*axis, *value),
             EventKind::PointerMove { x, y } => {
+                self.map_pointer = None;
                 self.source = CursorSource::Pointer;
                 self.cursor = self.camera.clamp_screen(Vec2::new(fx_int(*x), fx_int(*y)));
+            }
+            EventKind::MapPointer { x, y, world } => {
+                self.source = CursorSource::Pointer;
+                self.cursor = self.camera.clamp_screen(Vec2::new(fx_int(*x), fx_int(*y)));
+                self.map_pointer = Some(*world);
+                self.snap_target = None;
             }
             EventKind::Scroll { milli } => self.scroll(*milli),
             EventKind::Frame => self.frame(t, &mut cx),
@@ -642,6 +682,7 @@ impl Mapper {
         if action.is_held() {
             return out;
         }
+        self.wheel_axis_sample = None;
         self.targets = self.assist_targets(world);
         let mut cx = Cx {
             world,
@@ -883,7 +924,7 @@ impl Mapper {
         }
         // Edge pan push, per axis in -1..=1 (screen and world agree).
         let mut push = Vec2::ZERO;
-        if t.edge_pan_px > 0 && !reticle {
+        if t.edge_pan_px > 0 && !reticle && self.map_pointer.is_none() {
             let m = fx_int(t.edge_pan_px);
             let (w, h) = (fx_int(self.camera.width_px), fx_int(self.camera.height_px));
             let c = self.cursor;
@@ -1034,6 +1075,13 @@ impl Mapper {
         if matches!(axis, Axis::LeftX | Axis::LeftY) {
             if self.left_stick() != Vec2::ZERO {
                 self.source = CursorSource::Stick;
+                self.map_pointer = None;
+            }
+            if let Some((_, wheel)) = self.wheel.as_mut() {
+                let (_, before) = self
+                    .wheel_axis_sample
+                    .get_or_insert((self.now, wheel.highlighted));
+                wheel.highlighted = *before;
             }
             self.steer_wheel();
         }
