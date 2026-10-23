@@ -176,7 +176,7 @@ struct Ground(Arc<TerrainData>);
 struct InputRes {
     mapper: Mapper,
     last_axes: BTreeMap<InAxis, i16>,
-    last_pointer: Option<(i32, i32)>,
+    last_pointer: Option<EventKind>,
 }
 
 /// Screenshot plan (verification mode).
@@ -1232,24 +1232,52 @@ fn input_system(
     let overlay = feel.overlay_open || feel.overlay_captured_input;
     let t = time.elapsed().as_millis() as u32;
     let mut events = Vec::new();
-    // Pointer: the terrain point under the mouse, as a virtual pixel.
-    if let Some(pos) = windows.single().ok().and_then(|w| w.cursor_position()) {
-        let (o, d) = geom.ray(pos.x, pos.y);
-        if let Some(hit) = ground.0.raycast(o, d) {
-            let v = geom.virtual_px_at(hit[0], hit[2], input_h);
-            if input.last_pointer != Some(v) {
-                input.last_pointer = Some(v);
-                events.push(EventKind::PointerMove { x: v.0, y: v.1 });
-            }
-        }
-    }
-    // Minimap: a left click or drag on it moves the camera and is not
-    // passed to the mapper (so it neither selects nor deselects).
     let mouse_pos = windows.single().ok().and_then(|w| w.cursor_position());
     let mm_geom = minimap.geom(geom.size);
+    // Route the pointer through the visible map before considering terrain
+    // behind it. Map orders may be far outside the current camera viewport,
+    // so virtual terrain pixels (which the mapper clamps) are not sufficient.
+    if let Some(pos) = mouse_pos {
+        let pointer = if let Some(mg) = mm_geom.filter(|mg| mg.contains(pos.x, pos.y)) {
+            let target = mg.target_at(pos.x, pos.y);
+            let fx = |v: f32| tak_math::Fx::from_raw((v * 65536.0) as i32);
+            EventKind::MapPointer {
+                x: pos.x.round() as i32,
+                y: pos.y.round() as i32,
+                world: tak_math::Vec2::new(fx(target[0]), fx(target[1])),
+            }
+        } else {
+            let (o, d) = geom.ray(pos.x, pos.y);
+            // Also clear a previous map pointer if the ray leaves the map.
+            let v = ground.0.raycast(o, d).map_or_else(
+                || (pos.x.round() as i32, pos.y.round() as i32),
+                |hit| geom.virtual_px_at(hit[0], hit[2], input_h),
+            );
+            EventKind::PointerMove { x: v.0, y: v.1 }
+        };
+        // A stationary mouse must not steal the cursor back from the pad.
+        // A fresh mouse click, however, deliberately takes pointer control.
+        if input.last_pointer.as_ref() != Some(&pointer)
+            || mouse.get_just_pressed().next().is_some()
+        {
+            input.last_pointer = Some(pointer.clone());
+            events.push(pointer);
+        }
+    }
+    // Plain selection clicks pan the map. A pending target mode or a
+    // remapped order button still goes through the mapper, on press/release,
+    // preserving profile gestures, queue modifiers, and cancellation.
+    let left_selects = matches!(
+        input
+            .mapper
+            .press_action(&tak_input::Input::Button(InButton::MouseLeft)),
+        Some(Action::Select | Action::DragSelect)
+    );
     if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
         && mouse.just_pressed(MouseButton::Left)
         && mg.contains(pos.x, pos.y)
+        && left_selects
+        && input.mapper.mode() == Mode::None
         && !overlay
     {
         minimap.mouse_drag = true;
@@ -1271,6 +1299,7 @@ fn input_system(
     if let Some(pos) = mouse_pos
         && mouse.just_pressed(MouseButton::Left)
         && !minimap.mouse_drag
+        && !mm_geom.is_some_and(|mg| mg.contains(pos.x, pos.y))
         && !overlay
         && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
     {
@@ -3878,3 +3907,7 @@ fn gizmo_system(
 #[cfg(test)]
 #[path = "overlay_input_tests.rs"]
 mod overlay_input_tests;
+
+#[cfg(test)]
+#[path = "minimap_input_tests.rs"]
+mod minimap_input_tests;

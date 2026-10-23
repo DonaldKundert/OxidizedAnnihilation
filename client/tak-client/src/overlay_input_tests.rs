@@ -2,7 +2,7 @@
 use super::*;
 use clap::Parser;
 
-fn app() -> App {
+pub(super) fn app() -> App {
     let args = Args::parse_from(["test", "--data", "/synthetic-not-read", "--overlay"]);
     let map = tak_content::MapDef {
         name: "synthetic-training".into(),
