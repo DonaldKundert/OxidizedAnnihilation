@@ -42,6 +42,16 @@ jobs:
           toolchain: 1.99.1
           components: rustfmt, clippy
 
+      - name: Cache client dependencies and build outputs
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: client -> target
+          key: ${{ runner.os }}-rust-1.99.1-${{ hashFiles('Cargo.lock', 'client/Cargo.lock') }}
+          cache-provider: github
+          cache-bin: false
+          cache-on-failure: false
+          # No extra directories: never cache game installations, saves or logs.
+
       - name: Check client formatting
         run: cargo fmt --all -- --check
 
@@ -109,6 +119,12 @@ jobs:
           mkdir -p dist/client-linux-x86_64
           install -m 755 target/debug/tak-client dist/client-linux-x86_64/tak-client
           cp ../LICENSE dist/client-linux-x86_64/LICENSE
+          # Cargo metadata excludes std; preserve the toolchain's library notices too.
+          rust_notices="$(rustc --print sysroot)/share/doc/rust"
+          test -s "$rust_notices/COPYRIGHT-library.html"
+          mkdir -p dist/client-linux-x86_64/rust-standard-library
+          cp "$rust_notices/COPYRIGHT-library.html" dist/client-linux-x86_64/rust-standard-library/
+          cp -R "$rust_notices/licenses" dist/client-linux-x86_64/rust-standard-library/
           cargo about generate --locked --fail --workspace \
             --target x86_64-unknown-linux-gnu \
             -c "$RUNNER_TEMP/client-about.toml" \
