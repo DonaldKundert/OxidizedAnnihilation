@@ -1,0 +1,78 @@
+name: Client CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
+  # Keep Bevy's compile/link footprint within standard hosted-runner resources.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  client:
+    name: Client format, lint, test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Check out source without retaining credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          # Bevy 0.20 requires Rust >= 1.97.1, above the core workspace's MSRV.
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+
+      - name: Check client formatting
+        run: cargo fmt --all -- --check
+
+      - name: Install Linux window, audio, input and Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            g++ pkg-config libudev-dev libasound2-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libvulkan-dev mesa-vulkan-drivers
+
+      - name: Report verification scope
+        run: |
+          if [ "${TAK_DATA_DIR+x}" = x ]; then
+            echo 'TAK_DATA_DIR must remain unset on public hosted CI.' >&2
+            exit 1
+          fi
+          {
+            echo '### Client verification scope'
+            echo '- Checks cover the separate client workspace: formatting, lint, tests and executable linking.'
+            echo '- TAK_DATA_DIR is deliberately unset. Retail-data replay/corpus tests skip.'
+            echo '- No game assets, secrets, display server or GPU playtest are used.'
+            echo '- A green run does not establish rendering, audio playback or gameplay fidelity.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint client and all test targets
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test client without proprietary game data
+        run: env -u TAK_DATA_DIR cargo test --locked --workspace -- --nocapture
+
+      - name: Link client executable
+        run: cargo build --locked --workspace --bins
