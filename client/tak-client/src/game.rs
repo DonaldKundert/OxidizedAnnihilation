@@ -13,7 +13,7 @@ use tak_commands::{CommandLog, PlayerId, SimCommand, Tick, UnitDefId, UnitId};
 use tak_content::{MapDef, Ruleset, RulesetKind};
 use tak_script::PieceTransform;
 use tak_sim::load_match;
-use tak_sim::{PlayerSetup, Sim};
+use tak_sim::{Match, PlayerSetup, Sim};
 use tak_vfs::Vfs;
 
 /// Errors while setting up a match.
@@ -58,7 +58,20 @@ pub struct Session {
     pub recorded: CommandLog,
     /// The local player.
     pub local: PlayerId,
-    /// Hash after every tick run so far (index = tick).
+    /// Absolute tick of the first entry in `hashes`. Loaded sessions retain
+    /// only newly executed hashes, never label a suffix as a full replay.
+    pub hashes_first_tick: Tick,
+    /// Canonical verified origin for replay capture, absent for unsupported modes.
+    pub(crate) save_origin: Option<crate::saves::SaveOrigin>,
+    /// Actual commands executed by this adapter, independent of editable future
+    /// fixture input. Includes ignored/no-op orders and a restored prefix.
+    pub(crate) executed_log: CommandLog,
+    pub(crate) executed_through: Tick,
+    pub(crate) history_error: Option<String>,
+    /// Immutable future driver identity, also retained in checkpoint payloads.
+    pub(crate) controllers: tak_headless::bot::ControllerConfig,
+    last_step_error: Option<String>,
+    /// Hash after every tick run in this client (index + hashes_first_tick).
     pub hashes: Vec<u64>,
     /// Per-definition render info, indexed by `UnitDefId`.
     pub defs: Vec<DefInfo>,
@@ -66,6 +79,9 @@ pub struct Session {
     pub map: MapDef,
     /// Map VFS path without extension.
     pub map_name: String,
+    /// Campaign ownership and fidelity diagnostics, if authored startup was
+    /// explicitly selected. Applications must surface this to the player.
+    pub campaign_report: Option<String>,
     /// Placed map features (all of them, scenery included).
     pub features: Vec<FeatureBox>,
     /// Art of every feature definition in the ruleset, by lowercase name.
@@ -254,10 +270,91 @@ impl Session {
             return Err(SetupError("--players names no side".into()));
         }
         let m = load_match(vfs, map, &setups, seed).map_err(err)?;
+        Self::from_match(vfs, map, m, log, None)
+    }
+
+    /// Load authored placements with explicit OTA owner-to-side mapping and
+    /// strict opt-in objectives, exactly as the headless campaign runner does.
+    /// No mission AI, alliances, initial orders or progression are implemented.
+    /// The caller must surface [`Session::campaign_report`]. Input-session
+    /// recording/ghost descriptors cannot represent this source yet.
+    pub fn load_campaign(
+        data: &Path,
+        map: &str,
+        players: &str,
+        seed: u64,
+        objectives: bool,
+        log: CommandLog,
+    ) -> Result<Session, SetupError> {
+        let players = tak_headless::campaign::parse_players(players).map_err(err)?;
+        let loaded =
+            tak_headless::campaign::load_campaign_map(data, map, &players, seed, objectives)
+                .map_err(err)?;
+        let report = tak_headless::campaign::report(&loaded, &players, objectives);
+        let vfs = open_vfs(data)?;
+        Self::from_match(&vfs, map, loaded.game, log, Some(report))
+    }
+
+    /// Select the requested startup source. Kept Bevy-free so source routing
+    /// and synthetic fixtures can be tested without a renderer.
+    pub fn load_from_args(
+        vfs: &Vfs,
+        args: &crate::cli::Args,
+        log: CommandLog,
+    ) -> Result<Session, SetupError> {
+        args.validate_source().map_err(SetupError)?;
+        if let Some(path) = &args.load_checkpoint {
+            return crate::saves::restore(args, path, log);
+        }
+        if !args.demo
+            && args.ghost.is_none()
+            && args.record_session.is_none()
+            && args.synth_events.is_none()
+        {
+            return crate::saves::start(args, log);
+        }
+        match &args.campaign {
+            Some(map) => Self::load_campaign(
+                &args.data,
+                map,
+                args.campaign_players
+                    .as_deref()
+                    .ok_or_else(|| SetupError("--campaign requires --campaign-players".into()))?,
+                args.world_seed,
+                args.campaign_objectives,
+                log,
+            ),
+            None => Self::load(vfs, &args.map, &args.players, args.world_seed, log),
+        }
+    }
+
+    /// Build identical display metadata and scripted sim regardless of source.
+    fn from_match(
+        vfs: &Vfs,
+        map: &str,
+        m: Match,
+        log: CommandLog,
+        campaign_report: Option<String>,
+    ) -> Result<Session, SetupError> {
+        let sim = Sim::with_scripts(&m.scenario, Box::new(m.scripts)).map_err(err)?;
+        Self::from_sim(vfs, map, m.map, sim, log, campaign_report)
+    }
+
+    /// Derive display metadata from the actual verified sim's definition order.
+    /// This does not reload scripts or reconstruct gameplay after checkpoint load.
+    pub(crate) fn from_sim(
+        vfs: &Vfs,
+        map: &str,
+        loaded_map: MapDef,
+        sim: Sim,
+        log: CommandLog,
+        campaign_report: Option<String>,
+    ) -> Result<Session, SetupError> {
         let rs = Ruleset::load(vfs, RulesetKind::Base);
-        let defs = m
-            .scenario
-            .unit_defs
+        let defs = sim
+            .world()
+            .defs()
+            .as_slice()
             .iter()
             .map(|d| {
                 let fbi = rs.unit(&d.name);
@@ -275,8 +372,7 @@ impl Session {
                 }
             })
             .collect();
-        let features = m
-            .map
+        let features = loaded_map
             .features
             .iter()
             .map(|pf| {
@@ -312,7 +408,7 @@ impl Session {
             })
             .collect();
         let mut weapon_art = BTreeMap::new();
-        for (i, d) in m.scenario.unit_defs.iter().enumerate() {
+        for (i, d) in sim.world().defs().as_slice().iter().enumerate() {
             let Some(u) = rs.unit(&d.name) else { continue };
             for (slot, w) in u
                 .weapons
@@ -327,16 +423,24 @@ impl Session {
             }
         }
         let explosions = load_explosions(vfs);
-        let sim = Sim::with_scripts(&m.scenario, Box::new(m.scripts)).map_err(err)?;
+        let executed_through = sim.tick();
         Ok(Session {
             sim,
             log,
             recorded: CommandLog::new(),
             local: PlayerId(0),
             hashes: Vec::new(),
+            hashes_first_tick: Tick(0),
+            save_origin: None,
+            executed_log: CommandLog::new(),
+            executed_through,
+            history_error: None,
+            controllers: Default::default(),
+            last_step_error: None,
             defs,
-            map: m.map,
+            map: loaded_map,
             map_name: map.to_string(),
+            campaign_report,
             features,
             feature_art,
             weapon_art,
@@ -349,12 +453,87 @@ impl Session {
         self.sim.tick()
     }
 
-    /// Run one tick with its logged commands; returns the hash.
-    pub fn step(&mut self) -> u64 {
+    /// Future controller settings. Historical replay never calls the planner.
+    pub fn controllers(&self) -> &tak_headless::bot::ControllerConfig {
+        &self.controllers
+    }
+
+    /// Named policy/visibility disclosure for interactive startup and HUDs.
+    pub fn training_report(&self) -> Option<String> {
+        crate::training::report(&self.controllers)
+    }
+
+    /// The latest admission failure, cleared after a successful tick.
+    pub fn last_step_error(&self) -> Option<&str> {
+        self.last_step_error.as_deref()
+    }
+
+    /// Run one future tick through the shared headless admission/planning path.
+    /// Every fallible operation finishes before changing sim, log or history.
+    /// Competing bot-owner orders (including later ticks) pause rather than
+    /// silently override recorded input or execute only part of a tick.
+    pub fn try_step(&mut self) -> Result<u64, SetupError> {
+        let result = self.step_checked();
+        self.last_step_error = result.as_ref().err().map(ToString::to_string);
+        result
+    }
+
+    fn step_checked(&mut self) -> Result<u64, SetupError> {
         let t = self.sim.tick();
-        let h = self.sim.step(self.log.for_tick(t));
+        if t != self.executed_through || self.history_error.is_some() {
+            return Err(err(
+                "simulation advanced outside the recorded session tick path",
+            ));
+        }
+        if !self.controllers.is_empty() && self.local != PlayerId(0) {
+            return Err(err("training sessions require local human player 0"));
+        }
+        let realized = tak_headless::checkpoint::driver::prepare_future_tick(
+            self.sim.world(),
+            &self.controllers,
+            self.executed_log.len(),
+            &self.log,
+        )
+        .map_err(err)?;
+        if !realized.is_empty() {
+            // Preflight every insertion before publishing any command. Insert
+            // can fail only on duplicate keys; the shared driver already proved
+            // realized keys unique. Exclusive access keeps this proof valid
+            // through both insertion loops, without cloning elapsed history.
+            for entry in &realized {
+                let collides = |log: &CommandLog| {
+                    log.entries()
+                        .binary_search_by_key(&entry.key(), tak_commands::LoggedCommand::key)
+                        .is_ok()
+                };
+                if collides(&self.executed_log)
+                    || (self.controllers.controls(entry.player) && collides(&self.log))
+                {
+                    return Err(err(tak_commands::LogError::Duplicate {
+                        tick: entry.tick,
+                        player: entry.player,
+                        seq: entry.seq,
+                    }));
+                }
+            }
+            for entry in &realized {
+                self.executed_log.insert(entry.clone()).map_err(err)?;
+                if self.controllers.controls(entry.player) {
+                    self.log.insert(entry.clone()).map_err(err)?;
+                }
+            }
+        }
+        let h = self.sim.step(&realized);
+        self.executed_through = self.sim.tick();
         self.hashes.push(h);
-        h
+        Ok(h)
+    }
+
+    /// Compatibility convenience for pure replay/input harnesses. On failure
+    /// returns the unchanged current hash, records the reason and never advances.
+    /// Interactive callers should use `try_step` to pause/report explicitly.
+    pub fn step(&mut self) -> u64 {
+        self.try_step().unwrap_or_else(|_| self.sim.state_hash())
     }
 
     /// Queue an order from the local player for the next tick to run.

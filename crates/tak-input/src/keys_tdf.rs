@@ -15,7 +15,7 @@
 //! reported as skipped: TA's Ctrl+Shift lines are the additive versions of
 //! the Ctrl lines, which our select actions already do with Shift held.
 
-use tak_commands::{ControlGroup, Scope};
+use tak_commands::{ControlGroup, FireState, Scope};
 
 use crate::binding::{Action, Binding, Category, Gesture, Profile, ReservedOrder};
 use crate::event::{Input, Key};
@@ -196,8 +196,17 @@ fn command(value: &str) -> Cmd {
             "guard" => Cmd::Do(Action::GuardMode),
             "patrol" => Cmd::Do(Action::PatrolMode),
             "stop" => Cmd::Do(Action::Stop),
+            "offensive" => Cmd::Do(Action::SetFireState {
+                state: FireState::FireAtWill,
+            }),
+            "defensive" => Cmd::Do(Action::SetFireState {
+                state: FireState::Defensive,
+            }),
+            "passive" => Cmd::Do(Action::SetFireState {
+                state: FireState::HoldFire,
+            }),
             "clear" => reserved(ReservedOrder::Clear),
-            "heal" | "repair" => reserved(ReservedOrder::Heal),
+            "heal" | "repair" => Cmd::Do(Action::HealMode),
             "togglecloak" => reserved(ReservedOrder::Cloak),
             "load" => reserved(ReservedOrder::Load),
             "unload" => reserved(ReservedOrder::Unload),

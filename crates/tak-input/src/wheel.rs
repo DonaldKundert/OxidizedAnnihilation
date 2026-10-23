@@ -80,7 +80,7 @@ pub fn ring_slots(r: Ring) -> Vec<Action> {
                 state: FireState::FireAtWill,
             },
             Action::SetFireState {
-                state: FireState::ReturnFire,
+                state: FireState::Defensive,
             },
             Action::SetFireState {
                 state: FireState::HoldFire,
@@ -88,9 +88,7 @@ pub fn ring_slots(r: Ring) -> Vec<Action> {
         ],
         Ring::Unit => vec![
             Action::OpenRing { ring: Ring::Squads },
-            Action::Reserved {
-                order: ReservedOrder::Heal,
-            },
+            Action::HealMode,
             Action::Reserved {
                 order: ReservedOrder::Load,
             },

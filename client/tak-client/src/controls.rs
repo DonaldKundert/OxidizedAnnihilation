@@ -13,6 +13,7 @@ use tak_input::{CursorKind, Feedback, PRESETS, Recorder, Recording, TUNING_FIELD
 
 use super::*;
 use crate::feel::{self, Glyph, HintKey, Layout, Symbol};
+use crate::hud::{CURSOR_KINDS, cursor_seq};
 
 /// Feel state shared by the input adapter and the controls systems.
 #[derive(Resource)]
@@ -49,6 +50,10 @@ pub(super) struct Feel {
     pub hud_choice: String,
     /// A one-off bottom-bar message (e.g. the damage-bar mode).
     pub toast: Option<String>,
+    /// Client-owned quick-save request, kept outside deterministic input rules.
+    pub quick_save_requested: bool,
+    pub quick_save_dir: Result<PathBuf, String>,
+    pub loaded_checkpoint: Option<PathBuf>,
     /// Order acknowledgements to play this frame (`Sounds/*.WAV` names).
     pub sounds: Vec<&'static str>,
 }
@@ -76,6 +81,10 @@ impl Feel {
             damage_bars: 0,
             hud_choice: args.hud.to_ascii_lowercase(),
             toast: None,
+            quick_save_requested: false,
+            loaded_checkpoint: args.load_checkpoint.clone(),
+            quick_save_dir: crate::saves::save_directory(args.save_dir.as_deref(), &args.data)
+                .map_err(|e| e.to_string()),
             sounds: Vec::new(),
         }
     }
@@ -128,6 +137,14 @@ fn save(feel: &mut Feel, input: &InputRes) {
         .profile_path
         .clone()
         .unwrap_or_else(feel::default_profile_path);
+    if feel
+        .loaded_checkpoint
+        .as_ref()
+        .is_some_and(|input| crate::saves::same_file(input, &path))
+    {
+        feel.say("profile save refused: destination aliases the loaded game checkpoint");
+        return;
+    }
     match feel::save_profile(&path, input.mapper.profile()) {
         Ok(t) => {
             if feel.profile_path.is_none() {
@@ -189,6 +206,11 @@ pub(super) fn setup_overlay(mut commands: Commands) {
         Text::new("Tuning"),
         hud_text(16.0),
         OverlayTitle,
+        ChildOf(root),
+    ));
+    commands.spawn((
+        Text::new("Match quick-save: F10 or pad X / Square. Creates a new replay save."),
+        hud_text(13.0),
         ChildOf(root),
     ));
     for i in 0..OVERLAY_ROWS {
@@ -328,6 +350,13 @@ pub(super) fn overlay_input_system(
         || (keys.just_pressed(KeyCode::KeyS)
             && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::SuperLeft)));
     if let Some(pad) = pads.iter().next() {
+        if crate::saves::quick_save_shortcut(
+            false,
+            feel.overlay_open,
+            pad.just_pressed(GamepadButton::West),
+        ) {
+            feel.quick_save_requested = true;
+        }
         if pad.just_pressed(GamepadButton::DPadDown) {
             row = (row + 1) % n;
         }
@@ -504,13 +533,18 @@ pub(super) fn overlay_draw_system(
             "Write the profile (bindings + tuning) to the file above".to_string()
         };
         let pad = match feel.layout {
-            Layout::Xbox => "D-pad move/adjust, LB/RB x10, A toggle, Y save, B close",
+            Layout::Xbox => {
+                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, B close"
+            }
             Layout::PlayStation => {
-                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save, Circle close"
+                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save profile, Square quick-save match, Circle close"
             }
         };
         s.0 = format!(
-            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save, F11 close. Mouse: - / +{}",
+            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F11 close. Mouse: - / +\nQuick-save: {}{}",
+            feel.quick_save_dir
+                .as_ref()
+                .map_or_else(|e| e.clone(), |p| p.display().to_string()),
             feel.status
                 .as_ref()
                 .map_or(String::new(), |(m, _)| format!("\n{m}"))
@@ -537,36 +571,6 @@ impl CursorArt {
         self.0.contains_key("cursornormal")
     }
 }
-
-/// `anims/CURSORS.GAF` sequence for each context (**Chosen** mapping; the
-/// names say what each is for).
-fn cursor_seq(kind: CursorKind) -> &'static str {
-    match kind {
-        CursorKind::Normal => "cursornormal",
-        CursorKind::Select => "cursorselect",
-        CursorKind::Move => "CursorMove",
-        CursorKind::Attack => "CursorAttack",
-        CursorKind::Guard => "CursorDefend",
-        CursorKind::Patrol => "CursorPatrol",
-        CursorKind::Build => "cursorgrn",
-        CursorKind::BuildBlocked => "cursorred",
-        CursorKind::Cast => "Cursorresurrect",
-        CursorKind::Invalid => "cursortoofar",
-    }
-}
-
-const CURSOR_KINDS: [CursorKind; 10] = [
-    CursorKind::Normal,
-    CursorKind::Select,
-    CursorKind::Move,
-    CursorKind::Attack,
-    CursorKind::Guard,
-    CursorKind::Patrol,
-    CursorKind::Build,
-    CursorKind::BuildBlocked,
-    CursorKind::Cast,
-    CursorKind::Invalid,
-];
 
 #[derive(Component)]
 pub(super) struct GameCursor {
@@ -830,7 +834,7 @@ fn chip_for(art: &mut GlyphArt, images: &mut Assets<Image>, g: &Glyph) -> Handle
         .clone()
 }
 
-const HINTS: usize = 8;
+const HINTS: usize = 9;
 
 #[derive(Component)]
 pub(super) struct HintBar;
@@ -959,6 +963,7 @@ pub(super) fn hints_system(
         .collect();
     let cx = feel::HintCx {
         has_units: !sel.is_empty(),
+        has_healer: !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty(),
         has_builder: sel.iter().any(|u| {
             w.defs()
                 .get(u.def)
@@ -1326,6 +1331,10 @@ fn wheel_slot_view(
         }
         Action::MoveMode => v.info = format!("Move\nthen {order_prompt} on the ground"),
         Action::GuardMode => v.info = format!("Guard\nthen {order_prompt} on a friend"),
+        Action::HealMode => {
+            v.usable = !tak_input::healers_for(&s.view(), sel).is_empty();
+            v.info = format!("Heal / repair\nthen {order_prompt} on another own unit or frame");
+        }
         Action::PatrolMode => v.info = format!("Patrol\nthen {order_prompt} on the ground"),
         other => v.info = feel::action_label(other),
     }
@@ -1695,20 +1704,6 @@ pub(super) fn wheel_system(
 /// `ATTACK`, `GUARD`, `PATROL`, `STOP`), decoded by Bevy's WAV support.
 #[derive(Resource, Default)]
 pub(super) struct OrderSounds(BTreeMap<&'static str, Handle<AudioSource>>);
-
-/// The acknowledgement for an order (**Chosen** for orders without their
-/// own sound: build walks like a move, a spell attacks, a stance has none).
-pub(super) fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
-    use tak_commands::SimCommand as C;
-    Some(match c {
-        C::Move { .. } | C::Build { .. } => "MOVE",
-        C::Attack { .. } | C::AttackMove { .. } | C::CastSpell { .. } => "ATTACK",
-        C::Guard { .. } => "GUARD",
-        C::Patrol { .. } => "PATROL",
-        C::Stop { .. } => "STOP",
-        C::SetFireState { .. } => return None,
-    })
-}
 
 pub(super) fn setup_sounds(
     mut commands: Commands,

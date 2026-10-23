@@ -379,7 +379,9 @@ impl UnitEngine<'_> {
             | kport::WEAPON_LAUNCH_NOW => self.reg(p),
             port::STANDINGFIREORDERS => match c.fire_state {
                 tak_commands::FireState::HoldFire => 0,
-                tak_commands::FireState::ReturnFire => 1,
+                // Chosen: Defensive shares the middle script-port value.
+                // The legacy ReturnFire state and its port value are unchanged.
+                tak_commands::FireState::ReturnFire | tak_commands::FireState::Defensive => 1,
                 tak_commands::FireState::FireAtWill => 2,
             },
             // Percent, from the combat lane.
@@ -502,6 +504,31 @@ mod tests {
         let p = Vec2::from_ints(3000, 1234);
         assert_eq!(unpack_xz(pack_xz(p)), p);
         assert_eq!(pack_xz(p), (3000 << 16) | 1234);
+    }
+
+    #[test]
+    fn defensive_uses_middle_script_port_without_changing_legacy_values() {
+        let map = MapInfo::flat(512, 512, vec![]);
+        let mut rng = Rng::new(1);
+        let mut regs = BTreeMap::new();
+        let mut stats = ScriptStats::default();
+        for (state, expected) in [
+            (FireState::HoldFire, 0),
+            (FireState::ReturnFire, 1),
+            (FireState::FireAtWill, 2),
+            (FireState::Defensive, 1),
+        ] {
+            let mut c = ctx(Fx::ZERO, 0);
+            c.fire_state = state;
+            let mut e = UnitEngine {
+                ctx: &c,
+                map: &map,
+                rng: &mut rng,
+                regs: &mut regs,
+                stats: &mut stats,
+            };
+            assert_eq!(e.get_unit_value(port::STANDINGFIREORDERS), expected);
+        }
     }
 
     #[test]

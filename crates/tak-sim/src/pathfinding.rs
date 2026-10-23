@@ -617,12 +617,7 @@ pub fn tick(world: &mut World, _scripts: &mut dyn ScriptHost) {
 
 /// The move target at the front of a unit's queue.
 pub(crate) fn front_target(u: &Unit) -> Option<WorldPos> {
-    let assist_walk = u
-        .build
-        .assist
-        .filter(|a| a.walking)
-        .and_then(|a| a.walk_to)
-        .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }));
+    let assist_walk = crate::construction::is_work_move(u);
     if u.combat.order.is_some() && !crate::combat::is_our_move(u) && !assist_walk {
         return None;
     }
@@ -656,11 +651,7 @@ fn finish(u: &mut Unit, outcome: Outcome) {
         u.combat.attack_move = None;
     }
     let combat_move = crate::combat::is_our_move(u);
-    let assist_move = u.build.assist.is_some_and(|a| {
-        a.walking
-            && a.walk_to
-                .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
-    });
+    crate::construction::consume_work_move(u);
     match u.orders.pop_front() {
         Some(o @ Order::Patrol { .. }) => u.orders.push_back(o),
         Some(_) if u.orders.is_empty() => u.speed = Fx::ZERO,
@@ -668,11 +659,6 @@ fn finish(u: &mut Unit, outcome: Outcome) {
     }
     if combat_move {
         u.combat.goal = None;
-    }
-    if assist_move {
-        if let Some(assist) = &mut u.build.assist {
-            assist.walking = false;
-        }
     }
     u.path.reset();
     u.path.outcome = outcome;

@@ -558,6 +558,13 @@ fn init_and_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, no
     } else {
         c.heal_acc = 0;
     }
+    if c.health >= c.max_health {
+        // Active-repair work cannot be saved through a full-health interval,
+        // even when projectiles damage this unit later in this same tick.
+        if let Some(r) = &mut u.build.repair {
+            r.hp_remainder = 0;
+        }
+    }
     // TA sends the longest reload once the script exists; after `Create`
     // has had a tick to initialise its statics.
     if !c.reload_sent && now > c.born {
@@ -623,6 +630,53 @@ pub fn build_progress(
     let new = frame_health(max, total - done_after, total);
     let gain = i64::from(old) - i64::from(new);
     c.health = (i64::from(c.health) + gain).clamp(0, i64::from(c.max_health)) as i32;
+}
+
+/// Initialize health without passive regeneration or script side effects.
+/// Construction/repair can run before the first combat tick.
+pub(crate) fn ensure_health(world: &mut World, id: UnitId) {
+    let now = world.tick().0;
+    let Some(u) = world.unit(id) else { return };
+    if u.combat.ready {
+        return;
+    }
+    let Some(d) = world.defs().get(u.def) else {
+        return;
+    };
+    let (max, weapons) = (d.combat.max_damage, d.combat.weapons.len());
+    let (done, total) = u.build.built_fraction();
+    let health = max - frame_health(max, total - done.min(total), total);
+    if let Some(u) = world.unit_mut(id) {
+        init_state(&mut u.combat, max, weapons, now, health);
+    }
+}
+
+/// Positive healing only. Never resurrects, invokes combat callbacks, changes
+/// passive-regeneration credit, last attacker, kills or construction progress.
+/// Returns the actual HP restored, capped at the target's maximum.
+pub fn apply_healing(world: &mut World, target: UnitId, amount: i32) -> i32 {
+    if amount <= 0 {
+        return 0;
+    }
+    ensure_health(world, target);
+    let Some(u) = world.unit_mut(target) else {
+        return 0;
+    };
+    if u.combat.is_dying()
+        || !u.build.is_complete()
+        || u.combat.max_health <= 0
+        || u.combat.health <= 0
+    {
+        return 0;
+    }
+    let before = u.combat.health;
+    u.combat.health = before.saturating_add(amount).min(u.combat.max_health);
+    if u.combat.health >= u.combat.max_health {
+        if let Some(r) = &mut u.build.repair {
+            r.hp_remainder = 0;
+        }
+    }
+    u.combat.health - before
 }
 
 /// Copy of the per-weapon numbers the tick needs (no allocation).
@@ -752,7 +806,11 @@ fn nearest_enemy(
 ) -> Option<UnitId> {
     let mut best: Option<(Fx, UnitId)> = None;
     for (oid, o) in world.units() {
-        if o.owner == owner || !o.combat.ready || o.combat.max_health <= 0 || o.combat.is_dying() {
+        if !world.are_hostile(owner, o.owner)
+            || !o.combat.ready
+            || o.combat.max_health <= 0
+            || o.combat.is_dying()
+        {
             continue;
         }
         let d = pos.distance(o.pos);
@@ -796,7 +854,14 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
     let Some(u) = world.unit(id) else { return };
     let (pos, owner, heading, fire_state, def_id) =
         (u.pos, u.owner, u.heading, u.fire_state, u.def);
-    let last_attacker = u.combat.last_attacker.filter(|&a| is_target(world, a));
+    // Friendly fire still records its attacker for damage bookkeeping, but
+    // only a hostile player can qualify for automatic ReturnFire targeting.
+    let last_attacker = u.combat.last_attacker.filter(|&a| {
+        is_target(world, a)
+            && world
+                .unit(a)
+                .is_some_and(|a| world.are_hostile(owner, a.owner))
+    });
     let mut order = u.combat.order;
     let Some(def) = world.defs().get(def_id) else {
         return;
@@ -873,11 +938,13 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
             _ if core.spell || !autonomous => None,
             _ => {
                 let allowed =
-                    |oid: UnitId| fire_state == FireState::FireAtWill || Some(oid) == last_attacker;
+                    |oid: UnitId| fire_state != FireState::ReturnFire || Some(oid) == last_attacker;
                 let keep = current.filter(|&t| match t {
                     Target::Unit(oid) => {
                         allowed(oid)
-                            && world.unit(oid).is_some_and(|o| o.owner != owner)
+                            && world
+                                .unit(oid)
+                                .is_some_and(|o| world.are_hostile(owner, o.owner))
                             && in_reach(world, id, pos, core, t)
                     }
                     Target::Ground(_) => false,
@@ -935,6 +1002,14 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
                     step_chase(world, id, pos, chase, can_hit_any, || {
                         (pos.distance(gpos) > GUARD_DISTANCE).then_some(gpos)
                     });
+                }
+            }
+            None if fire_state == FireState::Defensive => {
+                // Never resume an old autonomous chase/return after switching
+                // stance. Do not touch movement explicitly ordered by the player.
+                halt_our_move(world, id);
+                if let Some(u) = world.unit_mut(id) {
+                    u.combat.leash_origin = None;
                 }
             }
             None => {
@@ -1048,26 +1123,30 @@ fn attack_move_step(
         .max(sight);
     let allowed = |oid: UnitId| {
         !auto.is_empty()
+            && world
+                .unit(oid)
+                .is_some_and(|u| world.are_hostile(owner, u.owner))
             && fire_state != FireState::HoldFire
-            && (fire_state == FireState::FireAtWill || Some(oid) == last_attacker)
-            // ReturnFire is not an instruction to pursue an attacker.
-            // Only an explicit Attack may force that chase in this state.
-            && (fire_state != FireState::ReturnFire
+            && (fire_state != FireState::ReturnFire || Some(oid) == last_attacker)
+            // Defensive and legacy ReturnFire never divert from the route
+            // to chase. Explicit Attack/Cast still override either state.
+            && (fire_state == FireState::FireAtWill
                 || auto.iter().any(|c| in_reach(world, id, pos, c, Target::Unit(oid))))
     };
     // Forget a failed location once its unit moves, dies, or its slot is reused.
     state.avoided.retain(|&oid, at| {
         is_target(world, oid)
-            && world
-                .unit(oid)
-                .is_some_and(|u| u.pos.distance(*at) <= REGOAL_DISTANCE)
+            && world.unit(oid).is_some_and(|u| {
+                world.are_hostile(owner, u.owner) && u.pos.distance(*at) <= REGOAL_DISTANCE
+            })
     });
     if let Some(t) = state.target {
         let keep = allowed(t)
             && is_target(world, t)
-            && world.unit(t).is_some_and(|u| {
-                u.owner != owner && state.origin.distance(u.pos).to_int_floor() <= leash.max(look)
-            });
+            && (fire_state == FireState::Defensive
+                || world.unit(t).is_some_and(|u| {
+                    state.origin.distance(u.pos).to_int_floor() <= leash.max(look)
+                }));
         if !keep {
             if is_target(world, t) && allowed(t) {
                 if let Some(u) = world.unit(t) {
@@ -1079,7 +1158,9 @@ fn attack_move_step(
     }
     if state.target.is_none() {
         state.target = nearest_enemy(world, owner, pos, |oid, _, d| {
-            allowed(oid) && d <= look && !state.avoided.contains_key(&oid)
+            allowed(oid)
+                && (fire_state == FireState::Defensive
+                    || (d <= look && !state.avoided.contains_key(&oid)))
         });
         if state.target.is_some() {
             state.origin = pos;
@@ -1124,7 +1205,7 @@ fn chase_target(
 ) -> Option<UnitId> {
     let _ = id;
     let auto: Vec<&Core> = cores.iter().filter(|c| !c.spell).collect();
-    if auto.is_empty() || fire_state == FireState::HoldFire {
+    if auto.is_empty() || matches!(fire_state, FireState::HoldFire | FireState::Defensive) {
         return None;
     }
     // Melee `range` is not a reach (see `melee_reach`); only ranged weapons
@@ -1137,7 +1218,7 @@ fn chase_target(
         .unwrap_or(0)
         .max(sight);
     nearest_enemy(world, owner, pos, |oid, opos, d| {
-        (fire_state == FireState::FireAtWill || Some(oid) == last_attacker)
+        (fire_state != FireState::ReturnFire || Some(oid) == last_attacker)
             && d <= look
             && origin.distance(opos).to_int_floor() <= leash
     })
@@ -1582,6 +1663,7 @@ fn start_death(
     dkind: i32,
     now: u32,
 ) {
+    crate::construction::cancel_heal(world, scripts, id);
     let Some(u) = world.unit_mut(id) else { return };
     u.orders.clear();
     u.combat.cancel_orders();

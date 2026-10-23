@@ -111,7 +111,7 @@ pub enum Target {
     Unit(UnitId),
 }
 
-/// Fire state, as in TA's three-way toggle.
+/// Automatic engagement policy. Legacy TA fire states keep their tokens.
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize,
 )]
@@ -119,11 +119,14 @@ pub enum Target {
 pub enum FireState {
     /// Never fire unless ordered to attack.
     HoldFire,
-    /// Fire only at units that attack this unit.
+    /// Legacy retaliation against the last attacker, including idle pursuit.
     ReturnFire,
-    /// Fire at any enemy in range (the default).
+    /// Fire at and pursue enemies automatically (the legacy default).
     #[default]
     FireAtWill,
+    /// Kingdoms Defensive: fire at enemies in reach, without automatic pursuit.
+    /// Explicit movement, Attack and CastSpell orders still apply.
+    Defensive,
 }
 
 /// Whether an order replaces the unit's queue or is appended to it
@@ -195,6 +198,15 @@ pub enum SimCommand {
         /// Replace or append.
         queue: QueueMode,
     },
+    /// Heal an owned unit or assist its unfinished construction frame.
+    Heal {
+        /// Complete mobile builders.
+        units: UnitSet,
+        /// Owned unit to heal; self-targeting is not supported.
+        target: UnitId,
+        /// Replace or append.
+        queue: QueueMode,
+    },
     /// Patrol between the unit's position (or previous patrol point) and `to`.
     Patrol {
         /// Patrollers.
@@ -238,6 +250,7 @@ impl SimCommand {
             | SimCommand::Attack { units, .. }
             | SimCommand::Build { units, .. }
             | SimCommand::Guard { units, .. }
+            | SimCommand::Heal { units, .. }
             | SimCommand::Patrol { units, .. }
             | SimCommand::CastSpell { units, .. }
             | SimCommand::Stop { units }
@@ -254,6 +267,7 @@ impl SimCommand {
             | SimCommand::Attack { queue, .. }
             | SimCommand::Build { queue, .. }
             | SimCommand::Guard { queue, .. }
+            | SimCommand::Heal { queue, .. }
             | SimCommand::Patrol { queue, .. }
             | SimCommand::CastSpell { queue, .. } => Some(*queue),
             SimCommand::Stop { .. } | SimCommand::SetFireState { .. } => None,

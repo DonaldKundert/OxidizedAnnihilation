@@ -67,6 +67,22 @@ pub trait WorldView {
     /// `true` if `owner` is hostile to the local player.
     fn is_enemy(&self, owner: PlayerId) -> bool;
 
+    /// `true` if `unit` is an operational mobile builder that can heal or
+    /// assist construction. The default uses the visible snapshot: an owned,
+    /// selectable, complete mobile builder. Sim adapters should additionally
+    /// reject dead/dying units and builders with no positive work rate.
+    ///
+    /// The input layer still enforces ownership, completion and builder kind
+    /// when an adapter overrides this capability check.
+    fn can_heal(&self, unit: UnitId) -> bool {
+        self.unit(unit).is_some_and(|u| {
+            u.owner == self.local_player()
+                && u.selectable
+                && !u.under_construction
+                && u.builder == Some(BuilderKind::Mobile)
+        })
+    }
+
     /// What `unit` can build, in menu order. Empty for non-builders.
     fn build_options(&self, unit: UnitId) -> Vec<UnitDefId> {
         let _ = unit;

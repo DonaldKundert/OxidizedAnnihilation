@@ -4,6 +4,7 @@
 //! verb line. Drawing is in `app.rs` / `hud_view.rs`.
 
 use tak_commands::{UnitDefId, UnitId};
+use tak_input::{Action, CursorKind};
 
 /// Image order shared by the common GAF buttons and per-weapon pictures:
 /// disabled, up, hovered, active.
@@ -176,6 +177,183 @@ pub const PANEL_BUTTONS: [&str; 13] = [
     "AgPassiveButton",
 ];
 
+/// What each panel button does, in [`PANEL_BUTTONS`] order. Clear remains
+/// reserved; Heal keeps the original RepairButton well and art.
+pub const PANEL_ACTIONS: [Action; 13] = [
+    Action::AttackMode,
+    Action::MoveMode,
+    Action::GuardMode,
+    Action::PatrolMode,
+    Action::Stop,
+    Action::Reserved {
+        order: tak_input::ReservedOrder::Clear,
+    },
+    Action::HealMode,
+    Action::CastSpell { index: 0 },
+    Action::CastSpell { index: 1 },
+    Action::CastSpell { index: 2 },
+    Action::SetFireState {
+        state: tak_commands::FireState::FireAtWill,
+    },
+    Action::SetFireState {
+        state: tak_commands::FireState::Defensive,
+    },
+    Action::SetFireState {
+        state: tak_commands::FireState::HoldFire,
+    },
+];
+
+/// TA:K names for the panel buttons (help line).
+pub const PANEL_NAMES: [&str; 13] = [
+    "Attack",
+    "Move",
+    "Guard",
+    "Patrol",
+    "Stop",
+    "Clear",
+    "Heal",
+    "Primary",
+    "Secondary",
+    "Special",
+    "Offensive",
+    "Defensive",
+    "Passive",
+];
+
+/// `anims/CURSORS.GAF` sequence for each context (**Chosen** mapping; the
+/// names say what each is for).
+pub fn cursor_seq(kind: CursorKind) -> &'static str {
+    match kind {
+        CursorKind::Normal => "cursornormal",
+        CursorKind::Select => "cursorselect",
+        CursorKind::Move => "CursorMove",
+        CursorKind::Attack => "CursorAttack",
+        CursorKind::Guard => "CursorDefend",
+        CursorKind::Heal => "CursorRepair",
+        CursorKind::Patrol => "CursorPatrol",
+        CursorKind::Build => "cursorgrn",
+        CursorKind::BuildBlocked => "cursorred",
+        CursorKind::Cast => "Cursorresurrect",
+        CursorKind::Invalid => "cursortoofar",
+    }
+}
+
+/// All cursor contexts to preload, including explicit Heal.
+pub const CURSOR_KINDS: [CursorKind; 11] = [
+    CursorKind::Normal,
+    CursorKind::Select,
+    CursorKind::Move,
+    CursorKind::Attack,
+    CursorKind::Guard,
+    CursorKind::Heal,
+    CursorKind::Patrol,
+    CursorKind::Build,
+    CursorKind::BuildBlocked,
+    CursorKind::Cast,
+    CursorKind::Invalid,
+];
+
+/// The acknowledgement for an order (**Chosen** for orders without their
+/// own sound: build walks like a move, a spell attacks, Heal assists like
+/// Guard, a stance has none).
+pub fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
+    use tak_commands::SimCommand as C;
+    Some(match c {
+        C::Move { .. } | C::Build { .. } => "MOVE",
+        C::Attack { .. } | C::AttackMove { .. } | C::CastSpell { .. } => "ATTACK",
+        C::Guard { .. } | C::Heal { .. } => "GUARD",
+        C::Patrol { .. } => "PATROL",
+        C::Stop { .. } => "STOP",
+        C::SetFireState { .. } => return None,
+    })
+}
+
+/// The visible goal of an order. A stale unit target has no goal; never
+/// substitute a slot's new generation or an unrelated position.
+pub fn order_goal(w: &tak_sim::World, order: &tak_sim::Order) -> Option<tak_commands::WorldPos> {
+    use tak_sim::Order;
+    match order {
+        Order::Move { to } | Order::AttackMove { to } | Order::Patrol { to } => Some(*to),
+        Order::Build { at, .. } => *at,
+        Order::Attack {
+            target: tak_commands::Target::Ground(p),
+        } => Some(*p),
+        Order::Attack {
+            target: tak_commands::Target::Unit(id),
+        }
+        | Order::Guard { target: id }
+        | Order::Heal { target: id } => w.unit(*id).map(|t| t.pos),
+    }
+}
+
+/// Heal goals use green/cyan, distinct from the ordinary yellow order line.
+pub fn order_rgba(order: &tak_sim::Order) -> [f32; 4] {
+    if matches!(order, tak_sim::Order::Heal { .. }) {
+        [0.3, 1.0, 0.7, 0.8]
+    } else {
+        [1.0, 1.0, 0.4, 0.6]
+    }
+}
+
+/// Player-visible orders, hiding the temporary Move which an active Heal
+/// inserts in front of its own order while the healer walks into range.
+/// Keeping that implementation detail out of the HUD preserves Heal's
+/// green goal line, status verb and player-order queue count.
+pub fn orders_for_display(u: &tak_sim::world::Unit) -> impl Iterator<Item = &tak_sim::Order> {
+    let hide_heal_walk = u.build.heal.is_some_and(|j| {
+        !j.cancelled
+            && j.work.walking
+            && j.work
+                .walk_to
+                .is_some_and(|to| u.orders.front() == Some(&tak_sim::Order::Move { to }))
+            && u.orders.get(1)
+                == Some(&tak_sim::Order::Heal {
+                    target: j.work.target,
+                })
+    });
+    u.orders.iter().skip(usize::from(hide_heal_walk))
+}
+
+/// The current order of a unit, as TA:K would say it.
+pub fn order_text(
+    w: &tak_sim::World,
+    u: &tak_sim::world::Unit,
+    display: impl Fn(UnitDefId) -> String,
+) -> String {
+    let name = |id: UnitId| w.unit(id).map_or("?".to_string(), |t| display(t.def));
+    let mut orders = orders_for_display(u);
+    let now = match orders.next() {
+        None => "Idle".to_string(),
+        Some(tak_sim::Order::Move { .. }) => "Moving".into(),
+        Some(tak_sim::Order::AttackMove { .. }) => "Attack-moving".into(),
+        Some(tak_sim::Order::Patrol { .. }) => "Patrolling".into(),
+        Some(tak_sim::Order::Guard { target }) => format!("Guarding {}", name(*target)),
+        Some(tak_sim::Order::Heal { target }) => {
+            let verb = w.unit(*target).map_or("Healing", |t| {
+                if !t.build.is_complete() {
+                    "Assisting"
+                } else if w.defs().get(t.def).is_some_and(|d| !d.build.mobile) {
+                    "Repairing"
+                } else {
+                    "Healing"
+                }
+            });
+            format!("{verb} {}", name(*target))
+        }
+        Some(tak_sim::Order::Attack {
+            target: tak_commands::Target::Unit(t),
+        }) => format!("Attacking {}", name(*t)),
+        Some(tak_sim::Order::Attack { .. }) => "Attacking ground".into(),
+        Some(tak_sim::Order::Build { def, .. }) => format!("Building {}", display(*def)),
+    };
+    let queued = orders.count();
+    if queued > 0 {
+        format!("{now} (+{queued})")
+    } else {
+        now
+    }
+}
+
 /// The selection grouped by unit type for the multi-selection strip: each
 /// type with its units, in order of the first unit (by id).
 pub fn group_by_type(units: &[(UnitId, UnitDefId)]) -> Vec<(UnitDefId, Vec<UnitId>)> {
@@ -250,6 +428,16 @@ pub fn health_rgb(frac: f32) -> [f32; 3] {
         [0.95, 0.8, 0.15]
     } else {
         [0.9, 0.2, 0.15]
+    }
+}
+
+/// User-facing stance names. Legacy ReturnFire is retaliation, not Kingdoms Defensive.
+pub fn stance_name(state: tak_commands::FireState) -> &'static str {
+    match state {
+        tak_commands::FireState::FireAtWill => "Offensive",
+        tak_commands::FireState::ReturnFire => "Retaliate",
+        tak_commands::FireState::HoldFire => "Passive",
+        tak_commands::FireState::Defensive => "Defensive",
     }
 }
 

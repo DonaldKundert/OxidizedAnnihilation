@@ -18,6 +18,7 @@
 
 use std::path::Path;
 
+pub mod bot;
 pub mod campaign;
 pub mod checkpoint;
 pub mod economy_report;

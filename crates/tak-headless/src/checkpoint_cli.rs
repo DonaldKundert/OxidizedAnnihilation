@@ -18,21 +18,30 @@ pub(crate) struct CheckpointArgs {
 #[derive(Args)]
 struct Start {
     /// Synthetic scenario JSON (saved inline, without scripts).
-    #[arg(long, required_unless_present = "map", conflicts_with = "map")]
+    #[arg(long, required_unless_present_any = ["map", "campaign"], conflicts_with_all = ["map", "campaign"])]
     scenario: Option<PathBuf>,
     /// Real-map VFS stem; retail content stays in the external install.
-    #[arg(long, required_unless_present = "scenario")]
+    #[arg(long, required_unless_present_any = ["scenario", "campaign"], conflicts_with = "campaign")]
     map: Option<String>,
-    /// External Kingdoms install (for --map only).
+    /// Authored campaign VFS stem; placements remain in the external install.
+    #[arg(long, required_unless_present_any = ["scenario", "map"], requires = "campaign_players")]
+    campaign: Option<String>,
+    /// Explicit OTA_SLOT:SIDE pairs in simulation player order.
+    #[arg(long, requires = "campaign")]
+    campaign_players: Option<String>,
+    /// Opt in to strict supported objectives (exactly OTA slots 1,2).
+    #[arg(long, requires = "campaign")]
+    campaign_objectives: bool,
+    /// External Kingdoms install (for --map or --campaign).
     #[arg(long, env = "TAK_DATA_DIR")]
     data: Option<PathBuf>,
     /// Sides for a real map, comma separated, in player-slot order.
-    #[arg(long, default_value = "ARA,ZON")]
+    #[arg(long, default_value = "ARA,ZON", conflicts_with = "campaign")]
     players: String,
-    /// Initial real-map world RNG seed.
+    /// Initial real-map or campaign world RNG seed.
     #[arg(long, default_value_t = 1)]
     world_seed: u64,
-    /// Disable COB scripts for a real-map match.
+    /// Disable COB scripts for a real-map or campaign match.
     #[arg(long)]
     no_scripts: bool,
 }
@@ -58,7 +67,7 @@ enum Command {
         /// Existing replay checkpoint.
         #[arg(long)]
         checkpoint: PathBuf,
-        /// External install; required only for a real-map checkpoint.
+        /// External install; required for a real-map or campaign checkpoint.
         #[arg(long, env = "TAK_DATA_DIR")]
         data: Option<PathBuf>,
         /// Continuation log using absolute original-match ticks.
@@ -98,18 +107,35 @@ impl CheckpointArgs {
                 ticks,
                 out,
             } => {
-                let source = match (&start.scenario, &start.map) {
-                    (Some(path), None) => CheckpointSource::from_scenario_file(path)?,
-                    (None, Some(map)) => CheckpointSource::map(
+                let source = match (&start.scenario, &start.map, &start.campaign) {
+                    (Some(path), None, None) => CheckpointSource::from_scenario_file(path)?,
+                    (None, Some(map), None) => CheckpointSource::map(
                         map,
                         &start.players,
                         start.world_seed,
                         !start.no_scripts,
                     ),
-                    _ => return Err(Error::Setup("pass --scenario or --map".into())),
+                    (None, None, Some(map)) => {
+                        let players = tak_headless::campaign::parse_players(
+                            start.campaign_players.as_deref().ok_or_else(|| Error::Setup(
+                                "--campaign needs explicit --campaign-players OTA_SLOT:SIDE pairs".into()
+                            ))?,
+                        )?;
+                        CheckpointSource::campaign(
+                            map,
+                            &players,
+                            start.world_seed,
+                            !start.no_scripts,
+                            start.campaign_objectives,
+                        )
+                    }
+                    _ => return Err(Error::Setup("pass --scenario, --map or --campaign".into())),
                 };
                 let log = read_command_log(log.as_deref())?;
                 let mut session = ReplaySession::new(source, start.data.as_deref())?;
+                if let Some(report) = session.source_report() {
+                    eprint!("{report}");
+                }
                 session.advance(&log, ticks)?;
                 let saved = session.checkpoint()?;
                 saved.write_atomic(&out)?;
@@ -146,6 +172,9 @@ impl CheckpointArgs {
                         max_commands: max_replay_commands,
                     },
                 )?;
+                if let Some(report) = session.source_report() {
+                    eprint!("{report}");
+                }
                 let first_tick = session.sim().tick().0;
                 let log = read_command_log(log.as_deref())?;
                 let continuation = session.advance(&log, ticks)?;
@@ -175,6 +204,7 @@ impl CheckpointArgs {
                 let kind = match saved.source() {
                     CheckpointSource::Synthetic { .. } => "synthetic",
                     CheckpointSource::Map { .. } => "map (external install required)",
+                    CheckpointSource::Campaign { .. } => "campaign (external install required)",
                 };
                 println!(
                     "checkpoint: {kind}\nnext tick: {}\nexecuted commands: {}\nstate: {}\ncontent: {}\nchecksum: valid (not authenticated)\nreplay: not checked",
@@ -183,6 +213,27 @@ impl CheckpointArgs {
                     saved.state_hash(),
                     saved.content_identity()
                 );
+                if let CheckpointSource::Campaign {
+                    map,
+                    players,
+                    world_seed,
+                    scripts,
+                    objectives,
+                } = saved.source()
+                {
+                    println!(
+                        "campaign map: {map}\nworld seed: {world_seed}\nscripts: {scripts}\nstrict objectives: {objectives}"
+                    );
+                    for (index, player) in players.iter().enumerate() {
+                        println!(
+                            "campaign player {index}: OTA owner {}, side {}",
+                            player.ota_slot, player.side
+                        );
+                    }
+                    println!(
+                        "campaign limitations: placement loading only; mission AI, alliances, neutrality, initial orders and scenario triggers are not implemented"
+                    );
+                }
             }
         }
         Ok(ExitCode::SUCCESS)

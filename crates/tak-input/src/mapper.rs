@@ -11,7 +11,7 @@ use tak_math::{Fx, Vec2};
 
 use crate::binding::{Action, Category, GRID_KEYS, Gesture, Profile, Ring};
 use crate::brush::{brush_radius, drag_circle, units_in_circle};
-use crate::context::{Mode, builders_for, own_units, pick_unit, resolve_context};
+use crate::context::{Mode, builders_for, healers_for, own_units, pick_unit, resolve_context};
 use crate::cursor::{
     Motion, approach_frac, cursor_motion, friction, pct, per_second, soft_snap, stick_vector,
     stick_vector_zones,
@@ -138,6 +138,8 @@ pub enum CursorKind {
     Attack,
     /// The context order would guard.
     Guard,
+    /// Heal an owned unit or assist its construction.
+    Heal,
     /// Patrol mode.
     Patrol,
     /// Build mode, placeable here.
@@ -563,6 +565,22 @@ impl Mapper {
                 Some(h) if !world.is_enemy(h.owner) => CursorKind::Guard,
                 _ => CursorKind::Invalid,
             },
+            Mode::Heal => {
+                if resolve_context(
+                    world,
+                    &units,
+                    pos,
+                    hovered.as_ref(),
+                    Mode::Heal,
+                    QueueMode::Replace,
+                )
+                .is_some()
+                {
+                    CursorKind::Heal
+                } else {
+                    CursorKind::Invalid
+                }
+            }
             Mode::CastSpell(_) => CursorKind::Cast,
             Mode::Attack | Mode::AttackMove => CursorKind::Attack,
             Mode::Move => CursorKind::Move,
@@ -661,6 +679,11 @@ impl Mapper {
         }
         let me = world.local_player();
         let has_units = !self.selection.is_empty() && !own_units(world, &self.selection).is_empty();
+        let healers = if self.mode == Mode::Heal {
+            healers_for(world, &self.selection)
+        } else {
+            UnitSet::new()
+        };
         let keep = |u: &UnitInfo| -> bool {
             if !u.selectable {
                 return false;
@@ -672,6 +695,7 @@ impl Mapper {
                 Mode::Build(_) => u.owner == me && u.under_construction,
                 Mode::Patrol => false,
                 Mode::Guard => u.owner == me,
+                Mode::Heal => u.owner == me && healers.iter().any(|&id| id != u.id),
                 Mode::CastSpell(_) | Mode::Attack => true,
                 Mode::Move | Mode::AttackMove => false,
                 Mode::None if has_units => world.is_enemy(u.owner),
@@ -1407,7 +1431,7 @@ impl Mapper {
         match w.clone().confirm() {
             Some(Action::OpenRing { ring }) => {
                 self.wheel_parents.push(w);
-                self.open_ring(input, ring);
+                self.open_ring(input, ring, cx.world);
             }
             Some(Action::RecallGroup { group })
                 if w.kind == WheelKind::Squads && self.queue_held() =>
@@ -1425,8 +1449,13 @@ impl Mapper {
 
     /// Open a sub-ring. It stays open after the wheel button is released:
     /// the stick chooses, A / X confirms, B goes back one ring.
-    fn open_ring(&mut self, input: &Input, ring: Ring) {
-        let slots = ring_slots(ring);
+    fn open_ring<W: WorldView + ?Sized>(&mut self, input: &Input, ring: Ring, world: &W) {
+        // Sub-rings keep their learned positions, even in non-fixed profiles.
+        let slots = heal_slots(
+            ring_slots(ring),
+            !healers_for(world, &self.selection).is_empty(),
+            true,
+        );
         self.wheel = Some((input.clone(), Wheel::open(WheelKind::of_ring(ring), slots)));
         self.wheel_sticky = true;
     }
@@ -1481,6 +1510,7 @@ impl Mapper {
                     spells > 0,
                     builders,
                 );
+                let slots = heal_slots(slots, !healers_for(cx.world, &units).is_empty(), true);
                 self.open_wheel(input, WheelKind::Command, slots);
             }
             Action::BuildWheel if self.profile.fixed_slots => {
@@ -1527,6 +1557,11 @@ impl Mapper {
                 } else {
                     self.profile.command_wheel.clone()
                 };
+                let slots = heal_slots(
+                    slots,
+                    !healers_for(cx.world, &self.selection).is_empty(),
+                    false,
+                );
                 self.open_wheel(input, WheelKind::Command, slots);
             }
             Action::BuildWheel => {
@@ -1684,6 +1719,16 @@ impl Mapper {
             }
             Action::PatrolMode => self.set_mode_if_units(Mode::Patrol, cx),
             Action::GuardMode => self.set_mode_if_units(Mode::Guard, cx),
+            Action::HealMode => {
+                let units = own_units(cx.world, &self.selection);
+                if units.is_empty() {
+                    self.refuse(Refusal::NothingSelected);
+                } else if healers_for(cx.world, &units).is_empty() {
+                    self.refuse(Refusal::CannotDo);
+                } else {
+                    self.mode = Mode::Heal;
+                }
+            }
             Action::CastSpellMode => self.cast_spell_mode(0, cx),
             Action::CastSpell { index } => self.cast_spell_mode(usize::from(index), cx),
             Action::BuildOption { index } => self.build_option(usize::from(index), cx),
@@ -2061,6 +2106,25 @@ impl Mapper {
     }
 }
 
+/// Hide unusable Heal slots without disturbing a fixed wheel's positions.
+fn heal_slots(slots: Vec<Action>, available: bool, fixed: bool) -> Vec<Action> {
+    if available {
+        return slots;
+    }
+    slots
+        .into_iter()
+        .filter_map(|action| {
+            if action != Action::HealMode {
+                Some(action)
+            } else if fixed {
+                Some(crate::wheel::BLANK)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn sat_add(a: Vec2, b: Vec2) -> Vec2 {
     Vec2::new(a.x.saturating_add(b.x), a.y.saturating_add(b.y))
 }
@@ -2095,12 +2159,11 @@ fn centre_of<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<WorldP
     (n > 0).then(|| Vec2::new(Fx::from_raw((x / n) as i32), Fx::from_raw((y / n) as i32)))
 }
 
-/// The lowest-id builder among `units`.
+/// The lowest-id builder with a nonempty build menu among `units`.
 fn first_builder<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<UnitId> {
-    units
-        .iter()
-        .copied()
-        .find(|&id| world.unit(id).is_some_and(|u| u.builder.is_some()))
+    units.iter().copied().find(|&id| {
+        world.unit(id).is_some_and(|u| u.builder.is_some()) && !world.build_options(id).is_empty()
+    })
 }
 
 /// The first unit of `units` with spells, and its spells (menu order).

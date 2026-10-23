@@ -60,6 +60,7 @@ pub fn call_script(
 /// Remove a unit and its script. The caller runs `Killed` first if it wants
 /// the death animation; this only tears down. Returns whether it existed.
 pub fn remove_unit(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) -> bool {
+    crate::construction::cancel_heal(world, scripts, id);
     scripts.remove_unit(id);
     world.despawn(id).is_some()
 }

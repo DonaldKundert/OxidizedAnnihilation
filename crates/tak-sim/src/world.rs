@@ -47,6 +47,11 @@ pub enum Order {
         /// Unit to guard.
         target: UnitId,
     },
+    /// Heal an owned unit (construction lane).
+    Heal {
+        /// Unit to heal or assist.
+        target: UnitId,
+    },
     /// Patrol leg toward a point; re-queued at the back when reached
     /// (pathfinding, WP-L).
     Patrol {
@@ -100,6 +105,10 @@ impl Order {
                 h.u8(5);
                 h.vec2(to);
             }
+            Order::Heal { target } => {
+                h.u8(6);
+                h.unit_id(target);
+            }
         }
     }
 }
@@ -149,6 +158,10 @@ impl Unit {
     pub(crate) fn cancel_player_orders(&mut self) {
         self.orders.clear();
         self.combat.cancel_orders();
+        if let Some(heal) = &mut self.build.heal {
+            heal.cancelled = true;
+            heal.work.walking = false;
+        }
         if let Some(assist) = &mut self.build.assist {
             assist.walk_to = None;
             assist.walking = false;
@@ -173,6 +186,7 @@ impl Unit {
             FireState::HoldFire => 0,
             FireState::ReturnFire => 1,
             FireState::FireAtWill => 2,
+            FireState::Defensive => 3,
         });
         h.len(self.orders.len());
         for o in &self.orders {
@@ -306,6 +320,26 @@ impl World {
     /// `true` if `p` is a player in this match.
     pub fn has_player(&self, p: PlayerId) -> bool {
         (p.0 as usize) < self.players.len()
+    }
+
+    /// Whether two valid players are the same owner or share an explicitly
+    /// configured team. Missing/`None` teams are single-player teams.
+    /// Unknown player ids are never allied, even with themselves.
+    ///
+    /// This read-only relationship controls automatic targeting and agrees
+    /// with skirmish victory. It does not grant shared control, vision,
+    /// resources or builder assistance, or prohibit explicit friendly fire.
+    pub fn are_allied(&self, a: PlayerId, b: PlayerId) -> bool {
+        self.has_player(a)
+            && self.has_player(b)
+            && self.victory.setup().team(a.0 as usize) == self.victory.setup().team(b.0 as usize)
+    }
+
+    /// Whether two valid players are on different teams. There is no
+    /// inferred campaign alliance or neutral-player exception. Unknown ids
+    /// are never hostile, so this is not `!are_allied` for invalid players.
+    pub fn are_hostile(&self, a: PlayerId, b: PlayerId) -> bool {
+        self.has_player(a) && self.has_player(b) && !self.are_allied(a, b)
     }
 
     /// A live unit, or `None` if the id is stale or out of range.

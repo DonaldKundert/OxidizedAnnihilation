@@ -1,5 +1,6 @@
 [package]
 name = "tak-headless"
+default-run = "tak-headless"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +12,7 @@ workspace = true
 
 [dependencies]
 tak-sim.workspace = true
+tak-math.workspace = true
 tak-input.workspace = true
 tak-commands.workspace = true
 tak-vfs.workspace = true

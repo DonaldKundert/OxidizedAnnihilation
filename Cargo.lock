@@ -648,6 +648,7 @@ dependencies = [
  "tak-commands",
  "tak-content",
  "tak-input",
+ "tak-math",
  "tak-sim",
  "tak-vfs",
  "thiserror",

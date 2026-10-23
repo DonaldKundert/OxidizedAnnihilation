@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tak_commands::{CommandLog, FireState, Scope};
+use tak_commands::{CommandLog, Scope};
 use tak_input::{
     Action, Button, EventKind, FrameIo, Gesture, Input, InputEvent, Mapper, Mode, Output, Profile,
     Recorder, Recording, Tuning, WheelKind,
@@ -86,7 +86,8 @@ pub fn initial_profile(
 
 /// Write a profile (pretty JSON); returns the new mtime.
 pub fn save_profile(path: &Path, p: &Profile) -> std::io::Result<SystemTime> {
-    std::fs::write(path, p.to_json_pretty() + "\n")?;
+    tak_headless::checkpoint::write_text_atomic(path, &(p.to_json_pretty() + "\n"))
+        .map_err(std::io::Error::other)?;
     Ok(mtime(path).unwrap_or(SystemTime::UNIX_EPOCH))
 }
 
@@ -334,8 +335,10 @@ fn hint_for(p: &Profile, text: &str, want: impl Fn(&Action) -> bool) -> Option<H
 pub struct HintCx {
     /// Own units selected.
     pub has_units: bool,
-    /// A builder among them.
+    /// A builder with a nonempty build menu among them.
     pub has_builder: bool,
+    /// An operational explicit healer among them, even without a build menu.
+    pub has_healer: bool,
     /// A spellcaster among them.
     pub has_caster: bool,
     /// More than one unit type among them (the sub-select cycle applies).
@@ -396,6 +399,7 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             Mode::Build(_) => "place",
             Mode::Patrol => "patrol here",
             Mode::Guard => "guard",
+            Mode::Heal => "heal / repair",
             Mode::CastSpell(_) => "cast",
             Mode::Attack => "attack",
             Mode::AttackMove => "attack-move here",
@@ -492,7 +496,14 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     let p = m.profile();
     let mut v: Vec<(Option<String>, &str)> = Vec::new();
     if m.mode() != Mode::None {
-        v.push((Some("LMB".into()), "confirm"));
+        v.push((
+            Some("LMB".into()),
+            if m.mode() == Mode::Heal {
+                "heal / repair"
+            } else {
+                "confirm"
+            },
+        ));
         v.push((
             key_name_for(p, |a| matches!(a, Action::QueueModifier)),
             "+ click: queue",
@@ -512,6 +523,12 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
         ));
         v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
         v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
+        if cx.has_healer {
+            v.push((
+                key_name_for(p, |a| matches!(a, Action::HealMode)),
+                "heal / repair",
+            ));
+        }
         v.push((
             key_name_for(p, |a| matches!(a, Action::PatrolMode)),
             "patrol",
@@ -562,14 +579,10 @@ pub fn action_label(a: &Action) -> String {
         Action::Stop => "Stop".into(),
         Action::PatrolMode => "Patrol".into(),
         Action::GuardMode => "Guard".into(),
+        Action::HealMode => "Heal / repair".into(),
         Action::CastSpellMode => "Cast spell".into(),
         Action::CastSpell { index } => format!("Spell {}", index + 1),
-        // TA:K's names for the fire states.
-        Action::SetFireState { state } => match state {
-            FireState::HoldFire => "Passive".into(),
-            FireState::ReturnFire => "Defensive".into(),
-            FireState::FireAtWill => "Offensive".into(),
-        },
+        Action::SetFireState { state } => crate::hud::stance_name(*state).into(),
         Action::CycleIdleBuilder => "Idle builder".into(),
         Action::JumpToAlert => "Last alert".into(),
         Action::CenterOnMonarch => "Monarch".into(),

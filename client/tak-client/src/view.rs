@@ -62,12 +62,11 @@ impl WorldView for SimView<'_> {
             if !self.sees(u.owner, u.pos) {
                 continue;
             }
-            let builder =
-                (d.build.builder && !d.build.canbuild.is_empty()).then_some(if d.build.mobile {
-                    BuilderKind::Mobile
-                } else {
-                    BuilderKind::Factory
-                });
+            let builder = d.build.builder.then_some(if d.build.mobile {
+                BuilderKind::Mobile
+            } else {
+                BuilderKind::Factory
+            });
             let r = pick_radius(d.footprintx, d.footprintz);
             f(&UnitInfo {
                 id,
@@ -84,6 +83,11 @@ impl WorldView for SimView<'_> {
 
     fn is_enemy(&self, owner: PlayerId) -> bool {
         owner != self.local
+    }
+
+    fn can_heal(&self, unit: UnitId) -> bool {
+        self.world.unit(unit).is_some_and(|u| u.owner == self.local)
+            && tak_sim::construction::can_heal(self.world, unit)
     }
 
     fn build_options(&self, unit: UnitId) -> Vec<UnitDefId> {
@@ -143,11 +147,8 @@ impl WorldView for SimView<'_> {
         let monarch = self.monarch() == Some(unit) || has("Monarch");
         let armed = !d.combat.weapons.is_empty();
         match category {
-            Category::Builder => d.build.builder && d.build.mobile && !d.build.canbuild.is_empty(),
-            Category::Factory => {
-                has("FACTORY")
-                    || (d.build.builder && !d.build.mobile && !d.build.canbuild.is_empty())
-            }
+            Category::Builder => d.build.builder && d.build.mobile,
+            Category::Factory => has("FACTORY") || (d.build.builder && !d.build.mobile),
             Category::Monarch => monarch,
             Category::Naval => has("BOAT") || has("NAVAL"),
             Category::Troops => {

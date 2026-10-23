@@ -114,7 +114,33 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
         SimCommand::SetFireState { units, state } => {
             for &id in units {
                 if let Some(u) = world.unit_mut_owned(id, player) {
+                    let previous = u.fire_state;
                     u.fire_state = *state;
+                    if previous != *state
+                        && *state == tak_commands::FireState::Defensive
+                        && !matches!(
+                            u.combat.order,
+                            Some(
+                                crate::combat::CombatOrder::Attack(_)
+                                    | crate::combat::CombatOrder::Cast { .. }
+                            )
+                        )
+                    {
+                        // Commands run before movement: drop a legacy automatic
+                        // chase now, not one tick after it has moved again.
+                        if crate::combat::is_our_move(u) {
+                            u.orders.pop_front();
+                        }
+                        u.combat.goal = None;
+                        u.combat.leash_origin = None;
+                        if let Some(a) = &mut u.combat.attack_move {
+                            a.target = None;
+                            a.goal = Some(a.destination);
+                            // Failed pursuit paths do not apply to in-reach
+                            // Defensive engagements, which never request them.
+                            a.avoided.clear();
+                        }
+                    }
                 }
             }
         }
@@ -122,6 +148,7 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             crate::combat::apply_command(world, player, cmd);
         }
         SimCommand::Build { .. } => crate::construction::apply_command(world, player, cmd),
+        SimCommand::Heal { .. } => crate::construction::apply_heal_command(world, player, cmd),
         SimCommand::Patrol { .. } => crate::pathfinding::apply_command(world, player, cmd),
     }
 }
@@ -163,6 +190,7 @@ fn order_step(u: &mut Unit, combat_capable: bool) {
         if u.pos.distance(to) > ARRIVAL_TOLERANCE {
             break;
         }
+        let work_move = crate::construction::consume_work_move(u);
         if matches!(u.orders.pop_front(), Some(Order::AttackMove { .. })) {
             u.combat.attack_move = None;
         }
@@ -171,8 +199,8 @@ fn order_step(u: &mut Unit, combat_capable: bool) {
         if u.orders.is_empty() {
             u.speed = Fx::ZERO;
         }
-        if u.combat.order.is_some() {
-            // A completed temporary combat move never completes a queued
+        if work_move || u.combat.order.is_some() {
+            // A completed temporary combat/construction move never completes a queued
             // player move, even when both happen to name the same point.
             u.combat.goal = None;
             break;

@@ -1,0 +1,308 @@
+const_soft_float 0.1.4: verbatim source-notice supplement for engineering review
+Release source revision: 723b63e489c55359012b0c5c793b897c494c0bfa
+Quoted ranges below are unchanged bytes from pinned sources; headings are local provenance metadata.
+Byte ranges are zero-based and half-open. Line ranges are one-based and inclusive.
+Not an upstream NOTICE file, new grant, relicensing, or legal approval.
+Root LICENSE-APACHE and LICENSE-MIT must remain separately preserved.
+
+[1] 823984418/const_soft_float :: src/soft_f32/cos.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/cos.rs#L1-L15
+Full source SHA256: 759278573251d0336f0feef20b7cf4416a39a55eb505070e4b9536450e95d1fb
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 716b05f780529420c7865d540eb90defe63a33e337c734b23f5d02f230cdc919
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_cosf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[2] 823984418/const_soft_float :: src/soft_f32/helpers/k_cosf.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/k_cosf.rs#L1-L15
+Full source SHA256: 68103e3ec418131191b6229844a3df867db7d4b6bb8038d0d51b0f23caf677c9
+Range: lines 1-15; bytes [0, 561)
+Header SHA256: 77e4f4050a0eb9480af78f84e28b427ffd71a173abcfc4f658c05f359e16718e
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_cosf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Debugged and optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[3] 823984418/const_soft_float :: src/soft_f32/helpers/rem_pio2f.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/rem_pio2f.rs#L1-L15
+Full source SHA256: 23df431316bf70904c147f8077417a5eb05b28c5dcdf5f95aa1137c022216d0e
+Range: lines 1-15; bytes [0, 566)
+Header SHA256: 76fe740be2b0cb832ab7b6cd4ceece6579207e9b8457d08958c8cd0224dbc50f
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_rem_pio2f.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Debugged and optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[4] 823984418/const_soft_float :: src/soft_f32/sin.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/sin.rs#L1-L15
+Full source SHA256: 43fcd1b09588fbdf1c993a7fe2b2400b01388e0da5b2fb8a8a6c7b26d4b0dc27
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 30c9c12121bd9681aaec53aaa80685c096acc2df6a0c658a2e27a235ee27978c
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/s_sinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[5] 823984418/const_soft_float :: src/soft_f64/cos.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/cos.rs#L1-L11
+Full source SHA256: 9a4fd04ae87044255a013a86a68e8ec485e7368370c55618d7b49000b81261c5
+Range: lines 1-11; bytes [0, 528)
+Header SHA256: 44d9aabf6e914b85fde530b8ecde0c5e0fd077e67f645767d57551d7d20ca3a3
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_cos.c */,
+// https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/cos.rs
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[6] 823984418/const_soft_float :: src/soft_f64/helpers/k_cos.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/k_cos.rs#L1-L11
+Full source SHA256: 704b9c6ac2626ba20753759b1eb0505e341aedd8f78d2fc0b2eed3010dbcf8dc
+Range: lines 1-11; bytes [0, 528)
+Header SHA256: a3655b5fbbdd8b90bdb6fba0bc132bdff4f82fa70181d5c82769e4201e43b34d
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/k_cos.c,
+// https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/k_cos.rs
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[7] 823984418/const_soft_float :: src/soft_f64/helpers/k_sin.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/k_sin.rs#L1-L11
+Full source SHA256: 7fde68b4384fd1a081c867bbc3d4562222b496a20f334031270926d7430a551b
+Range: lines 1-11; bytes [0, 528)
+Header SHA256: 274fba85b079bf6eb3337aff5494ee2f25eeda037c69f8d275f7ccb9145053fb
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/k_sin.c,
+// https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/k_sin.rs
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[8] 823984418/const_soft_float :: src/soft_f64/helpers/rem_pio2.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/rem_pio2.rs#L3-L14
+Full source SHA256: 434482facfbf9da484d594a2537537f01c1f4ae36434953f4541a285bd995d93
+Range: lines 3-14; bytes [46, 514)
+Header SHA256: da28bd93659d512cba362af000b10121e71e63ef135f3ba398a05f376e90bc7e
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/e_rem_pio2.c
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+//
+// Optimized by Bruce D. Evans. */
+END UNCHANGED NOTICE
+
+[9] 823984418/const_soft_float :: src/soft_f64/helpers/rem_pio2_large.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/helpers/rem_pio2_large.rs#L2-L12
+Full source SHA256: e6caafc05e7def0a3bf1beaee4615a83d94a29794eb419ef8de97808380d68a9
+Range: lines 2-12; bytes [25, 463)
+Header SHA256: 529554d11bbde6d2a93d9b19938270a4edb47065d7661fec422fad9b9054d7cf
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_rem_pio2.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[10] 823984418/const_soft_float :: src/soft_f64/sin.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/sin.rs#L1-L10
+Full source SHA256: ad5f8c1156e8a61cee67691ec833d7f55e012d771c5f406b55a3f0b243b96813
+Range: lines 1-10; bytes [0, 525)
+Header SHA256: 2fed8cd67086f037fee678d0be8b4602e1eedf7413652c7d870ff929ed9dc8f6
+BEGIN UNCHANGED NOTICE
+// origin: FreeBSD /usr/src/lib/msun/src/s_sin.c, https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/sin.rs */
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+END UNCHANGED NOTICE
+
+[11] 823984418/const_soft_float :: src/soft_f64/sqrt.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f64/sqrt.rs#L1-L11
+Full source SHA256: a94f30bee2a07cc746b012c65ff0e1db2e65d90b6c914e61a9eafc672fc22872
+Range: lines 1-11; bytes [0, 434)
+Header SHA256: 5113e4434f625306a6075b053d8119fe32b2356680c2be47b2744b6f538c4932
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_sqrt.c */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[12] 823984418/const_soft_float :: src/soft_f32/sqrt.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/sqrt.rs#L1-L5
+Full source SHA256: b2b48001c03c3aa8da36142ccd469130130d3caceb8f5db3f5db216de4dfcb40
+Range: lines 1-5; bytes [0, 259)
+Header SHA256: 60e7b76297e0ca493e12832114b01e84c91f5cbe0c856813519cbce432fca86e
+BEGIN UNCHANGED NOTICE
+/* origin: Rust libm https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/sqrtf.rs */
+/* origin: FreeBSD /usr/src/lib/msun/src/e_sqrtf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+END UNCHANGED NOTICE
+
+[13] 823984418/const_soft_float :: src/soft_f32/helpers/k_sinf.rs
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/src/soft_f32/helpers/k_sinf.rs#L3-L3
+Full source SHA256: 6bf06380ea03516a4eff0d9c4a7b2e35549890a954635de7fe3928fa15bc7de0
+Range: lines 3-3; bytes [52, 155)
+Header SHA256: cb4813a11ddee0fac8f2eaed809c2da49167c5034fa070ed08b6eaab1d5ca2e0
+BEGIN UNCHANGED NOTICE
+/// https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/k_sinf.rs
+END UNCHANGED NOTICE
+
+[14] 823984418/const_soft_float :: README.md
+Source: https://github.com/823984418/const_soft_float/blob/723b63e489c55359012b0c5c793b897c494c0bfa/README.md#L3-L3
+Full source SHA256: 2f17925d3dbdeb6404aa5214c650916761f7c015e496581b9dc48377f0385e26
+Range: lines 3-3; bytes [40, 176)
+Header SHA256: 09d8338a57ee31ac89540004e1a5181d224746b1298bbb4825dc20c2917362a9
+BEGIN UNCHANGED NOTICE
+Floating-point code is from `compiler_builtins = "0.1.94"` and `libm = "0.2.6"`, and has been rewritten for use in a constant context. 
+END UNCHANGED NOTICE
+
+[15] rust-lang/libm :: src/math/sqrtf.rs
+Source: https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/sqrtf.rs#L1-L14
+Full source SHA256: 4cf418d74f7751d522a642a9a8d6b86ee3472c6aaef44f0eb1bc26f4d8a90985
+Range: lines 1-14; bytes [0, 517)
+Header SHA256: e6e1b6ab267506f0d2d8f948c3190989370d266a0210a5ae0e5395a3ffb7b677
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/e_sqrtf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+
+[16] rust-lang/libm :: src/math/k_sinf.rs
+Source: https://github.com/rust-lang/libm/blob/4c8a973741c014b11ce7f1477693a3e5d4ef9609/src/math/k_sinf.rs#L1-L15
+Full source SHA256: 2775fcc710807164e6f37a4f8da3c8143cd5f16e19ce7c31c5591522151d7a96
+Range: lines 1-15; bytes [0, 548)
+Header SHA256: 1650039295219ae4abba67f75f78a982557364a3424b22f3c2cc1f4b49335f63
+BEGIN UNCHANGED NOTICE
+/* origin: FreeBSD /usr/src/lib/msun/src/k_sinf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ * Optimized by Bruce D. Evans.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+END UNCHANGED NOTICE
+

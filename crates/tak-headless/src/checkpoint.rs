@@ -12,6 +12,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::bot::ControllerConfig;
 use serde::{Deserialize, Serialize};
 use tak_commands::{CommandLog, Tick};
 use tak_content::{Ruleset, RulesetKind};
@@ -19,10 +20,14 @@ use tak_sim::{PlayerSetup, Scenario, Sim};
 use tak_vfs::Vfs;
 use xxhash_rust::xxh64::Xxh64;
 
+pub mod driver;
+
 /// Checkpoint wire format, independent of the command/scenario versions.
 pub const CHECKPOINT_FORMAT_VERSION: u32 = 1;
 /// Replay-rule compatibility gate. Bump when simulation changes invalidate saves.
-pub const REPLAY_RULES_VERSION: u32 = 1;
+// Rules 2 includes explicit-team automatic targeting and corrected work steering.
+// Reject older behavioral snapshots rather than silently changing their future.
+pub const REPLAY_RULES_VERSION: u32 = 2;
 /// Maximum serialized checkpoint size, checked before JSON deserialization.
 pub const MAX_CHECKPOINT_BYTES: usize = 32 * 1024 * 1024;
 /// Hard limit on executed commands stored in one checkpoint.
@@ -114,6 +119,38 @@ impl Default for ReplayBudget {
     }
 }
 
+/// One explicit OTA-owner/side mapping, in simulation player order.
+/// This descriptor contains no authored placements or other retail map data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointCampaignPlayer {
+    /// One-based OTA owner slot (sparse slots are allowed without objectives).
+    pub ota_slot: u8,
+    /// Explicit side; never inferred from mission headers.
+    pub side: String,
+}
+
+impl From<&tak_sim::campaign::CampaignPlayer> for CheckpointCampaignPlayer {
+    fn from(player: &tak_sim::campaign::CampaignPlayer) -> Self {
+        Self {
+            ota_slot: player.ota_slot,
+            side: player.side.clone(),
+        }
+    }
+}
+
+fn campaign_players(
+    players: &[CheckpointCampaignPlayer],
+) -> Vec<tak_sim::campaign::CampaignPlayer> {
+    players
+        .iter()
+        .map(|player| tak_sim::campaign::CampaignPlayer {
+            ota_slot: player.ota_slot,
+            side: player.side.clone(),
+        })
+        .collect()
+}
+
 /// Reconstructible initial setup. Real maps reference the user's external
 /// install; no archive, script, model or extracted map bytes are embedded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +171,20 @@ pub enum CheckpointSource {
         world_seed: u64,
         /// Whether the loaded COB host is used.
         scripts: bool,
+    },
+    /// Authored campaign placements reloaded from an external owned install.
+    /// This is an additive v1 source kind, not full campaign support.
+    Campaign {
+        /// VFS mission map stem, never an install-local filesystem path.
+        map: String,
+        /// Ordered, explicit OTA-owner/side mappings.
+        players: Vec<CheckpointCampaignPlayer>,
+        /// Initial world RNG seed.
+        world_seed: u64,
+        /// Whether the loaded COB host is used.
+        scripts: bool,
+        /// Opt in to strict, supported two-player objective evaluation.
+        objectives: bool,
     },
 }
 
@@ -163,6 +214,24 @@ impl CheckpointSource {
         }
     }
 
+    /// Reference authored campaign placements without embedding their contents.
+    /// Mappings remain ordered; validation occurs before external content reads.
+    pub fn campaign(
+        map: &str,
+        players: &[tak_sim::campaign::CampaignPlayer],
+        world_seed: u64,
+        scripts: bool,
+        objectives: bool,
+    ) -> Self {
+        Self::Campaign {
+            map: tak_vfs::normalize(map),
+            players: players.iter().map(CheckpointCampaignPlayer::from).collect(),
+            world_seed,
+            scripts,
+            objectives,
+        }
+    }
+
     fn validate(&self) -> Result<(), CheckpointError> {
         match self {
             Self::Synthetic { scenario } => scenario.validate()?,
@@ -182,16 +251,41 @@ impl CheckpointSource {
                     return Err(CheckpointError::Invalid("invalid side name length".into()));
                 }
             }
+            Self::Campaign {
+                map,
+                players,
+                objectives,
+                ..
+            } => {
+                // Validate descriptor shape and lengths before constructing a
+                // mapping, opening archives, or parsing any external content.
+                if map.is_empty()
+                    || map.len() > 1024
+                    || map.chars().any(char::is_control)
+                    || map.split(['/', '\\']).any(|s| s == "..")
+                {
+                    return Err(CheckpointError::Invalid("invalid campaign map name".into()));
+                }
+                if players.len() > tak_sim::scenario::MAX_PLAYERS
+                    || players.iter().any(|p| p.side.len() > 128)
+                {
+                    return Err(CheckpointError::Invalid(
+                        "invalid campaign player mapping size".into(),
+                    ));
+                }
+                crate::campaign::validate_players(&campaign_players(players), *objectives)
+                    .map_err(campaign_setup_error)?;
+            }
         }
         Ok(())
     }
 
-    fn load(&self, data: Option<&Path>) -> Result<(Sim, String), CheckpointError> {
+    fn load(&self, data: Option<&Path>) -> Result<(Sim, String, Option<String>), CheckpointError> {
         self.validate()?;
         match self {
             Self::Synthetic { scenario } => {
                 let identity = digest_json(scenario)?;
-                Ok((Sim::new(scenario)?, identity))
+                Ok((Sim::new(scenario)?, identity, None))
             }
             Self::Map {
                 map,
@@ -204,15 +298,51 @@ impl CheckpointSource {
                         "real-map checkpoint needs --data or TAK_DATA_DIR".into(),
                     )
                 })?;
-                let vfs = tak_vfs::open_kingdoms(data)?;
+                let vfs = open_checkpoint_install(data)?;
                 let players: Vec<_> = players
                     .iter()
                     .map(|side| PlayerSetup { side: side.clone() })
                     .collect();
-                load_map_source(&vfs, map, &players, *world_seed, *scripts)
+                let (sim, identity) = load_map_source(&vfs, map, &players, *world_seed, *scripts)?;
+                Ok((sim, identity, None))
+            }
+            Self::Campaign {
+                map,
+                players,
+                world_seed,
+                scripts,
+                objectives,
+            } => {
+                let data = data.ok_or_else(|| {
+                    CheckpointError::Invalid(
+                        "campaign checkpoint needs --data or TAK_DATA_DIR".into(),
+                    )
+                })?;
+                let vfs = open_checkpoint_install(data)?;
+                let players = campaign_players(players);
+                let (sim, identity, report) =
+                    load_campaign_source(&vfs, map, &players, *world_seed, *scripts, *objectives)?;
+                Ok((sim, identity, Some(report)))
             }
         }
     }
+}
+
+// Apply the checkpoint per-file ceiling to all nested rules/map/script reads,
+// not just fingerprinting. Aggregate unique-input preflight remains separate.
+fn open_checkpoint_install(data: &Path) -> Result<Vfs, CheckpointError> {
+    let mut vfs = Vfs::with_limits(tak_vfs::hapi::Limits {
+        max_file_bytes: MAX_CONTENT_FILE_BYTES,
+        ..Default::default()
+    });
+    for path in tak_vfs::kingdoms_mount_order(data) {
+        vfs.mount_archive(&path)?;
+    }
+    Ok(vfs)
+}
+
+fn campaign_setup_error(error: crate::Error) -> CheckpointError {
+    CheckpointError::Invalid(error.to_string())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -224,6 +354,8 @@ struct Payload {
     next_tick: u32,
     state_hash: String,
     executed: CommandLog,
+    #[serde(default, skip_serializing_if = "ControllerConfig::is_empty")]
+    controllers: ControllerConfig,
 }
 
 /// An immutable validated wire checkpoint. The checksum is a corruption
@@ -310,6 +442,11 @@ impl Checkpoint {
         &self.payload.source
     }
 
+    /// Persisted future controller identity; empty for legacy/default saves.
+    pub fn controllers(&self) -> &ControllerConfig {
+        &self.payload.controllers
+    }
+
     /// Reconstruct off to the side and return only a fully verified session.
     /// This never mutates a caller's existing simulation.
     pub fn restore(
@@ -331,13 +468,15 @@ impl Checkpoint {
                 budget.max_commands
             )));
         }
-        let (mut sim, actual) = self.payload.source.load(data)?;
+        let (mut sim, actual, source_report) = self.payload.source.load(data)?;
         if actual != self.payload.content_identity {
             return Err(CheckpointError::ContentMismatch {
                 expected: self.payload.content_identity.clone(),
                 actual,
             });
         }
+        validate_controllers(&self.payload.source, &self.payload.controllers, sim.world())?;
+        // Historical replay intentionally NEVER invokes a controller.
         // Do not allocate a per-tick hash history while replaying a save.
         for _ in 0..self.payload.next_tick {
             sim.step(self.payload.executed.for_tick(sim.tick()));
@@ -355,6 +494,8 @@ impl Checkpoint {
             content_identity: self.payload.content_identity.clone(),
             executed: self.payload.executed.clone(),
             sim,
+            source_report,
+            controllers: self.payload.controllers.clone(),
         })
     }
 
@@ -397,6 +538,11 @@ impl Checkpoint {
             return Err(CheckpointError::ChecksumMismatch);
         }
         self.payload.source.validate()?;
+        self.payload
+            .controllers
+            .validate_shape()
+            .map_err(bot_error)?;
+        reject_campaign_controllers(&self.payload.source, &self.payload.controllers)?;
         Ok(())
     }
 }
@@ -408,23 +554,60 @@ pub struct ReplaySession {
     content_identity: String,
     executed: CommandLog,
     sim: Sim,
+    source_report: Option<String>,
+    controllers: ControllerConfig,
 }
 
 impl ReplaySession {
     /// Start a session from a synthetic setup or an external real-map install.
     pub fn new(source: CheckpointSource, data: Option<&Path>) -> Result<Self, CheckpointError> {
-        let (sim, content_identity) = source.load(data)?;
+        Self::new_with_controllers(source, data, ControllerConfig::default())
+    }
+
+    /// Explicitly opt in to future command generation. Initial source variants
+    /// and defaults are unchanged, and campaign controllers fail closed.
+    pub fn new_with_controllers(
+        source: CheckpointSource,
+        data: Option<&Path>,
+        controllers: ControllerConfig,
+    ) -> Result<Self, CheckpointError> {
+        controllers.validate_shape().map_err(bot_error)?;
+        reject_campaign_controllers(&source, &controllers)?;
+        let (sim, content_identity, source_report) = source.load(data)?;
+        validate_controllers(&source, &controllers, sim.world())?;
         Ok(Self {
             source,
             content_identity,
             executed: CommandLog::new(),
             sim,
+            source_report,
+            controllers,
         })
+    }
+
+    /// Persisted future controller settings, without mutable access.
+    pub fn controllers(&self) -> &ControllerConfig {
+        &self.controllers
     }
 
     /// Read-only simulation, for renderers, diagnostics and current state.
     pub fn sim(&self) -> &Sim {
         &self.sim
+    }
+
+    /// Consume this verified replay session and transfer its complete simulation
+    /// (including the script host) to an interactive client. The caller must
+    /// retain the source/history separately and verify replay against the live
+    /// state before saving any subsequently mutable simulation. No mutable
+    /// access is exposed while a `ReplaySession` remains intact.
+    pub fn into_sim(self) -> Sim {
+        self.sim
+    }
+
+    /// Startup fidelity diagnostics, present for authored campaigns.
+    /// These are regenerated from the local install, never saved as retail text.
+    pub fn source_report(&self) -> Option<&str> {
+        self.source_report.as_deref()
     }
 
     /// Commands executed so far, with their original tick/player/sequence keys.
@@ -437,39 +620,8 @@ impl ReplaySession {
     /// orders are ignored. A future-only log is also valid.
     /// All resource checks happen before stepping any tick.
     pub fn advance(&mut self, log: &CommandLog, ticks: u32) -> Result<Vec<u64>, CheckpointError> {
+        let end = self.validate_advance(log, ticks, 0)?;
         let start = self.sim.tick().0;
-        let end = start
-            .checked_add(ticks)
-            .filter(|t| *t <= crate::MAX_TICKS)
-            .ok_or_else(|| CheckpointError::Limit("elapsed ticks exceed hard limit".into()))?;
-        for entry in log.iter().take_while(|e| e.tick.0 < start) {
-            let existing = self
-                .executed
-                .entries()
-                .binary_search_by_key(&entry.key(), |e| e.key());
-            if existing.ok().map(|index| &self.executed.entries()[index]) != Some(entry) {
-                return Err(CheckpointError::Invalid(format!(
-                    "continuation changes executed command at tick {}",
-                    entry.tick.0
-                )));
-            }
-        }
-        let mut count = 0usize;
-        let mut previous_key = None;
-        for entry in log.iter().filter(|e| e.tick.0 >= start && e.tick.0 < end) {
-            // Public CommandLog builders normally guarantee this. Check again
-            // before mutating history, including sequence-number saturation.
-            if previous_key.is_some_and(|previous| previous >= entry.key()) {
-                return Err(CheckpointError::Invalid(
-                    "continuation command keys are not unique and ordered".into(),
-                ));
-            }
-            previous_key = Some(entry.key());
-            count = count.saturating_add(1);
-        }
-        if self.executed.len().saturating_add(count) > MAX_CHECKPOINT_COMMANDS {
-            return Err(CheckpointError::Limit("too many executed commands".into()));
-        }
         // A valid CommandLog is sorted and unique. New tick keys cannot collide
         // with the strictly earlier history, so this copy cannot fail.
         for entry in log.iter().filter(|e| e.tick.0 >= start && e.tick.0 < end) {
@@ -480,6 +632,48 @@ impl ReplaySession {
         Ok(self.sim.run(log, ticks))
     }
 
+    fn validate_advance(
+        &self,
+        log: &CommandLog,
+        ticks: u32,
+        additional: u64,
+    ) -> Result<u32, CheckpointError> {
+        driver::validate_advance(self.sim.tick().0, &self.executed, log, ticks, additional)
+    }
+
+    /// Generate and record commands only for FUTURE absolute ticks. Restore and
+    /// plain `advance` remain replay-only. Competing input, changed history and
+    /// conservative worst-case command limits are checked before any mutation.
+    pub fn advance_driven(
+        &mut self,
+        input: &CommandLog,
+        ticks: u32,
+    ) -> Result<Vec<u64>, CheckpointError> {
+        validate_controllers(&self.source, &self.controllers, self.sim.world())?;
+        let start = self.sim.tick().0;
+        let end = driver::admit_driven(
+            self.sim.world(),
+            &self.controllers,
+            &self.executed,
+            input,
+            ticks,
+        )?;
+        let mut hashes = Vec::with_capacity(ticks as usize);
+        for _ in start..end {
+            let realized =
+                driver::realize_admitted_tick(self.sim.world(), &self.controllers, input)?;
+            for entry in &realized {
+                // Preflight proves unique future keys; normal insertion cannot
+                // fail. Retain a typed error instead of asserting/panicking.
+                self.executed
+                    .insert(entry.clone())
+                    .map_err(|error| CheckpointError::Invalid(error.to_string()))?;
+            }
+            hashes.push(self.sim.step(&realized));
+        }
+        Ok(hashes)
+    }
+
     /// Capture the exact current state as replay data, including tick zero.
     pub fn checkpoint(&self) -> Result<Checkpoint, CheckpointError> {
         let payload = Payload {
@@ -488,6 +682,7 @@ impl ReplaySession {
             next_tick: self.sim.tick().0,
             state_hash: hex(self.sim.state_hash()),
             executed: self.executed.clone(),
+            controllers: self.controllers.clone(),
         };
         let checksum = digest_json(&payload)?;
         let checkpoint = Checkpoint {
@@ -500,6 +695,31 @@ impl ReplaySession {
         checkpoint.validate()?;
         Ok(checkpoint)
     }
+}
+
+fn bot_error(error: crate::bot::BotError) -> CheckpointError {
+    CheckpointError::Invalid(error.to_string())
+}
+
+fn reject_campaign_controllers(
+    source: &CheckpointSource,
+    controllers: &ControllerConfig,
+) -> Result<(), CheckpointError> {
+    if !controllers.controllers.is_empty() && matches!(source, CheckpointSource::Campaign { .. }) {
+        return Err(CheckpointError::Invalid(
+            "simple-skirmish-v1 does not support campaign sources".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_controllers(
+    source: &CheckpointSource,
+    controllers: &ControllerConfig,
+    world: &tak_sim::World,
+) -> Result<(), CheckpointError> {
+    reject_campaign_controllers(source, controllers)?;
+    controllers.validate(world).map_err(bot_error)
 }
 
 fn check_versions(format: &str, version: u32, rules: u32) -> Result<(), CheckpointError> {
@@ -653,6 +873,51 @@ fn load_map_source(
     Ok((sim, identity))
 }
 
+// Do not call load_campaign directly: it eagerly reads COB/model data before
+// the second size preflight and even when the descriptor disables scripts.
+fn load_campaign_source(
+    vfs: &Vfs,
+    map: &str,
+    players: &[tak_sim::campaign::CampaignPlayer],
+    seed: u64,
+    scripts: bool,
+    objectives: bool,
+) -> Result<(Sim, String, String), CheckpointError> {
+    crate::campaign::validate_players(players, objectives).map_err(campaign_setup_error)?;
+    let mut paths = base_content_paths(vfs, map);
+    preflight_content(vfs, &paths)?;
+    let rules = Ruleset::load(vfs, RulesetKind::Base);
+    let loaded_map = tak_content::MapDef::load(vfs, &rules, map)
+        .map_err(tak_sim::content::ContentError::from)?;
+    let (mut scenario, unsupported) =
+        tak_sim::campaign::scenario_from_campaign(&loaded_map, &rules, players)?;
+    scenario.seed = seed;
+    if objectives {
+        crate::campaign::enable_strict_objectives(&mut scenario, &loaded_map, players)
+            .map_err(campaign_setup_error)?;
+    }
+    scenario.validate()?;
+    if scripts {
+        add_script_paths(&mut paths, &rules, &scenario);
+        preflight_content(vfs, &paths)?;
+    }
+    // Include the descriptor as well as content. Distinct owner ordering or
+    // objective/script modes can convert to the same Scenario on empty maps.
+    let content = identity_for_paths(vfs, &paths, &scenario, scripts)?;
+    let source = CheckpointSource::campaign(map, players, seed, scripts, objectives);
+    let identity = digest_json(&("tak-checkpoint-campaign-v1", source, content))?;
+    let report = crate::campaign::report_setup(&scenario, &unsupported, players, objectives);
+    let sim = if scripts {
+        Sim::with_scripts(
+            &scenario,
+            Box::new(tak_sim::content::load_scripts(vfs, &rules, &scenario)),
+        )?
+    } else {
+        Sim::new(&scenario)?
+    };
+    Ok((sim, identity, report))
+}
+
 fn base_content_paths(vfs: &Vfs, map: &str) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
     for (directory, extension) in [
@@ -687,9 +952,8 @@ fn add_script_paths(paths: &mut BTreeSet<String>, rules: &Ruleset, scenario: &Sc
     }
 }
 
-// This is a declared-size guard on owned VFS content, not a decompression
-// security boundary: the existing HAPI reader validates some decoded lengths
-// only after decoding. Do not load untrusted/corrupt archives on this basis.
+// Stage the aggregate unique-input guard before parsers. The VFS also bounds
+// each nested read and checks SQSH/directory agreement before decoding.
 fn preflight_content(vfs: &Vfs, paths: &BTreeSet<String>) -> Result<(), CheckpointError> {
     let mut total = 0u64;
     for path in paths {
@@ -720,6 +984,7 @@ fn identity_for_paths(
     hash_part(&mut hash, b"tak-checkpoint-content-v1");
     hash_part(&mut hash, &serde_json::to_vec(scenario)?);
     hash_part(&mut hash, &[u8::from(scripts)]);
+    let mut total = 0u64;
     for path in paths {
         hash_part(&mut hash, path.as_bytes());
         if vfs.stat(path).is_none() {
@@ -727,7 +992,9 @@ fn identity_for_paths(
             continue;
         }
         hash_part(&mut hash, b"present");
-        let bytes = vfs.read(path)?;
+        let remaining = MAX_CONTENT_BYTES.saturating_sub(total);
+        let bytes = vfs.read_bounded(path, remaining.min(MAX_CONTENT_FILE_BYTES))?;
+        total += bytes.len() as u64;
         hash_part(&mut hash, &bytes);
     }
     Ok(hex(hash.digest()))
@@ -784,6 +1051,56 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn additive_campaign_kind_preserves_wire_payload_and_checks_replay_rules() {
+        let source = CheckpointSource::map("KMAP/Example", "ARA,ZON", 7, false);
+        let payload = Payload {
+            source,
+            content_identity: "0000000000000000".into(),
+            next_tick: 0,
+            state_hash: "1111111111111111".into(),
+            executed: CommandLog::new(),
+            controllers: ControllerConfig::default(),
+        };
+        // Exact pre-campaign v1 field order, not a Value round trip (which
+        // would sort object keys and fail to pin the canonical checksum).
+        let legacy = r#"{"source":{"kind":"map","map":"kmap/example","players":["ARA","ZON"],"world_seed":7,"scripts":false},"content_identity":"0000000000000000","next_tick":0,"state_hash":"1111111111111111","executed":{"version":1,"entries":[]}}"#;
+        assert_eq!(serde_json::to_string(&payload).unwrap(), legacy);
+        let checksum = hex(xxhash_rust::xxh64::xxh64(legacy.as_bytes(), 0));
+        assert_eq!(digest_json(&payload).unwrap(), checksum);
+        let wire = format!(
+            r#"{{"format":"tak-replay-checkpoint","version":1,"replay_rules_version":1,"payload":{legacy},"checksum":"{checksum}"}}"#
+        );
+        assert!(matches!(
+            Checkpoint::from_json(&wire),
+            Err(CheckpointError::UnsupportedRules(1))
+        ));
+        let current = wire.replace(
+            "\"replay_rules_version\":1",
+            &format!("\"replay_rules_version\":{REPLAY_RULES_VERSION}"),
+        );
+        let parsed = Checkpoint::from_json(&current).unwrap();
+        assert_eq!(parsed.source(), &payload.source);
+        assert_eq!(parsed.checksum, checksum);
+        assert_eq!(CHECKPOINT_FORMAT_VERSION, 1);
+        assert_eq!(REPLAY_RULES_VERSION, 2);
+    }
+
+    #[test]
+    fn consuming_verified_session_transfers_tick_and_complete_state() {
+        let mut running = session();
+        running.advance(&CommandLog::new(), 9).unwrap();
+        let saved = running.checkpoint().unwrap();
+        let restored = saved.restore(None, ReplayBudget::default()).unwrap();
+        let mut sim = restored.into_sim();
+        assert_eq!(sim.tick(), saved.next_tick());
+        assert_eq!(hex(sim.state_hash()), saved.state_hash());
+        assert_eq!(
+            sim.step(&[]),
+            running.advance(&CommandLog::new(), 1).unwrap()[0]
+        );
     }
 
     #[test]
@@ -947,7 +1264,7 @@ mod tests {
             Checkpoint::from_json(&value.to_string()),
             Err(CheckpointError::UnsupportedRules(999))
         ));
-        value["replay_rules_version"] = 1.into();
+        value["replay_rules_version"] = REPLAY_RULES_VERSION.into();
         value["surprise"] = true.into();
         assert!(matches!(
             Checkpoint::from_json(&value.to_string()),
@@ -1252,6 +1569,290 @@ mod tests {
         assert!(sim.cob().is_none());
         sim.run(&CommandLog::new(), 1);
         assert!(sim.world().unit(UnitId::new(0, 0)).is_some());
+    }
+
+    fn campaign_install(label: &str, units: &str, condition: &str) -> Scratch {
+        let scratch = Scratch::new(label);
+        let ota = format!(
+            "[GLOBALHEADER]\n{{\n{condition}\n[MAP DATA]\n{{\n[UNITS]\n{{\n{units}\n}}\n}}\n}}\n"
+        );
+        let archive = tak_vfs::testing::HapiBuilder::new()
+            .file("missions/test.tnt", &tiny_map_bytes(), false)
+            .file("missions/test.ota", ota.as_bytes(), false)
+            .file(
+                "units/monarch.fbi",
+                b"[UNITINFO]\n{\nunitname=monarch;\nmaxdamage=200;\nobjectname=monarch;\n}\n",
+                false,
+            )
+            .file(
+                "gamedata/sidedata.tdf",
+                b"[SIDE0]\n{\nnameprefix=TST;\ncommander=monarch;\n}\n",
+                false,
+            )
+            .build();
+        scratch.write("synthetic.hpi", &archive);
+        scratch
+    }
+
+    fn authored_units() -> &'static str {
+        "[UNIT0]\n{\nunitname=monarch;\nplayer=2;\nxpos=2;\nzpos=2;\ninitialmission=patrol;\naiignore=1;\n}\n[UNIT1]\n{\nunitname=monarch;\nplayer=1;\nxpos=1;\nzpos=1;\n}\n"
+    }
+
+    #[test]
+    fn campaign_identity_binds_ordered_mapping_seed_scripts_and_objective_mode() {
+        // Empty startup deliberately makes mapping changes observationally
+        // equivalent to the current Scenario. The descriptor must still bind.
+        let scratch = campaign_install("campaign-identity", "", "destroyallunits=1;");
+        let players = crate::campaign::parse_players("1:TST,2:TST").unwrap();
+        let source = CheckpointSource::campaign("missions/test", &players, 9, false, false);
+        let checkpoint = ReplaySession::new(source, Some(&scratch.0))
+            .unwrap()
+            .checkpoint()
+            .unwrap();
+        let text = checkpoint.to_json_pretty().unwrap();
+        assert!(!text.contains("unit_defs"));
+        assert!(!text.contains("initial_units"));
+        assert!(!text.contains(scratch.0.to_str().unwrap()));
+        let parsed = Checkpoint::from_json(&text).unwrap();
+        assert_eq!(parsed.source(), checkpoint.source());
+        parsed
+            .restore(Some(&scratch.0), ReplayBudget::default())
+            .unwrap();
+        for variant in [
+            "mapping-order",
+            "mapping-slot",
+            "side",
+            "seed",
+            "scripts",
+            "objectives",
+        ] {
+            let mut changed = checkpoint.clone();
+            if let CheckpointSource::Campaign {
+                players,
+                world_seed,
+                scripts,
+                objectives,
+                ..
+            } = &mut changed.payload.source
+            {
+                match variant {
+                    "mapping-order" => players.swap(0, 1),
+                    "mapping-slot" => players[1].ota_slot = 10,
+                    "side" => players[0].side = "tst".into(),
+                    "seed" => *world_seed += 1,
+                    "scripts" => *scripts = true,
+                    "objectives" => *objectives = true,
+                    _ => unreachable!(),
+                }
+            }
+            reseal(&mut changed);
+            assert!(
+                matches!(
+                    changed.restore(Some(&scratch.0), ReplayBudget::default()),
+                    Err(CheckpointError::ContentMismatch { .. })
+                ),
+                "{variant}"
+            );
+        }
+    }
+
+    #[test]
+    fn campaign_zero_tick_and_repeated_resume_match_authored_startup() {
+        let scratch = campaign_install("campaign-resume", authored_units(), "");
+        let players = crate::campaign::parse_players("1:TST,2:TST").unwrap();
+        let source = CheckpointSource::campaign("missions/test", &players, 4, false, false);
+        let mut whole = ReplaySession::new(source.clone(), Some(&scratch.0)).unwrap();
+        assert!(
+            whole
+                .source_report()
+                .unwrap()
+                .contains("ignores initialmission")
+        );
+        let mut log = CommandLog::new();
+        for tick in [0, 0, 1, 29, 60, 119] {
+            log.record(
+                Tick(tick),
+                PlayerId(1),
+                SimCommand::Stop {
+                    units: UnitSet::single(UnitId::new(0, 0)),
+                },
+            );
+        }
+        let expected = whole.advance(&log, 120).unwrap();
+        for split in [0, 1, 29, 60, 119, 120] {
+            let mut first = ReplaySession::new(source.clone(), Some(&scratch.0)).unwrap();
+            first.advance(&log, split).unwrap();
+            let checkpoint = first.checkpoint().unwrap();
+            let mut resumed = checkpoint
+                .restore(Some(&scratch.0), ReplayBudget::default())
+                .unwrap();
+            assert_eq!(first.sim().state_hash(), resumed.sim().state_hash());
+            assert_eq!(
+                resumed.advance(&log, 120 - split).unwrap(),
+                expected[split as usize..]
+            );
+            let again = resumed
+                .checkpoint()
+                .unwrap()
+                .restore(Some(&scratch.0), ReplayBudget::default())
+                .unwrap();
+            assert_eq!(again.sim().state_hash(), whole.sim().state_hash());
+            assert_eq!(again.executed_log(), whole.executed_log());
+        }
+    }
+
+    #[test]
+    fn campaign_descriptor_and_replay_budgets_fail_before_install_access() {
+        let players = crate::campaign::parse_players("1:TST,2:TST").unwrap();
+        let source = CheckpointSource::campaign("missions/test", &players, 1, false, false);
+        for variant in [
+            "map",
+            "map-control",
+            "count",
+            "owner",
+            "duplicate",
+            "side",
+            "objectives",
+        ] {
+            let mut changed = source.clone();
+            if let CheckpointSource::Campaign {
+                map,
+                players,
+                objectives,
+                ..
+            } = &mut changed
+            {
+                match variant {
+                    "map" => *map = "../missions/test".into(),
+                    "map-control" => *map = "missions/test\u{001b}".into(),
+                    "count" => players.clear(),
+                    "owner" => players[0].ota_slot = 0,
+                    "duplicate" => players[1].ota_slot = 1,
+                    "side" => players[0].side = "bad\nside".into(),
+                    "objectives" => {
+                        players.swap(0, 1);
+                        *objectives = true;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            assert!(
+                matches!(
+                    ReplaySession::new(changed, None),
+                    Err(CheckpointError::Invalid(_))
+                ),
+                "{variant}"
+            );
+        }
+        let scratch = campaign_install("campaign-budget", authored_units(), "");
+        let mut running = ReplaySession::new(source, Some(&scratch.0)).unwrap();
+        running.advance(&CommandLog::new(), 2).unwrap();
+        let checkpoint = running.checkpoint().unwrap();
+        assert!(matches!(
+            checkpoint.restore(
+                None,
+                ReplayBudget {
+                    max_ticks: 1,
+                    max_commands: 0
+                }
+            ),
+            Err(CheckpointError::Limit(_))
+        ));
+        let mut value = serde_json::to_value(&checkpoint).unwrap();
+        value["payload"]["source"]["players"][0]["surprise"] = true.into();
+        assert!(matches!(
+            Checkpoint::from_json(&value.to_string()),
+            Err(CheckpointError::Json(_))
+        ));
+        value["payload"]["source"]["players"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("surprise");
+        value["payload"]["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("objectives");
+        assert!(matches!(
+            Checkpoint::from_json(&value.to_string()),
+            Err(CheckpointError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn campaign_strict_objectives_reuse_cli_rejection_and_initial_order_warnings() {
+        let players = crate::campaign::parse_players("1:TST,2:TST").unwrap();
+        for (label, condition) in [
+            ("unsupported", "useonlyunits=monarch;"),
+            ("unresolved", "killalloftype=NOTLOADED;"),
+            ("malformed", "victorytimerrunsout=not-a-number;"),
+        ] {
+            let scratch = campaign_install(label, authored_units(), condition);
+            let source = CheckpointSource::campaign("missions/test", &players, 1, false, true);
+            assert!(
+                ReplaySession::new(source, Some(&scratch.0)).is_err(),
+                "{label}"
+            );
+            let source = CheckpointSource::campaign("missions/test", &players, 1, false, false);
+            let session = ReplaySession::new(source, Some(&scratch.0)).unwrap();
+            let report = session.source_report().unwrap();
+            assert!(report.contains("initialmission"));
+            assert!(report.contains("mission AI, alliances and neutrality are not implemented"));
+        }
+    }
+
+    #[test]
+    fn campaign_staged_preflight_rejects_oversize_before_parsing_or_script_loading() {
+        let scratch = Scratch::new("campaign-staged-preflight");
+        scratch.write("missions/test.tnt", b"invalid small TNT");
+        scratch.write("units/huge.fbi", &[]);
+        File::options()
+            .write(true)
+            .open(scratch.0.join("units/huge.fbi"))
+            .unwrap()
+            .set_len(MAX_CONTENT_FILE_BYTES + 1)
+            .unwrap();
+        let mut vfs = Vfs::new();
+        vfs.mount_dir(&scratch.0).unwrap();
+        let players = crate::campaign::parse_players("1:TST,2:TST").unwrap();
+        assert!(matches!(
+            load_campaign_source(&vfs, "missions/test", &players, 1, false, false),
+            Err(CheckpointError::Limit(_))
+        ));
+        std::fs::remove_file(scratch.0.join("units/huge.fbi")).unwrap();
+        let ota = format!(
+            "[GLOBALHEADER]\n{{\n[MAP DATA]\n{{\n[UNITS]\n{{\n{}\n}}\n}}\n}}\n",
+            authored_units()
+        );
+        scratch.write("missions/test.tnt", &tiny_map_bytes());
+        scratch.write("missions/test.ota", ota.as_bytes());
+        scratch.write(
+            "units/monarch.fbi",
+            b"[UNITINFO]\n{\nunitname=monarch;\nobjectname=monarch;\n}\n",
+        );
+        scratch.write(
+            "gamedata/sidedata.tdf",
+            b"[SIDE0]\n{\nnameprefix=TST;\ncommander=monarch;\n}\n",
+        );
+        for path in ["scripts/monarch.cob", "objects3d/monarch.3do"] {
+            scratch.write(path, &[]);
+            File::options()
+                .write(true)
+                .open(scratch.0.join(path))
+                .unwrap()
+                .set_len(MAX_CONTENT_FILE_BYTES + 1)
+                .unwrap();
+        }
+        let mut vfs = Vfs::new();
+        vfs.mount_dir(&scratch.0).unwrap();
+        assert!(matches!(
+            load_campaign_source(&vfs, "missions/test", &players, 1, true, false),
+            Err(CheckpointError::Limit(_))
+        ));
+        let (mut sim, _, _) =
+            load_campaign_source(&vfs, "missions/test", &players, 1, false, false).unwrap();
+        assert!(sim.cob().is_none());
+        sim.run(&CommandLog::new(), 1);
+        assert_eq!(sim.world().units().count(), 2);
     }
 
     #[test]

@@ -43,7 +43,9 @@ pub use binding::{
     ReservedOrder, Ring,
 };
 pub use brush::{brush_radius, drag_circle, units_in_circle};
-pub use context::{Mode, builders_for, casters_for, own_units, pick_unit, resolve_context};
+pub use context::{
+    Mode, builders_for, casters_for, healers_for, own_units, pick_unit, resolve_context,
+};
 pub use cursor::{
     AXIS_MAX, Motion, approach_frac, cursor_motion, cursor_step, curve, friction, magnetize, pct,
     per_second, soft_snap, stick_vector, stick_vector_zones, zoom_factor,

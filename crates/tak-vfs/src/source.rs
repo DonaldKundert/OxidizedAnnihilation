@@ -75,3 +75,73 @@ impl Source for FileSource {
         f.read_exact(buf)
     }
 }
+
+/// Reads at most `limit` bytes, then uses a one-byte stack probe to detect more.
+/// Incremental reservations never deliberately grow the vector beyond the limit.
+pub(crate) fn read_to_end_bounded<R: Read>(
+    reader: &mut R,
+    limit: u64,
+) -> io::Result<(Vec<u8>, bool)> {
+    let limit = usize::try_from(limit)
+        .ok()
+        .filter(|&n| n <= isize::MAX as usize)
+        .ok_or_else(|| io::Error::other("read limit exceeds addressable memory"))?;
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let remaining = limit - out.len();
+        if remaining == 0 {
+            let mut probe = [0u8; 1];
+            return Ok((out, read_retry(reader, &mut probe)? != 0));
+        }
+        let n = read_retry(reader, &mut buf[..remaining.min(8192)])?;
+        if n == 0 {
+            return Ok((out, false));
+        }
+        let want = out.len() + n;
+        if want > out.capacity() {
+            let capacity = out.capacity().saturating_mul(2).max(want).min(limit);
+            out.try_reserve_exact(capacity - out.len())
+                .map_err(io::Error::other)?;
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
+fn read_retry<R: Read>(reader: &mut R, buf: &mut [u8]) -> io::Result<usize> {
+    loop {
+        match reader.read(buf) {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_reader_checks_exact_and_zero_limits() {
+        for (bytes, limit, exceeded) in [
+            (&b""[..], 0, false),
+            (&b"x"[..], 0, true),
+            (&b"abc"[..], 3, false),
+            (&b"abcd"[..], 3, true),
+        ] {
+            let (out, actual_exceeded) = read_to_end_bounded(&mut &bytes[..], limit).unwrap();
+            assert_eq!(actual_exceeded, exceeded);
+            assert_eq!(out, &bytes[..bytes.len().min(limit as usize)]);
+            assert!(out.capacity() <= limit as usize);
+        }
+    }
+
+    #[test]
+    fn bounded_reader_does_not_double_past_limit() {
+        let bytes = vec![0u8; 20_001];
+        let (out, exceeded) = read_to_end_bounded(&mut &bytes[..], 20_000).unwrap();
+        assert!(exceeded);
+        assert_eq!(out.len(), 20_000);
+        assert!(out.capacity() <= 20_000);
+    }
+}

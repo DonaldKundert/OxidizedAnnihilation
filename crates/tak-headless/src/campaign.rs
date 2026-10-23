@@ -43,6 +43,7 @@ pub fn parse_players(text: &str) -> Result<Vec<CampaignPlayer>, Error> {
             return Err(Error::Setup("too many campaign players".into()));
         }
     }
+    validate_players(&players, false)?;
     Ok(players)
 }
 
@@ -56,43 +57,77 @@ pub fn load_campaign_map(
     seed: u64,
     objectives: bool,
 ) -> Result<CampaignMatch, Error> {
+    validate_players(players, objectives)?;
+    let vfs = tak_vfs::open_kingdoms(data).map_err(ContentError::from)?;
+    let mut loaded = tak_sim::campaign::load_campaign(&vfs, map, players, seed)?;
+    if objectives {
+        enable_strict_objectives(&mut loaded.game.scenario, &loaded.game.map, players)?;
+    }
+    Ok(loaded)
+}
+
+/// Validate explicit ordered owner mappings before loading external content.
+/// Objective evaluation is restricted to its existing local/enemy slots.
+pub fn validate_players(players: &[CampaignPlayer], objectives: bool) -> Result<(), Error> {
+    if players.is_empty() || players.len() > tak_sim::scenario::MAX_PLAYERS {
+        return Err(Error::Setup(
+            "campaign requires 1..=MAX_PLAYERS mapped owners".into(),
+        ));
+    }
+    let mut slots = BTreeSet::new();
+    for player in players {
+        if player.ota_slot == 0 || !slots.insert(player.ota_slot) {
+            return Err(Error::Setup(
+                "duplicate or zero campaign OTA owner slot".into(),
+            ));
+        }
+        if player.side.trim().is_empty()
+            || player.side.contains([':', ','])
+            || player.side.chars().any(char::is_control)
+        {
+            return Err(Error::Setup(
+                "each campaign owner needs one nonempty side".into(),
+            ));
+        }
+    }
     if objectives && (players.len() != 2 || players[0].ota_slot != 1 || players[1].ota_slot != 2) {
         return Err(Error::Setup(
             "--campaign-objectives currently requires exactly OTA slots 1,2 in that order".into(),
         ));
     }
-    let vfs = tak_vfs::open_kingdoms(data).map_err(ContentError::from)?;
-    let mut loaded = tak_sim::campaign::load_campaign(&vfs, map, players, seed)?;
-    if objectives {
-        enable_objectives(&mut loaded.game.scenario, &loaded.game.map, players)?;
-        let rules = loaded
-            .game
-            .scenario
-            .victory
-            .mission
-            .as_ref()
-            .expect("enabled above");
-        if !rules.unsupported.is_empty() {
-            let keys: Vec<_> = rules
-                .unsupported
-                .iter()
-                .map(|s| s.split('=').next().unwrap_or(s))
-                .collect();
+    Ok(())
+}
+
+/// Enable only fully supported, resolved conditions on an already loaded map.
+/// Staged loaders can call this without eagerly loading any COB/model bytes.
+pub fn enable_strict_objectives(
+    scenario: &mut tak_sim::Scenario,
+    map: &tak_content::MapDef,
+    players: &[CampaignPlayer],
+) -> Result<(), Error> {
+    validate_players(players, true)?;
+    enable_objectives(scenario, map, players)?;
+    let rules = scenario.victory.mission.as_ref().expect("enabled above");
+    if !rules.unsupported.is_empty() {
+        let keys: Vec<_> = rules
+            .unsupported
+            .iter()
+            .map(|s| s.split('=').next().unwrap_or(s))
+            .collect();
+        return Err(Error::Setup(format!(
+            "campaign objectives contain unsupported or malformed conditions: {}",
+            keys.join(", ")
+        )));
+    }
+    for condition in rules.victory.iter().chain(&rules.defeat) {
+        if let Some(ty) = condition_unit_type(condition).filter(|ty| ty.def.is_none()) {
             return Err(Error::Setup(format!(
-                "campaign objectives contain unsupported or malformed conditions: {}",
-                keys.join(", ")
+                "campaign objective unit type {:?} is absent from the loaded definitions",
+                ty.name
             )));
         }
-        for condition in rules.victory.iter().chain(&rules.defeat) {
-            if let Some(ty) = condition_unit_type(condition).filter(|ty| ty.def.is_none()) {
-                return Err(Error::Setup(format!(
-                    "campaign objective unit type {:?} is absent from the loaded definitions",
-                    ty.name
-                )));
-            }
-        }
     }
-    Ok(loaded)
+    Ok(())
 }
 
 fn condition_unit_type(condition: &Condition) -> Option<&UnitType> {
@@ -111,12 +146,22 @@ fn condition_unit_type(condition: &Condition) -> Option<&UnitType> {
 
 /// Concise, deterministic diagnostics, kept separate from hash/log stdout.
 pub fn report(loaded: &CampaignMatch, players: &[CampaignPlayer], objectives: bool) -> String {
-    let count = loaded
-        .game
-        .scenario
-        .initial_units
-        .as_ref()
-        .map_or(0, Vec::len);
+    report_setup(
+        &loaded.game.scenario,
+        &loaded.unsupported,
+        players,
+        objectives,
+    )
+}
+
+/// Diagnostics for staged loaders that intentionally have not loaded scripts.
+pub fn report_setup(
+    scenario: &tak_sim::Scenario,
+    unsupported: &[String],
+    players: &[CampaignPlayer],
+    objectives: bool,
+) -> String {
+    let count = scenario.initial_units.as_ref().map_or(0, Vec::len);
     let mut report = format!(
         "campaign: {count} authored units, {} mapped owners; placement loading only, not full campaign support\n",
         players.len()
@@ -128,7 +173,7 @@ pub fn report(loaded: &CampaignMatch, players: &[CampaignPlayer], objectives: bo
         ));
     }
     let mut fields = BTreeMap::<&str, usize>::new();
-    for warning in &loaded.unsupported {
+    for warning in unsupported {
         match warning.split_once(": ") {
             Some((unit, field))
                 if unit
@@ -171,6 +216,32 @@ mod tests {
             (players[1].ota_slot, players[1].side.as_str()),
             (1, "Aramon")
         );
+    }
+
+    #[test]
+    fn direct_mapping_validation_rejects_invalid_objective_slots() {
+        let valid = parse_players("1:ARA,2:ZON").unwrap();
+        validate_players(&valid, true).unwrap();
+        for players in [
+            Vec::new(),
+            vec![CampaignPlayer {
+                ota_slot: 0,
+                side: "ARA".into(),
+            }],
+            vec![CampaignPlayer {
+                ota_slot: 1,
+                side: "ARA,ZON".into(),
+            }],
+            vec![CampaignPlayer {
+                ota_slot: 1,
+                side: "AR\nA".into(),
+            }],
+        ] {
+            assert!(validate_players(&players, false).is_err());
+        }
+        for text in ["1:ARA", "2:ARA,1:ZON", "1:ARA,10:ZON"] {
+            assert!(validate_players(&parse_players(text).unwrap(), true).is_err());
+        }
     }
 
     #[test]

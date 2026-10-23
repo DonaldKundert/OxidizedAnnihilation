@@ -11,55 +11,10 @@ use tak_input::{CursorKind, Feedback, Refusal};
 
 use super::*;
 use crate::hud::{
-    ARAMON_SLOTS, BUTTON_STATES, DamageBars, PANEL_BUTTONS, SKIN_BUTTON_PANEL, SKIN_END_CAP,
-    SKIN_INFO_PANEL, button_image, button_slots, button_state, group_by_type, health_rgb,
-    race_skin, verb_line,
+    ARAMON_SLOTS, BUTTON_STATES, DamageBars, PANEL_ACTIONS, PANEL_BUTTONS, PANEL_NAMES,
+    SKIN_BUTTON_PANEL, SKIN_END_CAP, SKIN_INFO_PANEL, button_image, button_slots, button_state,
+    group_by_type, health_rgb, race_skin, stance_name, verb_line,
 };
-
-/// What each panel button does, in [`PANEL_BUTTONS`] order. Reserved ones
-/// (Clear, Repair/Heal) keep their well empty until the sim supports them.
-pub(super) const PANEL_ACTIONS: [Action; 13] = [
-    Action::AttackMode,
-    Action::MoveMode,
-    Action::GuardMode,
-    Action::PatrolMode,
-    Action::Stop,
-    Action::Reserved {
-        order: tak_input::ReservedOrder::Clear,
-    },
-    Action::Reserved {
-        order: tak_input::ReservedOrder::Heal,
-    },
-    Action::CastSpell { index: 0 },
-    Action::CastSpell { index: 1 },
-    Action::CastSpell { index: 2 },
-    Action::SetFireState {
-        state: tak_commands::FireState::FireAtWill,
-    },
-    Action::SetFireState {
-        state: tak_commands::FireState::ReturnFire,
-    },
-    Action::SetFireState {
-        state: tak_commands::FireState::HoldFire,
-    },
-];
-
-/// TA:K names for the panel buttons (help line).
-const PANEL_NAMES: [&str; 13] = [
-    "Attack",
-    "Move",
-    "Guard",
-    "Patrol",
-    "Stop",
-    "Clear",
-    "Heal",
-    "Primary",
-    "Secondary",
-    "Special",
-    "Offensive",
-    "Defensive",
-    "Passive",
-];
 
 /// Build menu cells (retail menus have at most 9 entries).
 pub(super) const BUILD_CELLS: usize = 12;
@@ -703,6 +658,7 @@ pub(super) fn panel_system(
     let w = s.sim.world();
     let sel = own_selection(w, s.local, input.mapper.selection());
     let first = sel.first().map(|(_, u)| *u);
+    let has_healer = !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty();
     let caster = crate::view::caster_spells(w, s.local, input.mapper.selection());
     let caster_def = caster
         .as_ref()
@@ -729,6 +685,7 @@ pub(super) fn panel_system(
             && (!frames.is_empty() || picture(1).is_some())
             && match a {
                 Action::CastSpell { index } => spells.len() > usize::from(index),
+                Action::HealMode => has_healer,
                 _ => true,
             };
         let want = if shown {
@@ -753,6 +710,7 @@ pub(super) fn panel_system(
             Action::AttackMode => m == Mode::Attack,
             Action::MoveMode => m == Mode::Move,
             Action::GuardMode => m == Mode::Guard,
+            Action::HealMode => m == Mode::Heal,
             Action::PatrolMode => m == Mode::Patrol,
             Action::SetFireState { state } => first.is_some_and(|u| u.fire_state == state),
             Action::CastSpell { index } => spells
@@ -914,44 +872,6 @@ pub(super) fn build_grid_system(
     }
 }
 
-/// The current order of a unit, as TA:K would say it.
-fn order_text(s: &Session, w: &tak_sim::World, u: &tak_sim::world::Unit) -> String {
-    let name = |id: UnitId| {
-        w.unit(id)
-            .and_then(|t| s.def(t.def))
-            .map_or("?".to_string(), |d| d.display.clone())
-    };
-    let now = match u.orders.front() {
-        None => "Idle".to_string(),
-        Some(tak_sim::Order::Move { .. }) => "Moving".into(),
-        Some(tak_sim::Order::AttackMove { .. }) => "Attack-moving".into(),
-        Some(tak_sim::Order::Patrol { .. }) => "Patrolling".into(),
-        Some(tak_sim::Order::Guard { target }) => format!("Guarding {}", name(*target)),
-        Some(tak_sim::Order::Attack {
-            target: tak_commands::Target::Unit(t),
-        }) => format!("Attacking {}", name(*t)),
-        Some(tak_sim::Order::Attack { .. }) => "Attacking ground".into(),
-        Some(tak_sim::Order::Build { def, .. }) => format!(
-            "Building {}",
-            s.def(*def).map_or("?", |d| d.display.as_str())
-        ),
-    };
-    let queued = u.orders.len().saturating_sub(1);
-    if queued > 0 {
-        format!("{now} (+{queued})")
-    } else {
-        now
-    }
-}
-
-fn stance_name(f: tak_commands::FireState) -> &'static str {
-    match f {
-        tak_commands::FireState::FireAtWill => "Offensive",
-        tak_commands::FireState::ReturnFire => "Defensive",
-        tak_commands::FireState::HoldFire => "Passive",
-    }
-}
-
 /// Unit card: portrait, name, health / mana / build bars, stance, current
 /// order and queue (experience and kills are not in the sim yet).
 #[allow(clippy::too_many_arguments)]
@@ -988,7 +908,9 @@ pub(super) fn unit_card_system(
                 format!(
                     "{} - {}\nHealth {}/{}",
                     stance_name(u.fire_state),
-                    order_text(s, w, u),
+                    crate::hud::order_text(w, u, |def| {
+                        s.def(def).map_or("?".to_string(), |d| d.display.clone())
+                    }),
                     u.combat.health,
                     u.combat.max_health
                 )
@@ -1221,6 +1143,7 @@ pub(super) fn bottom_bar_system(
         }
         CursorKind::Attack => verb_line(&prompt, "Attack", target_name.as_deref()),
         CursorKind::Guard => verb_line(&prompt, "Guard", target_name.as_deref()),
+        CursorKind::Heal => verb_line(&prompt, "Heal / repair", target_name.as_deref()),
         CursorKind::Patrol => verb_line(&prompt, "Patrol", None),
         CursorKind::Cast => verb_line(&prompt, "Cast", target_name.as_deref()),
         CursorKind::Invalid => "Not possible here".into(),
@@ -1325,7 +1248,7 @@ mod tests {
         assert_eq!(
             PANEL_ACTIONS[11],
             Action::SetFireState {
-                state: tak_commands::FireState::ReturnFire
+                state: tak_commands::FireState::Defensive
             }
         );
         assert_eq!(

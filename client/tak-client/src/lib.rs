@@ -16,6 +16,8 @@ pub mod fog;
 pub mod game;
 pub mod hud;
 pub mod models;
+pub mod saves;
 pub mod sprites;
 pub mod terrain;
+mod training;
 pub mod view;

@@ -18,6 +18,7 @@ mod build_def;
 pub mod content;
 pub mod placement;
 pub mod progress;
+pub mod repair;
 
 pub use build_def::{BuildDef, MAX_BUILD_OPTIONS, YARD_CHARS, build_def_from_fbi, expand_yardmap};
 pub use progress::Frame;
@@ -85,6 +86,10 @@ pub struct UnitBuild {
     /// Mobile builders: the frame it helps build because it guards that
     /// frame, its builder or its factory (WP-P).
     pub assist: Option<Assist>,
+    /// Explicit queued Heal action, independent of Guard assistance.
+    pub heal: Option<HealJob>,
+    /// Target-owned fractional repair and production-mana credit.
+    pub repair: Option<repair::RepairCredit>,
 }
 
 /// A mobile builder assisting through `Guard` (see [`assist_target`]).
@@ -99,6 +104,15 @@ pub struct Assist {
     pub walking: bool,
     /// `StartBuilding` was called and `StopBuilding` is still owed.
     pub building: bool,
+}
+
+/// An explicit Heal action and its temporary-movement ownership token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HealJob {
+    /// Shared work interval and owned temporary steering.
+    pub work: Assist,
+    /// Replacing orders invalidate the interval even for the same target.
+    pub cancelled: bool,
 }
 
 impl UnitBuild {
@@ -153,6 +167,20 @@ impl UnitBuild {
             h.bool(a.walking);
             h.bool(a.building);
         });
+        // No suffix for units that have never used Heal, retaining legacy
+        // no-Heal replay hashes and old demo compatibility.
+        if let Some(j) = self.heal {
+            h.bytes(b"HEAL");
+            h.unit_id(j.work.target);
+            h.option(j.work.walk_to, StateHasher::vec2);
+            h.bool(j.work.walking);
+            h.bool(j.work.building);
+            h.bool(j.cancelled);
+        }
+        if let Some(r) = self.repair {
+            h.bytes(b"REPAIR");
+            r.hash(h);
+        }
     }
 }
 
@@ -229,6 +257,317 @@ impl ConstructionState {
     }
 }
 
+/// Whether `id` is a live, complete mobile builder eligible for explicit Heal.
+/// Workertime alone never grants the capability (e.g. nonbuilder creatures).
+pub fn can_heal(world: &World, id: UnitId) -> bool {
+    world.unit(id).is_some_and(|u| {
+        u.build.is_complete()
+            && !u.combat.is_dying()
+            && world
+                .defs()
+                .get(u.def)
+                .is_some_and(|d| d.build.builder && d.build.mobile && d.build.workertime > 0)
+    })
+}
+
+fn heal_target(world: &World, actor: UnitId, target: UnitId) -> bool {
+    let (Some(a), Some(t)) = (world.unit(actor), world.unit(target)) else {
+        return false;
+    };
+    actor != target
+        && a.owner == t.owner
+        && !t.combat.is_dying()
+        && world
+            .defs()
+            .get(t.def)
+            .is_some_and(|d| d.combat.max_damage > 0)
+}
+
+/// Admit an explicit owned-unit Heal order. Capability/target rejection leaves
+/// the existing queue untouched. Full-health targets are accepted and finish
+/// when the order reaches the front; queued targets may be damaged meanwhile.
+pub fn apply_heal_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
+    let SimCommand::Heal {
+        units,
+        target,
+        queue,
+    } = cmd
+    else {
+        return;
+    };
+    for &id in units {
+        if !can_heal(world, id)
+            || !heal_target(world, id, *target)
+            || !world.unit(id).is_some_and(|u| u.owner == player)
+        {
+            continue;
+        }
+        if let Some(u) = world.unit_mut(id) {
+            if *queue == QueueMode::Replace {
+                u.cancel_player_orders();
+            }
+            if u.orders.len() < MAX_ORDERS {
+                u.orders.push_back(Order::Heal { target: *target });
+            }
+        }
+    }
+}
+
+/// An owned work walk, not an arbitrary player Move at the same coordinates.
+/// Cancellation and every path/order completion must consume the ownership
+/// flag before examining another waypoint.
+pub(crate) fn is_work_move(u: &crate::world::Unit) -> bool {
+    let owns = |a: Assist| {
+        a.walking
+            && a.walk_to
+                .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
+    };
+    u.build.assist.is_some_and(owns) || u.build.heal.is_some_and(|j| !j.cancelled && owns(j.work))
+}
+
+/// Consume temporary-work steering ownership before popping the front Move.
+pub(crate) fn consume_work_move(u: &mut crate::world::Unit) -> bool {
+    let front = u.orders.front().copied();
+    let mut consumed = false;
+    if let Some(a) = &mut u.build.assist {
+        if a.walking
+            && a.walk_to
+                .is_some_and(|to| front == Some(Order::Move { to }))
+        {
+            a.walking = false;
+            consumed = true;
+        }
+    }
+    if let Some(j) = &mut u.build.heal {
+        if j.work.walking
+            && j.work
+                .walk_to
+                .is_some_and(|to| front == Some(Order::Move { to }))
+        {
+            j.work.walking = false;
+            consumed = true;
+        }
+    }
+    consumed
+}
+
+/// End an explicit Heal interval, including an owed StopBuilding. Called on
+/// replacement, target loss, death and lifecycle removal, even without scripts.
+pub(crate) fn cancel_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    end_heal(world, scripts, id, false);
+}
+
+fn end_heal(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, drop_order: bool) {
+    let Some(u) = world.unit_mut(id) else { return };
+    let Some(j) = u.build.heal.take() else { return };
+    let a = j.work;
+    if !j.cancelled
+        && a.walking
+        && a.walk_to
+            .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
+    {
+        u.orders.pop_front();
+        u.path = Default::default();
+    }
+    if drop_order && !j.cancelled && u.orders.front() == Some(&Order::Heal { target: a.target }) {
+        u.orders.pop_front();
+    }
+    if a.building {
+        start(scripts, id, "StopBuilding");
+    }
+}
+
+fn store_heal(world: &mut World, id: UnitId, work: Assist) {
+    if let Some(u) = world.unit_mut(id) {
+        u.build.heal = Some(HealJob {
+            work,
+            cancelled: false,
+        });
+    }
+}
+
+fn heal_done(world: &World, id: UnitId, target: UnitId) -> bool {
+    if !heal_target(world, id, target) {
+        return true;
+    }
+    let Some(t) = world.unit(target) else {
+        return true;
+    };
+    if !t.build.is_complete() {
+        return false;
+    }
+    world
+        .defs()
+        .get(t.def)
+        .is_none_or(|d| d.build.buildtime <= 0)
+        || (t.combat.ready && t.combat.health >= t.combat.max_health)
+}
+
+fn current_heal(u: &crate::world::Unit, j: HealJob) -> bool {
+    !j.cancelled
+        && u.combat.order.is_none()
+        && (u.orders.front()
+            == Some(&Order::Heal {
+                target: j.work.target,
+            })
+            || (j.work.walking
+                && j.work
+                    .walk_to
+                    .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
+                && u.orders.get(1)
+                    == Some(&Order::Heal {
+                        target: j.work.target,
+                    })))
+}
+
+fn sync_heal_job(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    if world
+        .unit(id)
+        .is_some_and(|u| u.build.heal.is_some_and(|j| !current_heal(u, j)))
+    {
+        end_heal(world, scripts, id, false);
+    }
+}
+
+fn heal_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    let Some(u) = world.unit(id) else { return };
+    let current = u.build.heal.filter(|&j| current_heal(u, j));
+    let Some(u) = world.unit(id) else { return };
+    let mut a = match current {
+        Some(j) => j.work,
+        None => {
+            // Never activate Heal through an earlier player Move, combat
+            // order or construction order, even if coordinates happen to match.
+            let Some(&Order::Heal { target }) = u.orders.front() else {
+                return;
+            };
+            if u.combat.order.is_some() {
+                return;
+            }
+            Assist {
+                target,
+                walk_to: None,
+                walking: false,
+                building: false,
+            }
+        }
+    };
+    store_heal(world, id, a);
+    if !can_heal(world, id) || !heal_target(world, id, a.target) {
+        end_heal(world, scripts, id, true);
+        return;
+    }
+    crate::combat::ensure_health(world, a.target);
+    if heal_done(world, id, a.target) {
+        end_heal(world, scripts, id, true);
+        return;
+    }
+    let (Some(u), Some(t)) = (world.unit(id), world.unit(a.target)) else {
+        return;
+    };
+    let (Some(bd), Some(td)) = (world.defs().get(u.def), world.defs().get(t.def)) else {
+        return;
+    };
+    let (owner, pos, turnrate, workertime) = (u.owner, t.pos, bd.turnrate, bd.build.workertime);
+    let in_range = placement::in_range(u.pos, bd, pos, td);
+    if !in_range {
+        if a.building {
+            start(scripts, id, "StopBuilding");
+            a.building = false;
+        }
+        let goal = world.map().clamp(pos);
+        if a.walk_to != Some(goal) {
+            if let Some(u) = world.unit_mut(id) {
+                if a.walking
+                    && a.walk_to
+                        .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
+                {
+                    u.orders.pop_front();
+                }
+                // Steering may use one extra slot; accepted tails survive.
+                u.orders.push_front(Order::Move { to: goal });
+                u.path = Default::default();
+            }
+            a.walk_to = Some(goal);
+            a.walking = true;
+        } else if !a.walking {
+            // The unchanged target was unreachable: finish, preserving the
+            // tail, instead of asking pathfinding to retry every tick.
+            store_heal(world, id, a);
+            end_heal(world, scripts, id, true);
+            return;
+        }
+        store_heal(world, id, a);
+        return;
+    }
+    if a.walking {
+        if let Some(u) = world.unit_mut(id) {
+            if a.walk_to
+                .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
+            {
+                u.orders.pop_front();
+            }
+            u.path = Default::default();
+            u.speed = Fx::ZERO;
+        }
+    }
+    a.walking = false;
+    a.walk_to = None;
+    if let Some(u) = world.unit_mut(id) {
+        u.speed = Fx::ZERO;
+    }
+    if !a.building {
+        start(scripts, id, "StartBuilding");
+        a.building = true;
+    }
+    store_heal(world, id, a);
+    face(world, id, pos, turnrate);
+    if world.unit(a.target).is_some_and(|u| !u.build.is_complete()) {
+        work(world, a.target, owner, workertime);
+    } else {
+        repair_step(world, a.target, owner, workertime);
+    }
+}
+
+fn repair_step(world: &mut World, target: UnitId, payer: PlayerId, workertime: i32) {
+    let Some(t) = world.unit(target) else { return };
+    let Some(d) = world.defs().get(t.def) else {
+        return;
+    };
+    let (max, missing) = (
+        t.combat.max_health,
+        t.combat.max_health.saturating_sub(t.combat.health),
+    );
+    if d.build.buildtime <= 0 || missing <= 0 {
+        return;
+    }
+    let (total, cost) = (
+        progress::total_work(d.build.buildtime),
+        progress::cost_raw(d.build.buildcost),
+    );
+    let mut credit = t.build.repair.unwrap_or_default();
+    let gain = credit.step(
+        max,
+        missing,
+        total,
+        cost,
+        progress::worker_step(workertime),
+        |want| economy::drain(world, payer, want),
+    );
+    if let Some(t) = world.unit_mut(target) {
+        t.build.repair = Some(credit);
+    }
+    crate::combat::apply_healing(world, target, gain);
+}
+
+fn heal_finish(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    if let Some(j) = world.unit(id).and_then(|u| u.build.heal) {
+        if heal_done(world, id, j.work.target) {
+            end_heal(world, scripts, id, true);
+        }
+    }
+}
+
 /// Apply a `Build` command. Each listed unit must be the player's, complete,
 /// a builder, and have `def` in its build menu. Mobile builders (`bmcode`)
 /// take `at: Some` (snapped to the footprint grid) and honour the queue
@@ -300,6 +639,11 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
     let ids = world.unit_ids();
     for &id in &ids {
         if let Some(u) = world.unit_mut(id) {
+            if u.build.is_complete() && u.combat.ready && u.combat.health >= u.combat.max_health {
+                if let Some(r) = &mut u.build.repair {
+                    r.hp_remainder = 0;
+                }
+            }
             if !u.build.is_complete() {
                 u.orders.clear();
                 u.speed = Fx::ZERO;
@@ -307,6 +651,9 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
         }
     }
     for &id in &ids {
+        // Retire the old explicit interval before another action starts its
+        // callbacks; a replacing Build must not be stopped by stale Heal.
+        sync_heal_job(world, scripts, id);
         match builder_kind(world, id) {
             Some(true) => {
                 mobile_step(world, scripts, id);
@@ -315,8 +662,11 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
             Some(false) => factory_step(world, scripts, id),
             None => {}
         }
+        // Conversely, Build/Guard cleanup precedes a newly activated Heal.
+        heal_step(world, scripts, id);
     }
     for &id in &ids {
+        heal_finish(world, scripts, id);
         match builder_kind(world, id) {
             Some(true) => {
                 mobile_finish(world, scripts, id);
