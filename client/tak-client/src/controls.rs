@@ -321,7 +321,13 @@ pub(super) fn overlay_input_system(
     rows: Query<(&OverlayRow, &ComputedNode, &UiGlobalTransform)>,
     mut feel: ResMut<Feel>,
     mut input: ResMut<InputRes>,
+    browser: Option<Res<save_browser::BrowserState>>,
 ) {
+    if browser.is_some_and(|browser| browser.captures_input()) {
+        feel.overlay_open = false;
+        feel.overlay_captured_input = true;
+        return;
+    }
     feel.overlay_captured_input = feel.overlay_open;
     if !feel.overlay_open {
         return;
@@ -538,14 +544,14 @@ pub(super) fn overlay_draw_system(
         };
         let pad = match feel.layout {
             Layout::Xbox => {
-                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, B close"
+                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, View checkpoints, B close"
             }
             Layout::PlayStation => {
-                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save profile, Square quick-save match, Circle close"
+                "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save profile, Square quick-save match, Share checkpoints, Circle close"
             }
         };
         s.0 = format!(
-            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F11 close. Mouse: - / +\nQuick-save: {}{}",
+            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F8 checkpoints, F11 close. Mouse: - / +\nQuick-save: {}{}",
             feel.quick_save_dir
                 .as_ref()
                 .map_or_else(|e| e.clone(), |p| p.display().to_string()),
@@ -692,7 +698,7 @@ pub(super) fn cursor_system(
                 continue;
             }
             let pos = if stick || plan.is_some() {
-                input_to_screen(&cam.geom, &ground.0, input.mapper.cursor_world())
+                input_to_screen(&cam.geom, &ground.0, input.mapper.cursor_world_unmapped())
             } else {
                 match windows.single().ok().and_then(|w| w.cursor_position()) {
                     Some(p) => [p.x, p.y],
@@ -1454,8 +1460,8 @@ pub(super) fn wheel_system(
     let ghost = feel.ghost.as_ref().and_then(|r| r.ghost_at(s.tick().0));
     let (wheel, at) = match (&ghost, input.mapper.wheel()) {
         (Some(g), _) => (g.wheel.clone(), g.cursor_world),
-        (None, Some(wh)) => (Some(wh.clone()), input.mapper.cursor_world()),
-        (None, None) => (None, input.mapper.cursor_world()),
+        (None, Some(wh)) => (Some(wh.clone()), input.mapper.cursor_world_unmapped()),
+        (None, None) => (None, input.mapper.cursor_world_unmapped()),
     };
     let Ok((mut rn, mut rv)) = root.single_mut() else {
         return;

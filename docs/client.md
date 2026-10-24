@@ -479,3 +479,68 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
 - The demo duel: the monarchs stop at range and trade ranged attacks; the
   Zhon monarch dies at tick 1,620 (the match is decided then; the Victory
   banner shows from tick 1,770). Behaviour is the sim's.
+
+## In-game replay checkpoint browser
+
+**Chosen:** F8 or the visible **Checkpoints [F8]** button opens the browser.
+On a controller, open settings with Menu/Start and press View/Select. The
+browser pauses the match and owns mouse, keyboard and controller input,
+including its opening/closing frame. Cancel restores the prior pause state.
+Opening also clears held gameplay gestures without clearing selection/groups.
+
+- Mouse: select a row, then **Load**, **New checkpoint**, or **Overwrite**.
+- Keyboard: Up/Down select, PageUp/PageDown page, S creates a new checkpoint,
+  O requests overwrite, Enter requests load, R refreshes, Escape closes.
+- Controller: D-pad selects, LB/RB page, A/Cross requests load, X/Square creates
+  a new checkpoint, Y/Triangle requests overwrite, View refreshes, B/Circle
+  closes. In the settings overlay, X/Square still quick-saves the match and
+  Y/Triangle still saves the input profile.
+- Load and overwrite require a second confirmation. **Cancel is focused by
+  default**: Left/Right, Tab or D-pad changes the choice; Enter/A activates it.
+  Escape/B cancels the confirmation without closing the browser. Mouse users
+  can click **Confirm** or **Cancel** directly.
+
+The newest saves appear first, with map, factions (explicit OTA owner slots for
+campaigns), match time at 30 ticks/second, relative file-modified time, absolute
+next tick, executed-order count, gameplay fingerprint and state hash. Listing
+validates the checkpoint file, not the installed content or replay. Corrupt,
+oversized or unsupported-version files remain listed with their error; they
+cannot be loaded or overwritten. Synthetic headless-only sources are labeled.
+The browser scans at most 4,096 directory entries, displays at most 128 saves,
+and parses at most 64 MiB per refresh. Move older files elsewhere if those
+bounds hide a needed save; CLI loading is still available.
+
+**Not a full savestate:** saving replays executed command history and checks
+its hash against the live simulation. Loading reconstructs the source, verifies
+installed gameplay content, replays history and verifies the resulting hash.
+Work is linear in elapsed ticks and can temporarily stall the client. Existing
+`--max-replay-ticks` and `--max-replay-commands` ceilings apply. Camera,
+selection, UI state and previously explored fog are not saved. A successful
+in-game load stays paused with the browser open; close it with mouse, Escape or
+B to resume. Current unit sight is shown immediately, with older explored fog
+reset. Render assets are prepared before the old match is replaced; errors
+leave the old simulation intact.
+
+Browser saving refuses queued/future commands because the checkpoint format
+stores only orders that executed. Close the browser and resume until those
+orders execute, then save again. Loading explicitly warns that it discards
+unsaved current progress and pending orders. F10 and settings-overlay
+X/Square retain their existing no-clobber quick-save behavior, including the
+warning when future orders are excluded. `--load-checkpoint FILE` remains
+compatible and does not require browser filenames or the browser directory.
+In-game loading is unavailable in demo, ghost, session-recording and screenshot
+modes; use a normal match or the CLI checkpoint option instead.
+
+Only direct regular `*.save.json` files in the configured per-user save folder
+are browsed. Symlinks and special files are ignored. New saves never replace an
+existing pathname. Confirmed overwrite uses the atomic canonical writer only
+after live replay verification and selected-file change checks. Changing a
+checkpoint after listing invalidates the pending choice and requires refresh
+and confirmation again. Content changes, replay failures and output aliases
+are refused before replacing the current match. This guards accidental edits,
+not hostile concurrent filesystem races or checkpoints from untrusted people.
+
+A one-frame preparation notice precedes browser save/load work. Escape/B or
+Cancel can still stop it before replay begins. Once that bounded synchronous
+replay is running it cannot be interrupted; this is not a background/async
+loader. No repeated click is queued while the operation is pending.

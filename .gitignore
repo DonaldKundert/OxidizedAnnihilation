@@ -10,3 +10,6 @@
 *.tnt
 /out/
 /survey*/
+
+# Separate Bevy workspace build outputs.
+/client/target/

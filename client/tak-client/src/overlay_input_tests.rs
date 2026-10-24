@@ -40,6 +40,9 @@ pub(super) fn app() -> App {
         .init_resource::<ButtonInput<MouseButton>>()
         .add_message::<MouseWheel>()
         .insert_resource(Feel::new(&args, None))
+        .insert_resource(save_browser::BrowserArgs(args.clone()))
+        .init_resource::<save_browser::BrowserState>()
+        .insert_non_send(save_browser::PendingLoad::default())
         .insert_resource(InputRes {
             mapper: Mapper::new(Profile::default_combined()),
             last_axes: BTreeMap::new(),
@@ -74,11 +77,8 @@ pub(super) fn app() -> App {
             alerts: Default::default(),
             new_alerts: vec![],
             fog_on: false,
-        })
-        .add_systems(
-            Update,
-            (controls::overlay_input_system, input_system).chain(),
-        );
+        });
+    add_interactive_input(&mut app);
     app
 }
 

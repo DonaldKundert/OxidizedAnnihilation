@@ -455,6 +455,12 @@ pub struct Profile {
     /// their normal bindings. Off by default (TA:K had none).
     #[serde(default, skip_serializing_if = "is_false")]
     pub grid_build_keys: bool,
+    /// Original-style primary mouse clicks: [`Action::DragSelect`] still
+    /// drags a selection, but a click selects an own unit or gives the
+    /// context order over ground / other players' units. Off by default;
+    /// [`Profile::original_tak`] enables it without changing the pad.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub left_click_context: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -483,7 +489,7 @@ const WP_J_CONTROLLER_JSON: &str = include_str!("profiles/wp_j_controller.json")
 const WP_S_MOUSE_KEYBOARD_JSON: &str = include_str!("profiles/wp_s_mouse_keyboard.json");
 
 /// Names accepted by [`Profile::named`] (control schemes), default first.
-pub const CONTROL_SCHEMES: [&str; 3] = ["kingdoms", "wp_s", "wp_j"];
+pub const CONTROL_SCHEMES: [&str; 4] = ["kingdoms", "original", "wp_s", "wp_j"];
 
 impl Profile {
     /// Parse and validate.
@@ -596,16 +602,22 @@ impl Profile {
         let mut p = pad;
         p.name = name.into();
         p.grid_build_keys |= keys.grid_build_keys;
+        p.left_click_context |= keys.left_click_context;
         p.bindings.extend(keys.bindings);
         p
     }
 
     /// A control scheme by name ([`CONTROL_SCHEMES`]), controller and
-    /// keyboard merged: `kingdoms` (default), `wp_s`, `wp_j` (the WP-J pad
-    /// with the WP-S keyboard).
+    /// keyboard merged: `kingdoms` (default), `original` (original-style
+    /// left-click orders), `wp_s`, `wp_j` (the WP-J pad with the WP-S keyboard).
     pub fn named(name: &str) -> Option<Profile> {
         match name.to_ascii_lowercase().replace('-', "_").as_str() {
             "kingdoms" | "kingdoms_console" | "default" => Some(Profile::default_combined()),
+            "original" | "original_tak" => Some(Profile::combine(
+                Profile::kingdoms_console(),
+                Profile::original_tak(),
+                "Kingdoms Console + Original TA:K",
+            )),
             "wp_s" | "wps" => Some(Profile::wp_s_combined()),
             "wp_j" | "wpj" => Some(Profile::combine(
                 Profile::wp_j_controller(),
@@ -622,9 +634,20 @@ impl Profile {
         Profile::classic_tak()
     }
 
-    /// "Classic TA:K": TA:K's own default keys and mouse model.
+    /// "Classic TA:K": TA:K's default keys with left-select / right-order
+    /// mouse controls, retained as the default for existing players.
     pub fn classic_tak() -> Profile {
         Profile::from_json(CLASSIC_TAK_JSON).expect("embedded Classic TA:K profile is valid")
+    }
+
+    /// "Original TA:K": Classic keys with optional original-style primary
+    /// contextual clicks. Own units select; ground moves; enemies attack.
+    /// Drag selection, explicit order modes and right-click orders remain.
+    pub fn original_tak() -> Profile {
+        let mut p = Profile::classic_tak();
+        p.name = "Original TA:K".into();
+        p.left_click_context = true;
+        p
     }
 
     /// The WP-S mouse and keyboard profile, kept selectable.

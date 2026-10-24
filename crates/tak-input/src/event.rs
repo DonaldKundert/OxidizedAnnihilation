@@ -145,6 +145,13 @@ pub enum EventKind {
         /// Ground point represented by this map pixel.
         world: tak_commands::WorldPos,
     },
+    /// Surface under the virtual stick cursor. Unlike [`EventKind::MapPointer`],
+    /// this leaves the cursor position and input source unchanged. Ignored
+    /// while the mouse owns the cursor; `None` restores terrain targeting.
+    StickMapPointer {
+        /// Ground point represented by the map pixel, or no map surface.
+        world: Option<tak_commands::WorldPos>,
+    },
     /// Mouse wheel: thousandths of a notch, positive away from the user
     /// (zoom in).
     Scroll {

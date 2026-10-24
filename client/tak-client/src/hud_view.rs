@@ -1125,7 +1125,7 @@ pub(super) fn bottom_bar_system(
     } else if m.mode() != Mode::None {
         "LMB".into()
     } else {
-        "RMB".into()
+        crate::feel::mouse_order_name(m)
     };
     let select_prompt = if mode.console {
         crate::feel::pad_action_name(m.profile(), feel.layout, |a| matches!(a, Action::Select))

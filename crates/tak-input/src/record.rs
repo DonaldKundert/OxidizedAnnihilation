@@ -52,7 +52,8 @@ pub struct RecFrame {
     pub events: Vec<EventKind>,
     /// Cursor, screen pixels.
     pub cursor: Vec2,
-    /// Cursor on the ground.
+    /// Visible cursor on the ground. Map-surface order targets remain in
+    /// the events; they must not displace the ghost cursor or its wheel.
     pub cursor_world: WorldPos,
     /// The stick (not the mouse) drives the cursor.
     pub stick: bool,
@@ -291,7 +292,7 @@ impl Recorder {
             tick,
             events,
             cursor: mapper.cursor_screen(),
-            cursor_world: mapper.cursor_world(),
+            cursor_world: mapper.cursor_world_unmapped(),
             stick: mapper.stick_cursor(),
             camera: *mapper.camera(),
             selection,

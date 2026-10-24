@@ -35,6 +35,10 @@ use crate::cli::{Args, Focus, parse_focus};
 mod controls;
 #[path = "hud_view.rs"]
 mod hud_view;
+#[path = "save_browser.rs"]
+mod save_browser;
+#[path = "scene_reload.rs"]
+mod scene_reload;
 use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
@@ -287,7 +291,13 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     // The player's own Keys.TDF (TA:K's key file) carries over onto the
     // Classic TA:K keys, unless a saved profile already says otherwise.
-    if !from_file && !args.no_keys_tdf && args.controls.eq_ignore_ascii_case("kingdoms") {
+    if !from_file
+        && !args.no_keys_tdf
+        && matches!(
+            args.controls.to_ascii_lowercase().as_str(),
+            "kingdoms" | "original"
+        )
+    {
         let path = args
             .keys_tdf
             .clone()
@@ -456,6 +466,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             last_pointer: None,
         })
         .insert_resource(feel)
+        .insert_resource(save_browser::BrowserArgs(args.clone()))
+        .init_resource::<save_browser::BrowserState>()
+        .insert_non_send(save_browser::PendingLoad::default())
         .init_resource::<ModelCache>()
         .init_resource::<UnitEntities>()
         .init_resource::<FeatureEntities>()
@@ -483,6 +496,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 controls::setup_sounds,
                 hud_view::setup_hud_art,
                 hud_view::setup_hud_view,
+                save_browser::setup,
             )
                 .chain(),
         )
@@ -492,8 +506,6 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 (
                     shot_driver,
                     controls::hot_reload_system,
-                    controls::overlay_input_system,
-                    input_system,
                     sim_driver,
                     quick_save_system,
                     camera_system,
@@ -503,7 +515,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     animate_sprites,
                     showcase_system,
                     fog_system,
-                ),
+                )
+                    .chain(),
                 (
                     hud_system,
                     hud_view::hud_mode_system,
@@ -519,10 +532,33 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     controls::hints_system,
                     controls::wheel_system,
                     controls::overlay_draw_system,
+                    save_browser::draw,
                     controls::sound_system,
                     controls::rumble_system,
                     fps_report,
-                ),
+                )
+                    .chain(),
+            )
+                .chain(),
+        );
+    add_interactive_input(&mut app);
+    app.add_systems(Last, scene_reload::apply_prepared_load)
+        .add_systems(
+            scene_reload::RebuildScene,
+            (
+                setup_scene,
+                setup_hud,
+                spawn_scenery,
+                setup_minimap,
+                setup_fog,
+                controls::setup_overlay,
+                controls::setup_cursors,
+                controls::setup_hints,
+                controls::setup_wheel,
+                controls::setup_sounds,
+                hud_view::setup_hud_art,
+                hud_view::setup_hud_view,
+                save_browser::setup,
             )
                 .chain(),
         );
@@ -1175,6 +1211,23 @@ const PAD_BUTTONS: [(GamepadButton, InButton); 18] = [
     (GamepadButton::C, InButton::Menu),
 ];
 
+/// One shared ordering definition for production and asset-free adapter tests.
+/// Tuple nesting does not recursively chain systems: modal capture must run
+/// before settings/gameplay, and gameplay must complete before any sim tick.
+fn add_interactive_input(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            save_browser::input,
+            controls::overlay_input_system,
+            input_system,
+        )
+            .chain()
+            .after(controls::hot_reload_system)
+            .before(sim_driver),
+    );
+}
+
 /// Bevy input to `tak-input` events; mapper outputs to the sim's log and
 /// the camera.
 fn input_system(
@@ -1272,7 +1325,14 @@ fn input_system(
             .mapper
             .press_action(&tak_input::Input::Button(InButton::MouseLeft)),
         Some(Action::Select | Action::DragSelect)
-    );
+    ) && !(input.mapper.profile().left_click_context
+        && input.mapper.selection().iter().any(|id| {
+            sim.session
+                .sim
+                .world()
+                .unit(*id)
+                .is_some_and(|unit| unit.owner == sim.session.local)
+        }));
     if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
         && mouse.just_pressed(MouseButton::Left)
         && mg.contains(pos.x, pos.y)
@@ -1284,6 +1344,7 @@ fn input_system(
     }
     if overlay {
         minimap.mouse_drag = false;
+        minimap.pad_swallow = false;
     }
     if minimap.mouse_drag {
         if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
@@ -1331,7 +1392,7 @@ fn input_system(
         }
     }
     for k in keys.get_just_pressed() {
-        if *k == KeyCode::F10 {
+        if matches!(*k, KeyCode::F10 | KeyCode::F8) {
             continue;
         }
         if overlay {
@@ -1342,7 +1403,7 @@ fn input_system(
         }
     }
     for k in keys.get_just_released() {
-        if *k == KeyCode::F10 {
+        if matches!(*k, KeyCode::F10 | KeyCode::F8) {
             continue;
         }
         if let Some(n) = key_name(*k) {
@@ -1351,43 +1412,6 @@ fn input_system(
     }
     // One pad drives the mapper (not while the overlay or a ghost has it).
     if let Some(pad) = pads.iter().next().filter(|_| !overlay && !ghost) {
-        // A with the virtual cursor over the minimap jumps the camera there.
-        let c = input.mapper.cursor_world();
-        let (cx, cz) = (f(c.x), f(c.y));
-        let csp = geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
-        let mut swallow_a = false;
-        if let Some(mg) = mm_geom
-            && mg.contains(csp[0], csp[1])
-            && pad.just_pressed(GamepadButton::South)
-        {
-            cam.geom.target = mg.target_at(csp[0], csp[1]);
-            minimap.pad_swallow = true;
-        }
-        if pad.just_pressed(GamepadButton::South)
-            && let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel)
-        {
-            minimap.pad_swallow = true;
-            if let Some(k) = hit {
-                pressed.push(k.action());
-            }
-        }
-        if minimap.pad_swallow {
-            swallow_a = true;
-            if pad.just_released(GamepadButton::South) || !pad.pressed(GamepadButton::South) {
-                minimap.pad_swallow = false;
-            }
-        }
-        for (gb, b) in PAD_BUTTONS {
-            if gb == GamepadButton::South && swallow_a {
-                continue;
-            }
-            if pad.just_pressed(gb) {
-                events.push(EventKind::ButtonDown { button: b });
-            }
-            if pad.just_released(gb) {
-                events.push(EventKind::ButtonUp { button: b });
-            }
-        }
         let l = pad.left_stick();
         let r = pad.right_stick();
         for (axis, v) in [
@@ -1400,6 +1424,25 @@ fn input_system(
             if input.last_axes.get(&axis) != Some(&q) {
                 input.last_axes.insert(axis, q);
                 events.push(EventKind::Axis { axis, value: q });
+            }
+        }
+        // Resolve the stick's map surface after its axes take control, but
+        // before its buttons fire. The target is filled in at dispatch time.
+        events.push(EventKind::StickMapPointer { world: None });
+        // A can be a chorded press action: establish other buttons first.
+        for (gb, b) in PAD_BUTTONS
+            .into_iter()
+            .filter(|(_, b)| *b != InButton::A)
+            .chain([(GamepadButton::South, InButton::A)])
+        {
+            if pad.just_pressed(gb) {
+                events.push(EventKind::ButtonDown { button: b });
+            }
+        }
+        // On release, consume A before its queue/chord modifier is lifted.
+        for (gb, b) in PAD_BUTTONS {
+            if pad.just_released(gb) {
+                events.push(EventKind::ButtonUp { button: b });
             }
         }
     }
@@ -1438,14 +1481,108 @@ fn input_system(
 
     let tick = sim.session.tick();
     let mut outs = Vec::new();
+    let mut mapped_events = Vec::new();
     {
         let view = sim.view();
-        for kind in &events {
+        for kind in &mut events {
+            let mut log_event = true;
+            if matches!(kind, EventKind::StickMapPointer { .. }) {
+                let previous_target = input.mapper.map_target();
+                // Advance held-stick motion before sampling the visible
+                // cursor. Reapplying at the same time cannot advance twice.
+                outs.extend(
+                    input
+                        .mapper
+                        .handle(&InputEvent::new(t, kind.clone()), &view, tick),
+                );
+                let c = input.mapper.cursor_world_unmapped();
+                let (cx, cz) = (f(c.x), f(c.y));
+                let csp = geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
+                let fx = |v: f32| tak_math::Fx::from_raw((v * 65536.0) as i32);
+                *kind = EventKind::StickMapPointer {
+                    world: mm_geom.filter(|mg| mg.contains(csp[0], csp[1])).map(|mg| {
+                        let p = mg.target_at(csp[0], csp[1]);
+                        tak_math::Vec2::new(fx(p[0]), fx(p[1]))
+                    }),
+                };
+                // Idle pad surface checks are not raw input changes. Avoid
+                // recording one redundant event for every rendered frame.
+                log_event = input.mapper.stick_cursor()
+                    && matches!(kind, EventKind::StickMapPointer { world } if *world != previous_target);
+            }
+            if matches!(
+                kind,
+                EventKind::ButtonDown {
+                    button: InButton::A
+                }
+            ) {
+                minimap.pad_swallow = false;
+                // The keyboard and held modifiers have now reached the
+                // mapper. Only an ordinary selection gesture pans the map;
+                // pending targets and remapped buttons retain their bindings.
+                let a = tak_input::Input::Button(InButton::A);
+                let selects = matches!(
+                    input
+                        .mapper
+                        .binding_action(&a, tak_input::Gesture::Press)
+                        .or_else(|| input.mapper.binding_action(&a, tak_input::Gesture::Tap)),
+                    Some(Action::Select | Action::DragSelect)
+                ) && matches!(
+                    input.mapper.binding_action(&a, tak_input::Gesture::Hold),
+                    None | Some(Action::Brush)
+                ) && [
+                    tak_input::Gesture::Release,
+                    tak_input::Gesture::DoubleTap,
+                    tak_input::Gesture::SecondTap,
+                ]
+                .into_iter()
+                .all(|gesture| {
+                    matches!(
+                        input.mapper.binding_action(&a, gesture),
+                        None | Some(
+                            Action::Select | Action::DragSelect | Action::SelectSameType { .. }
+                        )
+                    )
+                });
+                let c = input.mapper.cursor_world_unmapped();
+                let (cx, cz) = (f(c.x), f(c.y));
+                let csp = geom.to_screen([cx, ground.0.height_at(cx, cz), cz]);
+                if let Some(mg) = mm_geom.filter(|mg| mg.contains(csp[0], csp[1])) {
+                    if selects
+                        && input.mapper.mode() == Mode::None
+                        && input.mapper.wheel().is_none()
+                    {
+                        cam.geom.target = mg.target_at(csp[0], csp[1]);
+                        minimap.pad_swallow = true;
+                    }
+                } else if let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel) {
+                    minimap.pad_swallow = true;
+                    if let Some(k) = hit {
+                        pressed.push(k.action());
+                    }
+                }
+                if minimap.pad_swallow {
+                    continue;
+                }
+            }
+            if matches!(
+                kind,
+                EventKind::ButtonUp {
+                    button: InButton::A
+                }
+            ) && minimap.pad_swallow
+            {
+                minimap.pad_swallow = false;
+                continue;
+            }
             outs.extend(
                 input
                     .mapper
                     .handle(&InputEvent::new(t, kind.clone()), &view, tick),
             );
+            if log_event {
+                mapped_events.push(kind.clone());
+            }
         }
         // HUD buttons carry out their action directly.
         for a in pressed {
@@ -1522,7 +1659,7 @@ fn input_system(
             t,
             tick.0,
             tak_input::FrameIo {
-                events: &events,
+                events: &mapped_events,
                 outputs: &outs,
                 submitted: &submitted,
                 feedback: &fb,
@@ -3825,7 +3962,8 @@ fn gizmo_system(
         return;
     }
     let c = input.mapper.cursor_world();
-    let (cx, cz) = (f(c.x), f(c.y));
+    let visible = input.mapper.cursor_world_unmapped();
+    let (cx, cz) = (f(visible.x), f(visible.y));
     if art.as_ref().is_some_and(|a| a.loaded()) {
         // The game cursor sprite shows the cursor; mark the ground point
         // under a stick cursor.
