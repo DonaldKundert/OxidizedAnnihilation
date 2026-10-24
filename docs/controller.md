@@ -27,9 +27,11 @@ elsewhere: **Known**, **Believed**, **Chosen**, **Unknown**.
   fast pan), the D-pad is squads 1-4, View is the last alert (hold: the
   Crystal Ball), L3 the monarch, R3 resets the zoom (hold: track). The
   right stick zooms.
-- **New default keyboard, "Classic TA:K"**: exactly TA:K's own default keys
-  and mouse model (section 5). Your install's `Keys.TDF` is imported at
-  start, so customised keys carry over.
+- **New default keyboard, "Classic TA:K"**: TA:K's default keys with the
+  existing left-select / right-order mouse scheme (section 5). Your
+  install's `Keys.TDF` is imported at start, so customised keys carry over.
+  The optional `--controls original` scheme adds original-style contextual
+  left clicks without changing the default or the controller bindings.
 - **Wheels keep their shape**: Stop is always at 12 o'clock; Stance and Unit
   open sub-rings; build and spell wheels have pages of 8 (RB turns the
   page) with the game's build portraits.
@@ -147,7 +149,8 @@ profile's bindings, so they stay right after rebinding.
 ## Classic TA:K (keyboard and mouse)
 
 `Profile::classic_tak()`, `crates/tak-input/src/profiles/classic_tak.json`:
-TA:K's defaults from the install's readme and `Keys.TDF`.
+TA:K's keyboard defaults from the install's readme and `Keys.TDF`, with the
+existing right-context mouse scheme retained for compatibility.
 
 | Keys | Action |
 |---|---|
@@ -173,6 +176,37 @@ TA:K's defaults from the install's readme and `Keys.TDF`.
 | F1 / F11 | Game menu / tuning overlay |
 | Esc | Cancel mode, then deselect |
 | Arrow keys, mouse wheel | Pan, zoom (client) |
+
+### Original-style left-click orders (optional)
+
+`--controls original` combines the unchanged Kingdoms Console pad with
+`Profile::original_tak()`. A saved profile can opt in with
+`"left_click_context": true`; older profiles omit it and keep their existing
+behavior. This option changes `drag_select` clicks, not the controller's
+`select` action or its bindings.
+
+- Click an owned unit to select it, including when another unit is selected.
+  Shift-click adds to the selection; double-click the same owned unit selects
+  its type on screen.
+- With owned units selected, click ground to move or an enemy to attack.
+  Shift-click queues orders. Rapid repeated command clicks issue repeated
+  orders rather than accidentally triggering same-type selection.
+- Left drag still selects the dragged circle and never issues a move or
+  attack. Orders are resolved on release, after distinguishing click from
+  drag. Escape cancels a gesture before it can issue a late order.
+- Explicit order modes take priority, including over friendly units. Right
+  click remains the ordinary context order, so guarding an owned unit is
+  still available; clicking another player's non-enemy unit also guards it.
+- Empty selection cannot issue orders. Escape still clears selection when
+  no gesture or order mode is active.
+
+**Known** (reference-play observation, October 2026): the original game
+supports left-click contextual selection, movement and attacks. **Chosen**:
+keep this an explicit named option, retain right-click orders and the
+existing circular drag region, and reuse the current guard / queue / order
+mode rules. This is not a claim of complete one-to-one mouse fidelity.
+
+### Keyboard add-ons and imports
 
 - **No build hotkeys by default**, as in TA:K. `--grid-keys` (or
   `"grid_build_keys": true` in a profile) turns on the "Grid" add-on: with
@@ -486,6 +520,13 @@ match (map, players, seed, full command log, final hash). HUD buttons
 carry out their action directly (`Mapper::perform`), so their orders are in
 the outputs and the log rather than as device events.
 
+Map-surface events store their exact order targets separately from the visible
+cursor position, so a controller cursor, its wheel, and a recorded ghost do
+not jump to the distant world point represented by a minimap pixel. The
+additive `stick_map_pointer` event preserves controller ownership; older
+recordings still load, but recordings containing this event need a build
+that understands it.
+
 ### Watching one (ghost playback)
 
 ```sh
@@ -533,6 +574,10 @@ glides settle).
   segment; build-wheel pages; old schemes stay selectable.
 - `tests/classic_tak.rs`: the same for Classic TA:K
   (`tests/fixtures/classic_tak_session.json`) and the Grid add-on.
+- `tests/original_tak.rs`: opt-in left-click select / move / attack,
+  repeat-click and same-unit double-click disambiguation, additive and queued
+  input, drag thresholds, cancellation / hot reload, stale targets, cursor
+  hints, explicit orders, and unchanged default / controller behavior.
 - `tests/keys_tdf.rs`: a synthetic `Keys.TDF` (mapping, reserved,
   unbinding, skipped chords, bad input), and the install's file giving
   exactly Classic TA:K (data-gated).

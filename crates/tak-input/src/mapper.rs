@@ -174,6 +174,9 @@ struct Press {
 struct PendingTap {
     released_at: u32,
     with: Option<Input>,
+    /// Contextual mouse clicks only double-select the same owned unit.
+    /// Other gestures keep their existing unconstrained tap recognition.
+    selection_target: Option<UnitId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -343,6 +346,12 @@ impl Mapper {
     /// Adapters use this to distinguish selection gestures from order buttons
     /// on map surfaces without overriding the user's profile.
     pub fn press_action(&self, input: &Input) -> Option<Action> {
+        self.binding_action(input, Gesture::Press)
+    }
+
+    /// Resolve a gesture with the currently held chord modifier. Surface
+    /// adapters use this for tap-bound controllers as well as press-bound mice.
+    pub fn binding_action(&self, input: &Input, gesture: Gesture) -> Option<Action> {
         let with = self
             .inputs
             .iter()
@@ -350,7 +359,7 @@ impl Mapper {
                 state.press.is_some() && self.profile.has_chord(input, modifier)
             })
             .map(|(modifier, _)| modifier);
-        self.profile.find(input, with, Gesture::Press)
+        self.profile.find(input, with, gesture)
     }
 
     /// The tuning in use.
@@ -436,6 +445,18 @@ impl Mapper {
         if let Some(pos) = self.map_pointer {
             return pos;
         }
+        self.cursor_world_unmapped()
+    }
+
+    /// Explicit order target supplied by the active map surface, if any.
+    pub fn map_target(&self) -> Option<WorldPos> {
+        self.map_pointer
+    }
+
+    /// Ground point under the visible cursor, ignoring a map-surface target.
+    /// Adapters use this to draw and hit-test a stick cursor without projecting
+    /// a distant minimap order back through the gameplay camera.
+    pub fn cursor_world_unmapped(&self) -> WorldPos {
         if self.reticle_active() {
             return sat_add(
                 self.camera.screen_to_world(self.camera.center_screen()),
@@ -618,6 +639,13 @@ impl Mapper {
             },
             Mode::None => match hovered {
                 Some(h) if world.is_enemy(h.owner) => CursorKind::Attack,
+                Some(h)
+                    if self.profile.left_click_context
+                        && self.source == CursorSource::Pointer
+                        && h.owner == me =>
+                {
+                    CursorKind::Select
+                }
                 Some(h) if units.contains(h.id) => CursorKind::Select,
                 Some(_) => CursorKind::Guard,
                 None => CursorKind::Move,
@@ -663,6 +691,12 @@ impl Mapper {
                 self.cursor = self.camera.clamp_screen(Vec2::new(fx_int(*x), fx_int(*y)));
                 self.map_pointer = Some(*world);
                 self.snap_target = None;
+            }
+            EventKind::StickMapPointer { world } => {
+                if self.source == CursorSource::Stick {
+                    self.map_pointer = *world;
+                    self.snap_target = None;
+                }
             }
             EventKind::Scroll { milli } => self.scroll(*milli),
             EventKind::Frame => self.frame(t, &mut cx),
@@ -715,7 +749,7 @@ impl Mapper {
     fn assist_targets<W: WorldView + ?Sized>(&self, world: &W) -> Vec<(UnitId, Vec2)> {
         let t = &self.tuning;
         let assist = t.magnet_radius_px > 0 || t.friction_pct < 100;
-        if !assist {
+        if !assist || self.map_pointer.is_some() {
             return Vec::new();
         }
         let me = world.local_player();
@@ -1242,7 +1276,7 @@ impl Mapper {
             None => (None, None),
         };
         if let Some(p) = pending {
-            let double = (p.with == with)
+            let double = (p.with == with && self.tap_target_matches(&p, cx.world))
                 .then(|| self.profile.find(&input, with.as_ref(), Gesture::DoubleTap))
                 .flatten();
             match double {
@@ -1254,7 +1288,9 @@ impl Mapper {
                 None => self.fire_tap(&input, p.with.as_ref(), t, cx),
             }
         } else if let Some(p) = last_tap.filter(|p| {
-            p.with == with && t.saturating_sub(p.released_at) <= self.tuning.double_tap_ms
+            p.with == with
+                && t.saturating_sub(p.released_at) <= self.tuning.double_tap_ms
+                && self.tap_target_matches(p, cx.world)
         }) && let Some(a) = self
             .profile
             .find(&input, p.with.as_ref(), Gesture::SecondTap)
@@ -1281,12 +1317,38 @@ impl Mapper {
         let Some(press) = self.inputs.get_mut(&input).and_then(|s| s.press.take()) else {
             return;
         };
+        let contextual_drag = self.profile.left_click_context
+            && self
+                .profile
+                .find(&input, press.with.as_ref(), Gesture::Press)
+                == Some(Action::DragSelect);
+        // Capture the actual click result before ending the gesture. An
+        // order, drag, or cancelled gesture must not arm same-type selection
+        // and swallow the next command click inside the double-tap window.
+        let selection_target = contextual_drag
+            .then(|| {
+                self.drag
+                    .as_ref()
+                    .filter(|d| {
+                        d.input == input
+                            && self.mode == Mode::None
+                            && d.start_screen.distance(self.cursor)
+                                < fx_int(self.tuning.drag_min_px)
+                    })
+                    .and_then(|_| pick_unit(cx.world, self.cursor_world()))
+                    .filter(|u| u.owner == cx.world.local_player())
+                    .map(|u| u.id)
+            })
+            .flatten();
         self.end_held(&input, cx);
         let with = press.with.as_ref();
         if let Some(a) = self.profile.find(&input, with, Gesture::Release) {
             self.trigger(&input, a, t, cx);
         }
         if press.consumed || press.hold_fired {
+            return;
+        }
+        if contextual_drag && selection_target.is_none() {
             return;
         }
         // A long press of an input whose press binding is a held action
@@ -1307,6 +1369,7 @@ impl Mapper {
             self.inputs.entry(input).or_default().pending = Some(PendingTap {
                 released_at: t,
                 with: press.with,
+                selection_target,
             });
         } else {
             self.fire_tap(&input, with, t, cx);
@@ -1318,9 +1381,19 @@ impl Mapper {
                 self.inputs.entry(input).or_default().last_tap = Some(PendingTap {
                     released_at: t,
                     with: press.with,
+                    selection_target,
                 });
             }
         }
+    }
+
+    fn tap_target_matches<W: WorldView + ?Sized>(&self, tap: &PendingTap, world: &W) -> bool {
+        tap.selection_target.is_none_or(|id| {
+            self.mode == Mode::None
+                && self.selection.contains(id)
+                && pick_unit(world, self.cursor_world())
+                    .is_some_and(|u| u.id == id && u.owner == world.local_player())
+        })
     }
 
     fn fire_tap<W: WorldView + ?Sized>(
@@ -1659,7 +1732,11 @@ impl Mapper {
         if let Some(d) = self.drag.take_if(|d| &d.input == input) {
             let end = self.cursor_world();
             if d.start_screen.distance(self.cursor) < fx_int(self.tuning.drag_min_px) {
-                if self.mode != Mode::None {
+                let contextual_order = self.profile.left_click_context
+                    && !own_units(cx.world, &self.selection).is_empty()
+                    && !pick_unit(cx.world, end)
+                        .is_some_and(|u| u.owner == cx.world.local_player());
+                if self.mode != Mode::None || contextual_order {
                     self.context(false, cx);
                 } else {
                     let additive = self.queue_held();

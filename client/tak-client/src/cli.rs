@@ -109,7 +109,7 @@ pub struct Args {
     #[arg(long, default_value = "console")]
     pub input_preset: String,
     /// Control scheme: kingdoms (Kingdoms Console pad + Classic TA:K keys,
-    /// the default), wp_s or wp_j (the earlier schemes, for comparison).
+    /// the default), original (left-click contextual orders), wp_s or wp_j.
     /// Ignored when `--input-profile` names an existing file.
     #[arg(long, default_value = "kingdoms")]
     pub controls: String,

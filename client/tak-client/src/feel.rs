@@ -491,6 +491,25 @@ pub fn key_name_for(p: &Profile, want: impl Fn(&Action) -> bool) -> Option<Strin
     })
 }
 
+fn primary_mouse_context(m: &Mapper) -> bool {
+    m.profile().left_click_context
+        && m.press_action(&Input::Button(Button::MouseLeft)) == Some(Action::DragSelect)
+}
+
+/// Mouse/keyboard input that gives the default context order. Original-style
+/// left clicks take priority only while their actual binding still selects
+/// contextually; a remapped primary button must not advertise the wrong action.
+pub fn mouse_order_name(m: &Mapper) -> String {
+    if primary_mouse_context(m) {
+        "LMB".into()
+    } else {
+        key_name_for(m.profile(), |a| {
+            matches!(a, Action::Context { append: false })
+        })
+        .unwrap_or_else(|| "order".into())
+    }
+}
+
 /// Classic TA:K prompts (keys and mouse) for the bottom bar.
 pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
     let p = m.profile();
@@ -510,7 +529,14 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
         ));
         v.push((key_name_for(p, |a| matches!(a, Action::Cancel)), "cancel"));
     } else if cx.has_units {
-        v.push((Some("RMB".into()), "order"));
+        v.push((
+            Some(mouse_order_name(m)),
+            if primary_mouse_context(m) {
+                "select / move / attack"
+            } else {
+                "order"
+            },
+        ));
         v.push((
             key_name_for(p, |a| matches!(a, Action::AttackMode)),
             "attack",
@@ -814,6 +840,52 @@ pub fn synth_recording(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mouse_order_prompts_match_original_default_and_remapped_bindings() {
+        let original = Mapper::new(Profile::named("original").unwrap());
+        let classic = Mapper::new(Profile::default_combined());
+        let cx = HintCx {
+            has_units: true,
+            ..Default::default()
+        };
+        assert_eq!(mouse_order_name(&original), "LMB");
+        assert_eq!(mouse_order_name(&classic), "RMB");
+        assert_eq!(
+            hints_classic(&original, cx)[0],
+            Hint {
+                key: HintKey::Text("LMB".into()),
+                prefix: "",
+                text: "select / move / attack".into(),
+            }
+        );
+        assert_eq!(
+            hints_classic(&classic, cx)[0],
+            Hint {
+                key: HintKey::Text("RMB".into()),
+                prefix: "",
+                text: "order".into(),
+            }
+        );
+        assert_eq!(hints(&original, cx), hints(&classic, cx));
+        assert_eq!(
+            hints_classic(&original, HintCx::default()),
+            hints_classic(&classic, HintCx::default())
+        );
+
+        let mut remapped = Profile::original_tak();
+        for binding in &mut remapped.bindings {
+            if binding.action == Action::DragSelect {
+                binding.action = Action::Select;
+            }
+            if matches!(binding.action, Action::Context { append: false }) {
+                binding.input = Input::Key(tak_input::Key::new("q"));
+            }
+        }
+        let remapped = Mapper::new(remapped);
+        assert_eq!(mouse_order_name(&remapped), "Q");
+        assert_eq!(hints_classic(&remapped, cx)[0].text, "order");
+    }
 
     #[test]
     fn attack_move_is_distinct_from_force_attack_in_both_hint_sets() {

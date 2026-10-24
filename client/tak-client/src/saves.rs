@@ -14,6 +14,8 @@ use tak_headless::checkpoint::{Checkpoint, CheckpointSource, ReplayBudget, Repla
 use crate::cli::Args;
 use crate::game::{Session, SetupError};
 
+pub mod browser;
+
 static SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn err(error: impl std::fmt::Display) -> SetupError {
@@ -117,6 +119,16 @@ fn from_replay(
 /// synthetic checkpoint has no renderable real map and is explicitly refused.
 pub(crate) fn restore(args: &Args, path: &Path, log: CommandLog) -> Result<Session, SetupError> {
     let checkpoint = Checkpoint::read(path).map_err(err)?;
+    restore_checkpoint(args, checkpoint, log)
+}
+
+/// Restore a checkpoint already read and confirmed by the in-game browser.
+/// Keep the verified object instead of reopening a pathname after confirmation.
+pub(crate) fn restore_checkpoint(
+    args: &Args,
+    checkpoint: Checkpoint,
+    log: CommandLog,
+) -> Result<Session, SetupError> {
     crate::training::validate_local(checkpoint.controllers())?;
     if matches!(checkpoint.source(), CheckpointSource::Synthetic { .. }) {
         return Err(err(

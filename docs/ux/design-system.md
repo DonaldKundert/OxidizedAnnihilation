@@ -159,11 +159,22 @@ Confirm on release by default (option: confirm on press). Releasing in the dead 
 
 ## 5. Mouse and keyboard ("Classic TA:K" profile)
 
-Exactly the original defaults from section 1, including squads, formations, bookmarks, select-type groups, Ctrl+F1–F3 weapon or spell select, + / − speed, ~ damage bars, Tab radar. Plus the TA mouse model:
+The original keyboard defaults from section 1, including squads, formations, bookmarks, select-type groups, Ctrl+F1–F3 weapon or spell select, + / − speed, ~ damage bars, Tab radar. The existing mouse scheme stays the default for compatibility:
 - Left click selects, left drag box-selects.
 - Right click gives the context order; Shift+right click queues.
 - Double-click selects the same type on screen.
 - An order key followed by a left click gives an explicit order.
+
+**Optional original-style mouse scheme:** `--controls original` (or
+`left_click_context` in a saved profile) leaves controller and keyboard
+bindings alone. A left click selects an owned unit, moves the selection on
+ground, or attacks an enemy; Shift adds / queues. Drag remains selection,
+explicit order modes take precedence, and right-click context remains
+available. Same-type double-click selection requires two clicks on the same
+owned unit, so rapid command clicks are not swallowed. **Known**: contextual
+left clicks were observed in reference play (October 2026). **Chosen**: keep
+the current default, circular drag region and right-click alternative; this
+option is not a claim of full one-to-one original mouse fidelity.
 
 Additions where the original had nothing, chosen so they don't collide with it:
 

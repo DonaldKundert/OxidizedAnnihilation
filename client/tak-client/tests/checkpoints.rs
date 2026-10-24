@@ -916,3 +916,108 @@ fn explicit_training_configuration_refuses_incompatible_modes_and_protects_input
     args.demo = true;
     assert!(Session::load_from_args(&vfs, &args, CommandLog::new()).is_err());
 }
+
+#[test]
+fn browser_refuses_pending_orders_without_changing_files_or_live_state() {
+    let install = Scratch::new("browser-pending");
+    install.install("test.hpi", 200);
+    let output = Scratch::new("browser-pending-output");
+    let args = install.args(false);
+    let mut live =
+        Session::load_from_args(&open_vfs(&install.0).unwrap(), &args, CommandLog::new()).unwrap();
+    let path = saves::browser::save_new(&live, &output.0).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let entry = saves::browser::catalog(&output.0, &install.0)
+        .unwrap()
+        .entries
+        .remove(0);
+    live.submit(move_order(220));
+    let hash = live.sim.state_hash();
+    assert_eq!(saves::browser::pending_orders(&live), 1);
+    assert!(
+        saves::browser::save_new(&live, &output.0.join("not-created"))
+            .unwrap_err()
+            .to_string()
+            .contains("queued/future")
+    );
+    assert!(!output.0.join("not-created").exists());
+    assert!(saves::browser::overwrite(&live, &output.0, &entry).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(live.sim.state_hash(), hash);
+    // F10 compatibility: canonical quick-save still keeps executed history only.
+    assert_eq!(saves::capture(&live).unwrap().command_count(), 0);
+    live.try_step().unwrap();
+    saves::browser::overwrite(&live, &output.0, &entry).unwrap();
+    assert_eq!(Checkpoint::read(&path).unwrap().next_tick(), Tick(1));
+}
+
+#[test]
+fn browser_load_verifies_content_and_keeps_old_match_untouched_on_failure() {
+    for campaign in [false, true] {
+        let install = Scratch::new("browser-load");
+        install.install("test.hpi", 200);
+        let output = Scratch::new("browser-load-output");
+        let args = install.args(campaign);
+        let mut live =
+            Session::load_from_args(&open_vfs(&install.0).unwrap(), &args, CommandLog::new())
+                .unwrap();
+        for _ in 0..31 {
+            live.try_step().unwrap();
+        }
+        let path = saves::browser::save_new(&live, &output.0).unwrap();
+        let entry = saves::browser::catalog(&output.0, &install.0)
+            .unwrap()
+            .entries
+            .remove(0);
+        let metadata = entry.metadata.as_ref().unwrap();
+        assert_eq!(metadata.map, MAP);
+        assert_eq!(metadata.campaign, campaign);
+        assert!(metadata.factions.contains("TST"));
+        let restored = saves::browser::prepare_load(&args, &output.0, &entry).unwrap();
+        assert_eq!(restored.sim.state_hash(), live.sim.state_hash());
+        assert_eq!(restored.tick(), live.tick());
+        live.submit(move_order(220));
+        let old_hash = live.sim.state_hash();
+        install.install("test.hpi", 201);
+        let error = saves::browser::prepare_load(&args, &output.0, &entry)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("content mismatch"), "{error}");
+        assert_eq!(live.sim.state_hash(), old_hash);
+        assert_eq!(saves::browser::pending_orders(&live), 1);
+        assert_eq!(Checkpoint::read(&path).unwrap().next_tick(), Tick(31));
+    }
+}
+
+#[test]
+fn browser_load_protects_outputs_and_refuses_special_playback_modes() {
+    let install = Scratch::new("browser-mode");
+    install.install("test.hpi", 200);
+    let output = Scratch::new("browser-mode-output");
+    let mut args = install.args(false);
+    let live =
+        Session::load_from_args(&open_vfs(&install.0).unwrap(), &args, CommandLog::new()).unwrap();
+    let path = saves::browser::save_new(&live, &output.0).unwrap();
+    let entry = saves::browser::catalog(&output.0, &install.0)
+        .unwrap()
+        .entries
+        .remove(0);
+    args.record = Some(path.clone());
+    assert!(
+        saves::browser::prepare_load(&args, &output.0, &entry)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("aliases")
+    );
+    args.record = None;
+    args.ghost = Some("ghost.json".into());
+    assert!(
+        saves::browser::prepare_load(&args, &output.0, &entry)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unavailable")
+    );
+    assert_eq!(Checkpoint::read(&path).unwrap().next_tick(), Tick(0));
+}
