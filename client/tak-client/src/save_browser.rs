@@ -55,6 +55,10 @@ impl BrowserState {
         self.waiting_for_swap = false;
     }
 
+    pub fn cancel_for_transition(&mut self) {
+        *self = Self::default();
+    }
+
     fn schedule(&mut self, operation: Operation) {
         self.model.message = match &operation {
             Operation::SaveNew | Operation::Overwrite(_) => "Verifying executed history before saving. Replay may take time...",
@@ -260,7 +264,11 @@ pub(super) fn input(
     mut feel: ResMut<Feel>,
     mut gameplay: ResMut<InputRes>,
     mut minimap: ResMut<MinimapState>,
+    skirmish: Option<Res<super::skirmish_ui::SkirmishState>>,
 ) {
+    if skirmish.is_some_and(|state| state.captures_input()) {
+        return;
+    }
     state.captured = state.open;
     if plan.is_some() {
         return;

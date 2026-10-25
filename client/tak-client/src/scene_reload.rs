@@ -5,7 +5,66 @@ use super::*;
 #[derive(bevy::ecs::schedule::ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct RebuildScene;
 
+#[derive(Clone, Copy)]
+enum ReplacementKind {
+    Checkpoint,
+    Skirmish(crate::skirmish::SetupConfig),
+}
+
+#[derive(Resource, Default)]
+struct RequestFrame(bool);
+
 pub(super) fn apply_prepared_load(world: &mut World) {
+    // Render the preparing notice once before synchronous validation. A close
+    // or cancel in the next input pass can still clear the request without I/O.
+    world.init_resource::<RequestFrame>();
+    let has_request = world
+        .get_resource::<skirmish_ui::PendingRequest>()
+        .is_some_and(|pending| pending.request.is_some());
+    if has_request && !world.resource::<RequestFrame>().0 {
+        world.resource_mut::<RequestFrame>().0 = true;
+        return;
+    }
+    world.resource_mut::<RequestFrame>().0 = false;
+    let request = world
+        .get_resource_mut::<skirmish_ui::PendingRequest>()
+        .and_then(|mut pending| pending.request.take());
+    if let Some(request) = request {
+        let config = match request {
+            skirmish_ui::Request::Launch(config) | skirmish_ui::Request::Rematch(config) => config,
+        };
+        let mut args = world.resource::<save_browser::BrowserArgs>().0.clone();
+        if !args.allows_match_replacement() {
+            world
+                .resource_mut::<skirmish_ui::SkirmishState>()
+                .report_error(
+                "New matches are unavailable during authored playback, recording or verification"
+                    .into(),
+            );
+            return;
+        }
+        args.skirmish = false;
+        args.load_checkpoint = None;
+        args.controller_config = None;
+        args.map = config.map.path().into();
+        args.players = config.players().into();
+        args.world_seed = config.seed;
+        let session = match crate::skirmish::prepare_session_with_budget(
+            &args.data,
+            &config,
+            crate::saves::replay_budget(&args),
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                world
+                    .resource_mut::<skirmish_ui::SkirmishState>()
+                    .report_error(error.to_string());
+                return;
+            }
+        };
+        replace_session(world, args, session, ReplacementKind::Skirmish(config));
+        return;
+    }
     let Some(load) = world
         .non_send_mut::<save_browser::PendingLoad>()
         .prepared
@@ -14,43 +73,55 @@ pub(super) fn apply_prepared_load(world: &mut World) {
         return;
     };
     let mut args = world.resource::<save_browser::BrowserArgs>().0.clone();
-    args.load_checkpoint = Some(load.path.clone());
+    args.skirmish = false;
+    args.load_checkpoint = Some(load.path);
+    replace_session(world, args, load.session, ReplacementKind::Checkpoint);
+}
+
+fn replace_session(world: &mut World, args: Args, session: Session, kind: ReplacementKind) {
     let prepared = (|| -> Result<_, Box<dyn std::error::Error>> {
         crate::saves::protect_checkpoint_outputs(&args)?;
         let vfs = crate::game::open_vfs(&args.data)?;
-        let ground = terrain::load(
-            &vfs,
-            &load.session.map_name,
-            load.session.map.palette.as_deref(),
-        )?;
+        let ground = terrain::load(&vfs, &session.map_name, session.map.palette.as_deref())?;
         let tex = TextureIndex::load(&vfs);
         Ok((vfs, ground, tex))
     })();
     let (vfs, ground, tex) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
-            world
-                .resource_mut::<save_browser::BrowserState>()
-                .report_error(format!("Load failed; current match unchanged: {error}"));
+            match kind {
+                ReplacementKind::Checkpoint => world
+                    .resource_mut::<save_browser::BrowserState>()
+                    .report_error(format!("Load failed; current match unchanged: {error}")),
+                ReplacementKind::Skirmish(_) => world
+                    .resource_mut::<skirmish_ui::SkirmishState>()
+                    .report_error(error.to_string()),
+            }
             return;
         }
     };
-    let title = format!("Oxidized Annihilation - {}", load.session.map_name);
-    let snap = load.session.snapshot();
+    let training = if session.controllers().controllers.is_empty() {
+        ""
+    } else {
+        " - simple-skirmish-v1 (omniscient training)"
+    };
+    let title = format!("Oxidized Annihilation - {}{training}", session.map_name);
+    let setup = crate::skirmish::from_session(&session);
+    let snap = session.snapshot();
     let cells = ground.cells;
     let mut fog = crate::fog::FogGrid::new(cells.0, cells.1);
-    let w = load.session.sim.world();
+    let w = session.sim.world();
     let eyes: Vec<_> = w
         .units()
-        .filter(|(_, u)| u.owner == load.session.local)
+        .filter(|(_, u)| u.owner == session.local)
         .map(|(_, u)| {
             let sight = w.defs().get(u.def).map_or(0, |d| d.combat.sight);
             (f(u.pos.x), f(u.pos.y), (sight as f32).max(FOG_MIN_SIGHT))
         })
         .collect();
     fog.update(&eyes);
-    let target = focus_point(&load.session, Focus::Monarch(0)).unwrap_or([0.0, 0.0]);
-    let kingdom = load.session.map.kingdom.clone();
+    let target = focus_point(&session, Focus::Monarch(0)).unwrap_or([0.0, 0.0]);
+    let kingdom = session.map.kingdom.clone();
     let fog_on = world.non_send::<SimRes>().fog_on;
     let profile = world.resource::<InputRes>().mapper.profile().clone();
     let old_feel = world.resource::<Feel>();
@@ -60,8 +131,13 @@ pub(super) fn apply_prepared_load(world: &mut World) {
     feel.overlay_captured_input = true;
     feel.toast = Some(format!(
         "Loaded paused at tick {}. Close the checkpoint browser to resume. Camera, selection and explored fog reset.",
-        load.session.tick().0
+        session.tick().0
     ));
+    if let ReplacementKind::Skirmish(_) = kind {
+        feel.toast = session
+            .training_report()
+            .or_else(|| Some("Practice match started. The opposing monarch is passive.".into()));
+    }
     // An input recording/ghost cannot describe a new arbitrary checkpoint.
     // The browser rejects these modes before preparation; don't carry stale
     // local presentation state or pre-load gestures across the boundary.
@@ -73,12 +149,12 @@ pub(super) fn apply_prepared_load(world: &mut World) {
         kingdom,
     });
     world.insert_non_send(SimRes {
-        session: load.session,
+        session,
         prev: snap.clone(),
         curr: snap,
         acc: 0.0,
         speed: 1.0,
-        paused: true,
+        paused: matches!(kind, ReplacementKind::Checkpoint),
         fog,
         fog_changed: true,
         alerts: Default::default(),
@@ -93,6 +169,7 @@ pub(super) fn apply_prepared_load(world: &mut World) {
     });
     world.insert_resource(feel);
     world.resource_mut::<CamState>().geom.target = target;
+    world.resource_mut::<CamState>().geom.zoom = args.zoom;
     world.insert_resource(ModelCache::default());
     world.insert_resource(UnitEntities::default());
     world.insert_resource(FeatureEntities::default());
@@ -111,7 +188,23 @@ pub(super) fn apply_prepared_load(world: &mut World) {
     world.insert_resource(hud_view::BottomMsg::default());
     world.remove_resource::<Showcase>();
     world.resource_mut::<save_browser::BrowserArgs>().0 = args;
-    world.resource_mut::<save_browser::BrowserState>().loaded();
+    match kind {
+        ReplacementKind::Checkpoint => {
+            world.resource_mut::<save_browser::BrowserState>().loaded();
+            if let Some(mut state) = world.get_resource_mut::<skirmish_ui::SkirmishState>() {
+                state.checkpoint_loaded(setup);
+            }
+        }
+        ReplacementKind::Skirmish(config) => {
+            world
+                .resource_mut::<save_browser::BrowserState>()
+                .cancel_for_transition();
+            world.non_send_mut::<save_browser::PendingLoad>().prepared = None;
+            world
+                .resource_mut::<skirmish_ui::SkirmishState>()
+                .launched(config);
+        }
+    }
     for mut win in world
         .query_filtered::<&mut Window, With<PrimaryWindow>>()
         .iter_mut(world)
@@ -144,6 +237,106 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use clap::Parser;
+
+    #[test]
+    fn queued_skirmish_can_be_cancelled_before_preparation() {
+        let mut app = super::super::overlay_input_tests::app();
+        let config = crate::skirmish::SetupConfig::default();
+        app.insert_resource(skirmish_ui::SkirmishState::new(config, false))
+            .insert_resource(skirmish_ui::PendingRequest {
+                request: Some(skirmish_ui::Request::Launch(config)),
+            });
+        let before = app.world().non_send::<SimRes>().session.sim.state_hash();
+        app.world_mut()
+            .run_system_once(apply_prepared_load)
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<skirmish_ui::PendingRequest>()
+                .request
+                .is_some()
+        );
+        app.world_mut()
+            .resource_mut::<skirmish_ui::PendingRequest>()
+            .request = None;
+        app.world_mut()
+            .run_system_once(apply_prepared_load)
+            .unwrap();
+        assert_eq!(
+            app.world().non_send::<SimRes>().session.sim.state_hash(),
+            before
+        );
+        assert!(!app.world().resource::<RequestFrame>().0);
+    }
+
+    #[test]
+    fn failed_skirmish_preparation_preserves_live_match_and_pending_orders() {
+        for protected in [false, true] {
+            let mut app = super::super::overlay_input_tests::app();
+            let config = crate::skirmish::SetupConfig::default();
+            app.insert_resource(skirmish_ui::SkirmishState::new(config, false))
+                .insert_resource(skirmish_ui::PendingRequest {
+                    request: Some(skirmish_ui::Request::Launch(config)),
+                });
+            let mut args = Args::parse_from(["test", "--data", "/synthetic-not-read"]);
+            if protected {
+                args.record = Some("/synthetic-never-written".into());
+            }
+            app.insert_resource(save_browser::BrowserArgs(args));
+            let unit = app
+                .world()
+                .non_send::<SimRes>()
+                .session
+                .sim
+                .world()
+                .units()
+                .next()
+                .unwrap()
+                .0;
+            app.world_mut().non_send_mut::<SimRes>().session.submit(
+                tak_commands::SimCommand::Stop {
+                    units: tak_commands::UnitSet::single(unit),
+                },
+            );
+            let before_log = app.world().non_send::<SimRes>().session.recorded.clone();
+            let before_profile = app.world().resource::<InputRes>().mapper.profile().clone();
+            let before = app.world().non_send::<SimRes>().session.sim.state_hash();
+            let before_tick = app.world().non_send::<SimRes>().session.tick();
+            let marker = app.world_mut().spawn(Transform::default()).id();
+            app.world_mut()
+                .run_system_once(apply_prepared_load)
+                .unwrap();
+            assert!(
+                app.world()
+                    .resource::<skirmish_ui::PendingRequest>()
+                    .request
+                    .is_some()
+            );
+            app.world_mut()
+                .run_system_once(apply_prepared_load)
+                .unwrap();
+            assert_eq!(
+                app.world().non_send::<SimRes>().session.recorded,
+                before_log
+            );
+            assert_eq!(
+                app.world().resource::<InputRes>().mapper.profile(),
+                &before_profile
+            );
+            assert_eq!(
+                app.world().non_send::<SimRes>().session.sim.state_hash(),
+                before
+            );
+            assert_eq!(app.world().non_send::<SimRes>().session.tick(), before_tick);
+            assert!(app.world().get_entity(marker).is_ok());
+            assert!(
+                app.world()
+                    .resource::<skirmish_ui::PendingRequest>()
+                    .request
+                    .is_none()
+            );
+        }
+    }
 
     #[test]
     fn failed_render_preparation_preserves_live_match_scene_and_profile() {

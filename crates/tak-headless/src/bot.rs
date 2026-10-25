@@ -70,9 +70,10 @@ impl Definition {
     }
 }
 
-/// One explicit income -> optional factory -> troop recipe. Without a producer,
-/// the mobile root builder constructs the troop directly (including Zhon-like
-/// recipes). No faction/profile/mission-string guessing occurs.
+/// One explicit income -> optional producer -> troop recipe. The producer
+/// may be an immobile factory or a mobile intermediary builder. Without one,
+/// the mobile root builder constructs the troop directly. No faction/profile/
+/// mission-string guessing occurs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -80,7 +81,7 @@ pub struct Recipe {
     pub builder: Definition,
     /// Optional single income structure.
     pub income: Option<Definition>,
-    /// Optional single immobile factory.
+    /// Optional single working factory or mobile intermediary builder.
     pub producer: Option<Definition>,
     /// Ordinary mobile nonbuilder combat unit.
     pub troop: Definition,
@@ -123,26 +124,32 @@ impl Recipe {
             ));
         }
         for role in self.income.iter().chain(self.producer.iter()) {
-            let def = role.validate(world)?;
+            role.validate(world)?;
             if !identities.insert(role.id) || !root.build.canbuild.contains(&role.id) {
                 return Err(BotError(
                     "recipe root menu must contain distinct income/producer roles".into(),
                 ));
             }
-            if def.maxvelocity > tak_math::Fx::ZERO {
-                return Err(BotError("income and producer must be structures".into()));
-            }
         }
         if let Some(income) = &self.income {
-            if income.validate(world)?.economy.mogriumincome <= 0 {
+            let income = income.validate(world)?;
+            if income.maxvelocity > tak_math::Fx::ZERO {
+                return Err(BotError("income must be a structure".into()));
+            }
+            if income.economy.mogriumincome <= 0 {
                 return Err(BotError("income role has no ordinary income".into()));
             }
         }
         let source = if let Some(producer) = &self.producer {
             let factory = producer.validate(world)?;
-            if !worker(factory) || factory.build.mobile {
+            if !worker(factory) {
                 return Err(BotError(
-                    "producer must be a working factory (bmcode off)".into(),
+                    "producer must be a working factory or mobile builder".into(),
+                ));
+            }
+            if factory.build.mobile != (factory.maxvelocity > tak_math::Fx::ZERO) {
+                return Err(BotError(
+                    "producer movement must match its production mode".into(),
                 ));
             }
             factory

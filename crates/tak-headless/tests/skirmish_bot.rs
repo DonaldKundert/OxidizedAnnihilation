@@ -765,3 +765,49 @@ fn existing_attack_is_retained_and_frames_dying_units_and_builders_are_not_attac
     config.controllers[0].recipe.troop = root;
     assert!(config.plan(sim.world()).is_err());
 }
+
+#[test]
+fn mobile_intermediary_pays_builds_troops_attacks_and_resumes_without_special_rules() {
+    let mut scenario = demo::scenario(false);
+    scenario.unit_defs[2].build.mobile = true;
+    scenario.unit_defs[2].maxvelocity = tak_math::Fx::from_int(1);
+    scenario.unit_defs[2].build.builddistance = 160;
+    let config = demo::config(&tak_sim::World::new(&scenario).unwrap(), false).unwrap();
+    let source = CheckpointSource::synthetic(scenario);
+    let mut live =
+        ReplaySession::new_with_controllers(source.clone(), None, config.clone()).unwrap();
+    let mut hashes = live.advance_driven(&empty(), 32).unwrap();
+    let mut restored = live
+        .checkpoint()
+        .unwrap()
+        .restore(None, ReplayBudget::default())
+        .unwrap();
+    let suffix = live.advance_driven(&empty(), 1768).unwrap();
+    assert_eq!(restored.advance_driven(&empty(), 1768).unwrap(), suffix);
+    hashes.extend(suffix);
+    assert_eq!(restored.controllers(), &config);
+    assert_eq!(restored.executed_log(), live.executed_log());
+    assert!(
+        matches!(live.sim().world().victory().state(), MatchState::Over { winners } if winners == &[PlayerId(0)])
+    );
+    for def in [UnitDefId(1), UnitDefId(2), UnitDefId(3)] {
+        assert!(live.executed_log().iter().any(|entry| matches!(entry.command, SimCommand::Build { def: built, at: Some(_), .. } if built == def)));
+    }
+    assert!(
+        live.executed_log()
+            .iter()
+            .any(|entry| matches!(entry.command, SimCommand::Attack { .. }))
+    );
+    let mut raw = ReplaySession::new(source, None).unwrap();
+    assert_eq!(raw.advance(live.executed_log(), 1800).unwrap(), hashes);
+}
+
+#[test]
+fn mobile_producer_extension_does_not_allow_mobile_income_or_mismatched_build_mode() {
+    let mut scenario = demo::scenario(false);
+    scenario.unit_defs[1].maxvelocity = tak_math::Fx::from_int(1);
+    assert!(demo::config(&tak_sim::World::new(&scenario).unwrap(), false).is_err());
+    let mut scenario = demo::scenario(false);
+    scenario.unit_defs[2].build.mobile = true;
+    assert!(demo::config(&tak_sim::World::new(&scenario).unwrap(), false).is_err());
+}
