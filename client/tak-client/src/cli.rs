@@ -12,6 +12,10 @@ pub struct Args {
     /// Kingdoms install directory.
     #[arg(long, env = "TAK_DATA_DIR")]
     pub data: PathBuf,
+    /// Open the controller-first skirmish setup before starting a match.
+    /// Uses supported installed maps/factions and an explicit training opponent.
+    #[arg(long, conflicts_with_all = ["map", "players", "world_seed", "load_checkpoint", "controller_config", "campaign", "demo", "ghost", "record_session", "synth_events", "screenshot", "log", "record", "hashes"])]
+    pub skirmish: bool,
     /// Skirmish map: VFS path without extension.
     #[arg(long, default_value = "kmap/Adamantine Gate")]
     pub map: String,
@@ -166,9 +170,30 @@ pub struct Args {
 }
 
 impl Args {
+    /// Replacing a live match cannot splice a different history into output
+    /// recordings, deterministic verification, or authored playback.
+    pub fn allows_match_replacement(&self) -> bool {
+        !self.demo
+            && self.ghost.is_none()
+            && self.record_session.is_none()
+            && self.synth_events.is_none()
+            && self.screenshot.is_none()
+            && self.log.is_none()
+            && self.record.is_none()
+            && self.hashes.is_none()
+            && self.campaign.is_none()
+    }
+
     /// Check source-specific runtime restrictions as well as clap's conflicts.
     /// This also protects callers constructing or modifying Args directly.
     pub fn validate_source(&self) -> Result<(), String> {
+        if self.skirmish
+            && (!self.allows_match_replacement()
+                || self.load_checkpoint.is_some()
+                || self.controller_config.is_some())
+        {
+            return Err("--skirmish cannot replace an authored, recorded, checkpoint or verification startup; use the in-game setup for ordinary matches".into());
+        }
         if self.controller_config.is_some()
             && (self.load_checkpoint.is_some()
                 || self.campaign.is_some()
@@ -260,6 +285,42 @@ pub fn parse_focus(s: &str) -> Option<Focus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skirmish_setup_is_explicit_and_cannot_splice_recorded_sources() {
+        let ordinary = Args::try_parse_from(["test", "--data", "/synthetic"]).unwrap();
+        assert!(!ordinary.skirmish);
+        assert!(ordinary.allows_match_replacement());
+        let setup = Args::try_parse_from(["test", "--data", "/synthetic", "--skirmish"]).unwrap();
+        assert!(setup.skirmish);
+        assert!(setup.validate_source().is_ok());
+        for flag in [
+            "--load-checkpoint",
+            "--controller-config",
+            "--log",
+            "--record",
+            "--hashes",
+            "--screenshot",
+        ] {
+            assert!(
+                Args::try_parse_from([
+                    "test",
+                    "--data",
+                    "/synthetic",
+                    "--skirmish",
+                    flag,
+                    "unused"
+                ])
+                .is_err(),
+                "{flag}"
+            );
+        }
+        let mut recording = ordinary.clone();
+        recording.record = Some("unused".into());
+        assert!(!recording.allows_match_replacement());
+        recording.skirmish = true;
+        assert!(recording.validate_source().is_err());
+    }
 
     #[test]
     fn focus_forms() {

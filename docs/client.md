@@ -37,9 +37,8 @@ play.
 
 Needs the usual Bevy system packages (udev, alsa headers for audio,
 x11/xkbcommon/wayland, a Vulkan or GL driver). Same commands.
-With a toolchain older than 1.97.1 (the cloud box has 1.97.0 and cannot
-download another), add `--ignore-rust-version` to `cargo build/run/test/clippy`;
-1.97.0 compiles Bevy 0.20 without changes.
+Use Rust 1.97.1 or newer; current client CI pins 1.99.1. Do not bypass the
+declared minimum with `--ignore-rust-version` for release verification.
 
 ### Headless verification (CI / cloud)
 
@@ -71,6 +70,50 @@ tak-client --demo --screenshot out/demo_{tick}.png --at-tick 45,720,1500 \
   Farms (1,160 features); zoom 1.0 on Gaerion Wood 5.7–6.0 fps; zoom 2.5
   on Grimm Farms with hundreds of sprites on screen about 4.5 fps. The sim
   runs at exactly 30 ticks/s regardless. `WGPU_BACKEND=gl` was not needed.
+
+### Controller-first skirmish setup
+
+Run `tak-client --data /path/to/owned/install --skirmish` to choose a match
+before it starts. Existing direct-map CLI launches remain unchanged. The bounded
+setup currently supports **Adamantine Gate**, local **Aramon or Zhon**, and the
+opposite faction as either a **Training opponent** or **Passive practice**.
+The seed is shown and retained for deterministic rematches. Other CLI maps and
+custom controller JSON remain available outside this curated setup.
+
+- Open setup in an ordinary match with **F7**, the **Skirmish** mouse button,
+  or **Menu → R3** on the controller. **Menu → View** still opens checkpoints;
+  Y still saves the input profile.
+- Navigate fields with **Up/Down or D-pad**; change faction/opponent with
+  **Left/Right**. **Enter/A** activates. **Esc/B** cancels or returns to play.
+  At startup, cancellation keeps setup paused until a match is chosen.
+- Starting over from a live match or rematching asks for confirmation with
+  **Cancel selected initially**. Returning to the setup screen itself does not
+  discard the match. Failed preparation leaves the current match intact.
+- Victory, defeat, or draw opens an actionable result menu after the existing
+  result delay. Rematch reuses the supported map/sides/seed/opponent settings;
+  setup lets you change them. Dismiss the result to inspect the battlefield.
+- Input must return to neutral after a modal closes or a match is replaced:
+  held buttons/sticks cannot immediately issue orders into the new match.
+
+**Chosen:** the training preset reuses `simple-skirmish-v1`, a deterministic,
+command-only, full-map/omniscient opponent. It builds income, uses an Aramon
+factory or Zhon direct builder, pays normal costs, produces a bounded army and
+attacks. It is not original TA:K AI and does not scout through fog. Recipes are
+validated against the installed definitions rather than shipping retail data.
+Passive practice disables the planner, not normal enemy automatic combat.
+No economy, construction, combat, or victory rules are changed by the menu.
+
+Launch/rematch uses the same fallible preparation and scene replacement path as
+checkpoints: fresh simulation, commands, opponent, selection, camera, explored
+fog and visual caches; the window and connected devices remain. A checkpoint
+retains its own controller configuration. Only an exact supported preset is
+recognized for one-button rematch; custom configurations are never silently
+converted to a built-in preset.
+
+These menus are unavailable in authored playback, campaign, recording and
+screenshot verification modes, where switching matches would mix histories.
+Checkpoints remain replay checkpoints, not full presentation savestates. F8 and
+F10 keep their documented constraints and content/state verification.
 
 ### Logs, hashes, replay
 
@@ -544,3 +587,30 @@ A one-frame preparation notice precedes browser save/load work. Escape/B or
 Cancel can still stop it before replay begins. Once that bounded synchronous
 replay is running it cannot be interrupted; this is not a background/async
 loader. No repeated click is queued while the operation is pending.
+
+### Skirmish lifecycle verification
+
+The skirmish integration target includes asset-free recipe/paid-production tests
+and opt-in installed-content checks. Set `TAK_DATA_DIR` to a legally owned install
+for the latter; without it those cases report a data skip, not gameplay evidence.
+The longer ordinary-production/result diagnostic is explicit:
+
+```sh
+TAK_DATA_DIR=/path/to/owned/install cargo test --manifest-path client/Cargo.toml \
+  -p tak-client --test skirmish \
+  installed_ordinary_production_reaches_actual_results_without_world_edits \
+  -- --ignored --nocapture
+```
+
+It exercises both factions as training opponents against an idle human and as
+scripted local players against passive opposition. It submits ordinary paid
+build/production/attack commands, never edits health or injects an outcome, and
+checks result save/replay equivalence. This is engine gameplay evidence, not a
+claim that a human completed these matches using a physical controller. Optional
+`TAK_SKIRMISH_RESULT_DIR` exports private near-result checkpoints and provenance
+for GUI result/rematch checks; keep those generated files outside the repository.
+
+Zhon's validated recipe may use a mobile intermediary builder. The shared recipe
+validator now accepts this existing paid production path; neither resource costs
+nor planner command generation are overridden. Older immobile-factory recipes
+retain their behavior and replay representation.

@@ -22,7 +22,7 @@ fn err(error: impl std::fmt::Display) -> SetupError {
     SetupError(error.to_string())
 }
 
-fn replay_budget(args: &Args) -> ReplayBudget {
+pub(crate) fn replay_budget(args: &Args) -> ReplayBudget {
     ReplayBudget {
         max_ticks: args.max_replay_ticks,
         max_commands: args.max_replay_commands,
@@ -41,6 +41,12 @@ pub(crate) struct SaveOrigin {
     checkpoint: Checkpoint,
     data: PathBuf,
     budget: ReplayBudget,
+}
+
+impl SaveOrigin {
+    pub(crate) fn source(&self) -> &CheckpointSource {
+        self.checkpoint.source()
+    }
 }
 
 /// Start the live game from the same bounded source loader as checkpoints.
@@ -87,6 +93,17 @@ fn from_replay(
     replay: ReplaySession,
     log: CommandLog,
 ) -> Result<Session, SetupError> {
+    from_replay_with_budget(&args.data, replay_budget(args), checkpoint, replay, log)
+}
+
+/// Share canonical startup with the bounded in-game skirmish setup.
+pub(crate) fn from_replay_with_budget(
+    data: &Path,
+    budget: ReplayBudget,
+    checkpoint: Checkpoint,
+    replay: ReplaySession,
+    log: CommandLog,
+) -> Result<Session, SetupError> {
     let map = match checkpoint.source() {
         CheckpointSource::Map { map, .. } | CheckpointSource::Campaign { map, .. } => map,
         CheckpointSource::Synthetic { .. } => {
@@ -97,7 +114,7 @@ fn from_replay(
     let executed = replay.executed_log().clone();
     // The canonical source's data path is authoritative for both simulation
     // and render metadata; an independent caller VFS must not redirect art/map.
-    let vfs = crate::game::open_vfs(&args.data)?;
+    let vfs = crate::game::open_vfs(data)?;
     let rules = tak_content::Ruleset::load(&vfs, tak_content::RulesetKind::Base);
     let loaded_map = tak_content::MapDef::load(&vfs, &rules, map).map_err(err)?;
     let report = replay.source_report().map(str::to_owned);
@@ -109,8 +126,8 @@ fn from_replay(
     session.executed_log = executed;
     session.save_origin = Some(SaveOrigin {
         checkpoint,
-        data: args.data.clone(),
-        budget: replay_budget(args),
+        data: data.to_path_buf(),
+        budget,
     });
     Ok(session)
 }

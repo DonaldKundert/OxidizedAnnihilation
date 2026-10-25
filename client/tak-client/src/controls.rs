@@ -322,7 +322,13 @@ pub(super) fn overlay_input_system(
     mut feel: ResMut<Feel>,
     mut input: ResMut<InputRes>,
     browser: Option<Res<save_browser::BrowserState>>,
+    skirmish: Option<Res<super::skirmish_ui::SkirmishState>>,
 ) {
+    if skirmish.is_some_and(|state| state.captures_input()) {
+        feel.overlay_open = false;
+        feel.overlay_captured_input = true;
+        return;
+    }
     if browser.is_some_and(|browser| browser.captures_input()) {
         feel.overlay_open = false;
         feel.overlay_captured_input = true;
@@ -544,14 +550,14 @@ pub(super) fn overlay_draw_system(
         };
         let pad = match feel.layout {
             Layout::Xbox => {
-                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, View checkpoints, B close"
+                "D-pad move/adjust, LB/RB x10, A toggle, Y save profile, X quick-save match, View checkpoints, R3 skirmish, B close"
             }
             Layout::PlayStation => {
                 "D-pad move/adjust, L1/R1 x10, Cross toggle, Triangle save profile, Square quick-save match, Share checkpoints, Circle close"
             }
         };
         s.0 = format!(
-            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F8 checkpoints, F11 close. Mouse: - / +\nQuick-save: {}{}",
+            "{what}\n{pad}\nKeys: arrows (Shift x10), PgUp/PgDn, Enter save profile, F10 quick-save match, F8 checkpoints, F7 skirmish, F11 close. Mouse: - / +\nQuick-save: {}{}",
             feel.quick_save_dir
                 .as_ref()
                 .map_or_else(|e| e.clone(), |p| p.display().to_string()),

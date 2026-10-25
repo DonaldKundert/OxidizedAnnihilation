@@ -39,6 +39,8 @@ mod hud_view;
 mod save_browser;
 #[path = "scene_reload.rs"]
 mod scene_reload;
+#[path = "skirmish_ui.rs"]
+mod skirmish_ui;
 use crate::game::FeatureArt;
 use crate::game::{Session, Snapshot, UnitSnap, angle_rad, lerp, lerp_angle, lerp_pose};
 use crate::models::{BuiltModel, TextureIndex, load_model};
@@ -409,6 +411,16 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         None => Vec::new(),
     };
 
+    let matched_setup = crate::skirmish::from_session(&session);
+    let initial_setup = if args.skirmish {
+        crate::skirmish::SetupConfig::default()
+    } else {
+        matched_setup.unwrap_or_default()
+    };
+    let mut skirmish_state = skirmish_ui::SkirmishState::new(initial_setup, args.skirmish);
+    if !args.skirmish {
+        skirmish_state.checkpoint_loaded(matched_setup);
+    }
     let training = if session.controllers().controllers.is_empty() {
         ""
     } else {
@@ -466,6 +478,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             last_pointer: None,
         })
         .insert_resource(feel)
+        .insert_resource(skirmish_state)
+        .init_resource::<skirmish_ui::PendingRequest>()
         .insert_resource(save_browser::BrowserArgs(args.clone()))
         .init_resource::<save_browser::BrowserState>()
         .insert_non_send(save_browser::PendingLoad::default())
@@ -497,6 +511,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 hud_view::setup_hud_art,
                 hud_view::setup_hud_view,
                 save_browser::setup,
+                skirmish_ui::setup,
             )
                 .chain(),
         )
@@ -533,6 +548,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     controls::wheel_system,
                     controls::overlay_draw_system,
                     save_browser::draw,
+                    skirmish_ui::draw,
                     controls::sound_system,
                     controls::rumble_system,
                     fps_report,
@@ -559,6 +575,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 hud_view::setup_hud_art,
                 hud_view::setup_hud_view,
                 save_browser::setup,
+                skirmish_ui::setup,
             )
                 .chain(),
         );
@@ -1218,6 +1235,7 @@ fn add_interactive_input(app: &mut App) {
     app.add_systems(
         Update,
         (
+            skirmish_ui::input,
             save_browser::input,
             controls::overlay_input_system,
             input_system,
@@ -1251,6 +1269,7 @@ fn input_system(
     )>,
     hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
     mut feel: ResMut<Feel>,
+    skirmish: Option<Res<skirmish_ui::SkirmishState>>,
 ) {
     if let Ok(win) = windows.single() {
         cam.geom.size = [win.width(), win.height()];
@@ -1275,6 +1294,12 @@ fn input_system(
     let input_h = cam.input_h;
     input.mapper.set_camera(cam.input_camera());
     if plan.is_some() {
+        return;
+    }
+    if skirmish.is_some_and(|state| state.captures_input()) {
+        // The modal owns all input, including F10; do not save the stale
+        // background session while selecting a new match.
+        wheel.clear();
         return;
     }
     if crate::saves::quick_save_shortcut(keys.just_pressed(KeyCode::F10), false, false) {
@@ -1392,7 +1417,7 @@ fn input_system(
         }
     }
     for k in keys.get_just_pressed() {
-        if matches!(*k, KeyCode::F10 | KeyCode::F8) {
+        if matches!(*k, KeyCode::F10 | KeyCode::F8 | KeyCode::F7) {
             continue;
         }
         if overlay {
@@ -1403,7 +1428,7 @@ fn input_system(
         }
     }
     for k in keys.get_just_released() {
-        if matches!(*k, KeyCode::F10 | KeyCode::F8) {
+        if matches!(*k, KeyCode::F10 | KeyCode::F8 | KeyCode::F7) {
             continue;
         }
         if let Some(n) = key_name(*k) {
