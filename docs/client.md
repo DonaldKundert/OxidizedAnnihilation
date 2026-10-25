@@ -97,7 +97,7 @@ custom controller JSON remain available outside this curated setup.
 
 **Chosen:** the training preset reuses `simple-skirmish-v1`, a deterministic,
 command-only, full-map/omniscient opponent. It builds income, uses an Aramon
-factory or Zhon direct builder, pays normal costs, produces a bounded army and
+factory or Zhon mobile intermediary builder, pays normal costs, produces a bounded army and
 attacks. It is not original TA:K AI and does not scout through fog. Recipes are
 validated against the installed definitions rather than shipping retail data.
 Passive practice disables the planner, not normal enemy automatic combat.
