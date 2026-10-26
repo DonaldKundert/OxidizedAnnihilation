@@ -143,6 +143,31 @@ pub enum QueueMode {
     Append,
 }
 
+/// A standing order copied to each newly finished factory product. These
+/// orders are separate from production and never move the factory itself.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FactoryRallyOrder {
+    /// Move through a waypoint once.
+    Move {
+        /// Destination.
+        to: WorldPos,
+    },
+    /// Begin or extend a patrol after preceding move waypoints. The first
+    /// patrol also returns to the last move waypoint, or the product's release
+    /// position when no move precedes it.
+    Patrol {
+        /// Patrol destination.
+        to: WorldPos,
+    },
+    /// Guard a live, non-hostile unit after preceding waypoints. The exact
+    /// generational target is checked again when each product finishes.
+    Guard {
+        /// Unit to escort or assist, including the producing factory.
+        target: UnitId,
+    },
+}
+
 /// An order for the simulation. Every variant names the units it applies to;
 /// the sim validates ownership (a player can only order their own units) and
 /// silently drops IDs that are stale or not theirs.
@@ -239,6 +264,35 @@ pub enum SimCommand {
         /// New fire state.
         state: FireState,
     },
+    /// Set standing orders without cancelling or reordering production.
+    /// Ordinary `Move`/`Patrol` keep their historical semantics in old logs.
+    SetFactoryRally {
+        /// Owned, complete, live factories; other units are ignored.
+        units: UnitSet,
+        /// Standing order, or `None` to clear all standing orders.
+        order: Option<FactoryRallyOrder>,
+        /// Replace or append; ignored when `order` is `None`.
+        queue: QueueMode,
+    },
+    /// Remove matching factory production entries, newest pending first.
+    /// Also disables a matching repeat recipe without consuming `count`.
+    /// The active product is cancelled only after pending matches run out.
+    CancelProduction {
+        /// Owned, complete, live factories; other units are ignored.
+        units: UnitSet,
+        /// Product type to remove.
+        def: UnitDefId,
+        /// Maximum entries to remove per factory; zero does nothing.
+        count: u32,
+    },
+    /// Set continuous factory production after its finite queue runs out.
+    /// Changing or disabling the recipe preserves the active paid product.
+    SetFactoryRepeat {
+        /// Owned, complete, live factories; other units are ignored.
+        units: UnitSet,
+        /// A product in the factory's build menu, or `None` to disable.
+        def: Option<UnitDefId>,
+    },
 }
 
 impl SimCommand {
@@ -249,6 +303,9 @@ impl SimCommand {
             | SimCommand::AttackMove { units, .. }
             | SimCommand::Attack { units, .. }
             | SimCommand::Build { units, .. }
+            | SimCommand::SetFactoryRally { units, .. }
+            | SimCommand::CancelProduction { units, .. }
+            | SimCommand::SetFactoryRepeat { units, .. }
             | SimCommand::Guard { units, .. }
             | SimCommand::Heal { units, .. }
             | SimCommand::Patrol { units, .. }
@@ -259,18 +316,22 @@ impl SimCommand {
     }
 
     /// The queue mode, or `None` for immediate commands (`Stop`,
-    /// `SetFireState`).
+    /// `SetFireState`, `CancelProduction`, `SetFactoryRepeat`).
     pub fn queue(&self) -> Option<QueueMode> {
         match self {
             SimCommand::Move { queue, .. }
             | SimCommand::AttackMove { queue, .. }
             | SimCommand::Attack { queue, .. }
             | SimCommand::Build { queue, .. }
+            | SimCommand::SetFactoryRally { queue, .. }
             | SimCommand::Guard { queue, .. }
             | SimCommand::Heal { queue, .. }
             | SimCommand::Patrol { queue, .. }
             | SimCommand::CastSpell { queue, .. } => Some(*queue),
-            SimCommand::Stop { .. } | SimCommand::SetFireState { .. } => None,
+            SimCommand::Stop { .. }
+            | SimCommand::SetFireState { .. }
+            | SimCommand::CancelProduction { .. }
+            | SimCommand::SetFactoryRepeat { .. } => None,
         }
     }
 }
@@ -334,4 +395,9 @@ pub enum ClientCommand {
     CenterOnMonarch,
     /// Clear the selection (B / Escape with nothing else to cancel).
     ClearSelection,
+    /// Add a control group to the current selection without replacing it.
+    RecallGroupAdd {
+        /// Group number.
+        group: ControlGroup,
+    },
 }

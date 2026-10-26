@@ -1664,6 +1664,7 @@ fn start_death(
     now: u32,
 ) {
     crate::construction::cancel_heal(world, scripts, id);
+    crate::construction::cancel_repeat_on_death(world, scripts, id);
     let Some(u) = world.unit_mut(id) else { return };
     u.orders.clear();
     u.combat.cancel_orders();

@@ -175,7 +175,7 @@ step"). Here:
 ## Factories
 
 `Build { at: None }` appends to the factory's order queue as
-`Order::Build { at: None }` (Believed: factory buttons always queue). Each
+`Order::Build { at: None }` (Kingdoms-manual-confirmed: production buttons queue). Each
 order is one unit (no count coalescing). Per tick, following TA's five-state
 handler (TA-Known):
 
@@ -204,6 +204,107 @@ handler (TA-Known):
    economy to credit (TA-Known: refund `(1 − remaining) × cost`, product
    vanishes). If the product is destroyed, the factory drops all its orders
    (TA-Known).
+
+### Independent production editing and standing orders
+
+The owned Kingdoms manual (printed pp. 58–59 and 72–73) confirms ordered
+mixed production, visible counts, left/right click to add/remove one,
+Shift to add/remove five, and inherited Move/Patrol standing orders.
+This is documentary evidence, not a new original-executable observation.
+
+New client factory orders use `SetFactoryRally`, separate from production.
+Replace changes the standing route without cancelling a paid frame; Append
+adds a standing order. Completed products copy the current route. A
+first Patrol adds a return leg at the preceding Move destination, or at the
+product's release position when there is no Move. Empty explicit routes
+restore the ordinary exit behavior. Stop clears production and explicit
+standing orders. Mobile builders retain their ordinary placement behavior.
+
+`CancelProduction` removes the requested definition from the tail of the
+pending queue before cancelling a matching active product. The count shown
+includes the active product. These choices, including exact refund timing,
+are **Chosen**, not established by the manual. Active cancellation uses the
+existing paid-cost refund path once and leaves unrelated production and
+standing orders intact. Unit ownership and factory eligibility are checked
+by the simulation; counts and route lengths are bounded.
+
+New client Stop gestures first explicitly cancel observed factory production,
+then emit the ordinary Stop. This prevents a later Build in the same simulation
+tick from relabelling an old paid finite frame as a new queue head. Cancellation
+uses a full bounded-queue budget, so earlier same-tick additions cannot exhaust a
+stale displayed count. Mixed selections still send ordinary Stop to mobile units;
+one gesture produces one input acknowledgement. Raw historical Stop logs retain
+their previous behavior, including this same-tick Stop/requeue edge, to preserve
+replay compatibility. This is input normalization, not a simulation rule migration.
+
+Legacy Move/Patrol/Build/Guard commands retain their prior replay semantics.
+Explicit rally state is optional and contributes a tagged hash suffix only
+when present, preserving historical hashes for logs without new commands.
+New checkpoints still reconstruct by replay, not by serializing a full
+presentation save state. Tests pin an older construction replay's hashes
+and exercise new commands across checkpoint boundaries and processes.
+
+### Target-bound Guard standing orders
+
+The owned manual's printed pp. 70 and 72–73 list Guard among the standard
+orders and extend standing orders to the menu functions. Factory Guard support
+is based on that documentary combination, not a new original-executable test.
+Attack and AttackMove standing orders remain outside this slice. Zhon/mobile
+builders retain ordinary Guard and mixed placement queues.
+
+`FactoryRallyOrder::Guard` stores the full generational target ID. The following
+are **Chosen** safe implementation rules, not experimentally established original
+behavior:
+
+- A new Guard target must exist, be live and non-hostile to the factory owner.
+  Invalid requests do not replace a valid existing route. Initialized zero-health
+  targets are invalid; units outside combat retain normal existence semantics.
+- Production, paid work, repeat and callbacks are untouched by a Guard route edit.
+  At completion the product snapshots the current recipe and revalidates targets
+  against its owner. Dead, stale or newly hostile targets are skipped, never
+  replaced by a unit reusing the same arena index.
+- A leading effective Guard first takes the ordinary yard-exit Move, even if
+  the target is nearby. If no effective recipe remains, ordinary exit is used.
+  Guard-bearing recipes reserve one exit leg, in addition to the existing Patrol
+  return-leg reserve, within `MAX_ORDERS`. Blocked exits use the existing
+  deterministic pathfinding/failure behavior, not teleportation or immunity.
+- Preceding Move/Patrol points remain player-directed. Once released, the product
+  uses ordinary Guard/Append semantics, including existing target-loss behavior;
+  changing factory standing orders does not retask finished units.
+
+Move/Patrol-only recipe behavior and hash discriminants remain unchanged. Guard
+adds a new discriminator and generational ID hash; old command logs retain their
+previous semantics. The client uses the simulator's team relations for friendly
+targets, shows dynamic Guard route endpoints and marks unavailable targets rather
+than displaying a reused or hostile unit's location.
+
+### Continuous production
+
+The owned manual also documents Ctrl+selection for continuous production,
+`+++` as its indicator, and right-click to stop it. The following coexistence
+policy is **Chosen**, not an original-executable observation:
+
+- One optional recipe is a fallback after the finite FIFO. It does not allocate
+  an infinite queue, reserve mana, bypass exit retries or change construction cost.
+- An active product retains its origin. Changing or disabling the recipe keeps
+  that paid frame; completing a repeated frame never consumes a newly queued item.
+- Finite work added during a repeat runs after that active frame and before the
+  next repeat. Repeatedly adding finite work can therefore postpone repeating.
+- A positive `CancelProduction` clears the matching recipe without using its
+  removal budget, then removes matching finite waiting entries before a matching
+  active product. Zero is a full no-op. A different repeated recipe is preserved.
+- Stop, replacing legacy orders and destruction of an on-pad product clear repeat.
+  Explicit cancellation uses the same pre-helper cleanup and exact paid refund.
+  A dying repeat-controlled on-pad product is a loss, not a completed/refunded
+  product. Lethal damage to its factory immediately cancels/refunds an active
+  repeated frame, avoiding an orphan during same-tick chain explosions. These
+  new-state rules leave legacy finite-only death/replay behavior unchanged.
+- Counts include an active repeated frame, not an unbounded future count. `+++`
+  and a separate repeating/eligible-factory count describe the standing recipe.
+
+`SetFactoryRepeat { def: Some(...) }` enables or changes the recipe idempotently;
+`None` disables future repeats. Recipe and active-origin state add sparse tagged
+hash suffixes only when nondefault, preserving logs without these commands.
 
 ## Determinism
 

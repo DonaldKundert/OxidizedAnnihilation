@@ -466,8 +466,8 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   stances Offensive, Defensive, Passive; the weapon buttons Primary,
   Secondary, Special as spells 1-3 (numbered; the plates are blank).
   Frames: 0 dark (unusable), 1 up, 2 lit (hover), 3 down (the active mode,
-  stance or cast). Clear and Heal leave their wells empty (the sim lacks
-  them).
+  stance or cast). Clear remains reserved; Heal / repair is available for
+  an eligible healer or builder and otherwise leaves its well empty.
 - **Build menu** in a column left of the side panel: the first own builder's options as
   `anims/buildpic/<unit>.jpg` portraits (171 files, 64×48, **Known**) with
   the cost (and the Grid key when on), greyed when the player's mana is
@@ -476,10 +476,16 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   `EndCap`: portrait, name (and the selection count), health (green,
   yellow, red), the unit's own mana (blue), build progress (gold), stance,
   current order ("Attacking Thirsha", "Building Wall") and queue length.
-  Experience and kills are not in the sim, so not shown.
-- **Selection strip** above the card for mixed selections: one portrait
+  **Chosen layout:** full name and status text wrap in a bounded panel above
+  the unchanged art, portrait and bars. Long product/Guard names and queue
+  counts remain visible rather than overlapping the separate command hints.
+  This same always-visible detail works with mouse and controller, without
+  truncation or another detail-view binding. Experience is not shown.
+- **Selection strip** above the wrapping details for mixed selections: one portrait
   per type with its count; during a sub-select cycle (RT) the full
-  selection with the active type lit and the rest dimmed.
+  selection with the active type lit and the rest dimmed. It wraps inside the
+  same width and takes no layout space when inactive; only visible surfaces,
+  not transparent gaps between them, capture mouse input.
 - **Bottom bar** (right of the card, left of the minimap; a column from the
   bottom up): the active profile's prompts (pad glyph chips, or `[Key]`
   text for Classic TA:K), the verb line ("X: Attack Zhon Hunter", "LMB:
@@ -614,3 +620,55 @@ Zhon's validated recipe may use a mobile intermediary builder. The shared recipe
 validator now accepts this existing paid production path; neither resource costs
 nor planner command generation are overridden. Older immobile-factory recipes
 retain their behavior and replay representation.
+
+### Factory and army controls
+
+Factory portraits now show active-plus-waiting product counts. Left-click adds
+one, right-click removes one, and Shift changes the batch to five. The full
+mouse button gesture stays inside visible HUD, including releases outside it;
+hidden panels do not block world input. Mobile construction retains placement
+mode rather than becoming production queue editing. Pre-held Shift plus a
+primary-mouse drag queues distinct snapped terrain placements for mobile
+builders, without converting the gesture into selection. See
+[queued mobile placement](controller.md#queued-mobile-placement-by-mouse) for
+chosen spacing, boundary cancellation and scope limits.
+
+The controller build wheel shows counts and the current batch. A/Cross adds,
+X/Square removes, and holding RB/R1 before opening requests five. RB inside a
+multi-page wheel still changes page. Removing or confirming closes the wheel
+without a second action when its opener is released. Prompts honor configured
+bindings and Xbox/PlayStation glyph layout.
+
+Ctrl+left-click (including Ctrl+Shift) or Y/Triangle on a highlighted factory
+wheel option enables repeat production. `+++` and an explicit repeating-factory
+count distinguish it from the finite queue. Existing paid work finishes, then
+finite queued work runs before another repeat. Right-click/X stops that matching
+recipe while applying the ordinary decrement. Mobile placement is unchanged.
+Production queues, active frames, repeat recipes and rally routes reconstruct
+through replay checkpoints once pending input commands have executed. This does
+not turn them into full presentation saves: camera, selection and explored fog
+retain the limitations documented above.
+
+Factory Move, Patrol and friendly-target Guard now edit a separate visible standing route without
+cancelling the unit on the pad. Products inherit that route on release. Stop
+remains an explicit cancellation of production and standing orders. Unsupported
+factory Attack/AttackMove targeting is refused rather than discarding production.
+Guard routes follow the original live friendly target, show its current location,
+and say "Guard target unavailable" if that exact target dies or becomes hostile.
+New products use safe yard egress before a leading Guard; see the chosen lifetime
+and egress rules in construction.md.
+
+Ctrl+Shift+number adds a saved squad to selection without changing that squad;
+the owned key file also defines Alt+Shift aliases. RB plus D-pad recall is the
+controller equivalent. More-specific imported chords override simpler ones,
+and same-poll modifier presses/releases retain their intended meaning.
+
+See [controller controls](controller.md#factory-production-and-standing-orders)
+and [construction semantics](construction.md#independent-production-editing-and-standing-orders)
+for exact scope, chosen removal/refund behavior, and original-manual evidence.
+
+Explicit Attack mode also supports a primary-mouse box over visible enemies,
+without replacing the attacking army's selection. The red rectangle and Classic
+hint show the gesture; Shift appends targets. See
+[Attack boxes](controller.md#explicit-attack-box-by-mouse) for deterministic
+ordering, the 64-target cap, visibility rules and interrupted-gesture behavior.

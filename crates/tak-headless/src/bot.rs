@@ -425,6 +425,7 @@ fn idle(unit: &Unit) -> bool {
         && unit.combat.attack_move.is_none()
         && unit.build.job.is_none()
         && unit.build.factory.product.is_none()
+        && unit.build.factory_repeat.is_none()
         && unit.build.assist.is_none()
 }
 fn distance_squared(a: WorldPos, b: WorldPos) -> i128 {
@@ -443,7 +444,13 @@ pub fn committed_count(world: &World, owner: PlayerId, def: UnitDefId) -> usize 
             .build
             .job
             .and_then(|job| job.target)
-            .or(unit.build.factory.product)
+            // Repeated products own no finite queue entry, so they cannot
+            // back (and suppress) an independently queued Build commitment.
+            .or(unit
+                .build
+                .factory
+                .product
+                .filter(|_| !unit.build.factory.product_from_repeat))
             .is_some_and(|target| {
                 world
                     .unit(target)

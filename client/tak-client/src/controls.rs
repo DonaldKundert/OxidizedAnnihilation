@@ -9,7 +9,9 @@ use std::time::{Duration, SystemTime};
 
 use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::window::CursorOptions;
-use tak_input::{CursorKind, Feedback, PRESETS, Recorder, Recording, TUNING_FIELDS, Tuning};
+use tak_input::{
+    CursorKind, Feedback, PRESETS, Recorder, Recording, TUNING_FIELDS, Tuning, WorldView,
+};
 
 use super::*;
 use crate::feel::{self, Glyph, HintKey, Layout, Symbol};
@@ -979,12 +981,12 @@ pub(super) fn hints_system(
         .collect();
     let cx = feel::HintCx {
         has_units: !sel.is_empty(),
-        has_healer: !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty(),
-        has_builder: sel.iter().any(|u| {
-            w.defs()
-                .get(u.def)
-                .is_some_and(|d| d.build.builder && !d.build.canbuild.is_empty())
+        has_factory: input.mapper.selection().iter().any(|id| {
+            w.unit(*id).is_some_and(|u| u.owner == me)
+                && tak_sim::construction::can_factory_control(w, *id)
         }),
+        has_healer: !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty(),
+        has_builder: first_builder(&sim.session, input.mapper.selection()).is_some(),
         has_caster: sel.iter().any(|u| {
             w.defs()
                 .get(u.def)
@@ -1249,18 +1251,21 @@ pub(super) fn setup_wheel(mut commands: Commands) {
     }
 }
 
-/// The first own builder of the selection (the one the build wheel and
+/// The first operational builder of the selection (the one the build wheel and
 /// `BuildOption` use) and its definition.
 fn first_builder<'w>(
-    w: &'w tak_sim::World,
-    local: PlayerId,
+    s: &'w Session,
     sel: &tak_commands::UnitSet,
 ) -> Option<&'w tak_sim::defs::UnitDef> {
-    sel.iter().filter_map(|id| w.unit(*id)).find_map(|u| {
-        w.defs()
-            .get(u.def)
-            .filter(|d| u.owner == local && d.build.builder && !d.build.canbuild.is_empty())
-    })
+    let view = s.view();
+    sel.iter()
+        .filter(|&&id| view.can_build(id))
+        .find_map(|&id| {
+            view.world
+                .defs()
+                .get(view.world.unit(id)?.def)
+                .filter(|d| !d.build.canbuild.is_empty())
+        })
 }
 
 /// What a wheel slot shows.
@@ -1302,7 +1307,7 @@ fn wheel_slot_view(
     let mana = tak_sim::economy::player(w, s.local).map_or(0.0, |e| super::mana(e.mana));
     match a {
         Action::BuildOption { index } => {
-            let builder = first_builder(w, s.local, sel);
+            let builder = first_builder(s, sel);
             let def = builder.and_then(|d| d.build.canbuild.get(usize::from(*index)).copied());
             if let (Some(b), Some(o)) = (builder, def) {
                 let d = w.defs().get(o);
@@ -1320,6 +1325,8 @@ fn wheel_slot_view(
                 if v.short {
                     v.shortfall = format!("short {:.0} mana", cost as f64 - mana);
                 }
+            } else {
+                v.usable = false;
             }
         }
         Action::CastSpell { index } => {
@@ -1486,9 +1493,32 @@ pub(super) fn wheel_system(
         matches!(a, Action::Context { append: false })
     })
     .unwrap_or_else(|| "confirm".into());
+    let add_prompt = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+        matches!(a, Action::Select)
+    })
+    .unwrap_or_else(|| "select".into());
+    let batch_prompt = feel::pad_action_name(input.mapper.profile(), feel.layout, |a| {
+        matches!(a, Action::QueueModifier)
+    })
+    .unwrap_or_else(|| "queue modifier".into());
     let views: Vec<SlotView> = wh.slots[..n]
         .iter()
-        .map(|a| wheel_slot_view(a, s, w, sel, &order_prompt))
+        .map(|a| {
+            let mut view = wheel_slot_view(a, s, w, sel, &order_prompt);
+            if let Action::BuildOption { index } = a
+                && let Some(count) = input.mapper.factory_production_count(*index, &s.view())
+            {
+                let batch = input.mapper.production_batch_count();
+                let (repeating, eligible) = input.mapper.factory_repeat_counts(*index, &s.view()).unwrap_or((0, 0));
+                let repeat_prompt = feel::glyph(feel.layout, tak_input::Button::Y).map_or("Y", |g| g.name);
+                if count > 0 { view.label.push_str(&format!(" x{count}")); }
+                if repeating > 0 { view.label.push_str(" +++"); }
+                view.info.push_str(&format!(
+                    "\nQueued: {count} | {add_prompt} add {batch} / {order_prompt} remove {batch}\n{repeat_prompt} repeat | Repeating at {repeating} of {eligible} factories\nHold {batch_prompt} before opening for five"
+                ));
+            }
+            view
+        })
         .collect();
     // The centre panel (highlighted slot) and its size, so the ring clears
     // it as it clears the cursor.
@@ -1839,5 +1869,57 @@ pub(super) fn write_recording(feel: &mut Feel, s: &Session) {
             r.summary()
         ),
         Err(e) => eprintln!("{}: {e}", path.display()),
+    }
+}
+
+#[cfg(test)]
+mod construction_tests {
+    use super::*;
+    use tak_commands::UnitDefId;
+
+    #[test]
+    fn build_wheel_uses_completed_source_and_disables_unfinished_only_slots() {
+        let mut app = super::super::overlay_input_tests::app();
+        let mut state = app.world_mut().non_send_mut::<SimRes>();
+        let local = state.session.local;
+        let world = state.session.sim.world_mut();
+        let unfinished = world.units().find(|(_, u)| u.owner == local).unwrap().0;
+        world.unit_mut(unfinished).unwrap().build.frame = Some(tak_sim::construction::Frame {
+            done: 95,
+            total: 100,
+            paid: 0,
+        });
+        let factory = world
+            .spawn(
+                UnitDefId(2),
+                local,
+                tak_math::Vec2::from_ints(240, 160),
+                tak_math::Angle::ZERO,
+            )
+            .unwrap();
+        let session = &state.session;
+        let world = session.sim.world();
+        let mixed = tak_commands::UnitSet::from(vec![unfinished, factory]);
+        let view = wheel_slot_view(
+            &Action::BuildOption { index: 0 },
+            session,
+            world,
+            &mixed,
+            "X",
+        );
+        assert!(view.usable);
+        assert_eq!(view.unit, Some(UnitDefId(3)));
+        assert_eq!(view.label, "training_troop");
+        let only_frame = tak_commands::UnitSet::single(unfinished);
+        assert!(first_builder(session, &only_frame).is_none());
+        let view = wheel_slot_view(
+            &Action::BuildOption { index: 0 },
+            session,
+            world,
+            &only_frame,
+            "X",
+        );
+        assert!(!view.usable);
+        assert_eq!(view.unit, None);
     }
 }

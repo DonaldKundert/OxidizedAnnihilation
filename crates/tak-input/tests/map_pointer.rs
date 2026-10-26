@@ -133,3 +133,34 @@ fn recording_keeps_visible_ghost_cursor_and_exact_map_target_separate() {
     assert!(decoded.ghost_at(0).unwrap().stick);
     assert_eq!(mapper.cursor_world(), pos(12000, 9000));
 }
+
+#[test]
+fn valid_mouse_surface_distinguishes_terrain_map_and_stale_map_after_leave() {
+    let world = world();
+    let mut mapper = Mapper::new(Profile::classic_tak());
+    assert!(!mapper.mouse_pointer_on_surface());
+    mapper.handle(
+        &InputEvent::new(0, EventKind::PointerMove { x: 30, y: 40 }),
+        &world,
+        Tick(0),
+    );
+    assert!(mapper.mouse_pointer_on_terrain());
+    assert!(mapper.mouse_pointer_on_surface());
+    mapper.handle(&InputEvent::new(1, map_event()), &world, Tick(0));
+    assert!(!mapper.mouse_pointer_on_terrain());
+    assert!(mapper.mouse_pointer_on_surface());
+    for t in [2, 3] {
+        mapper.handle(
+            &InputEvent::new(t, EventKind::PointerLeaveTerrain),
+            &world,
+            Tick(0),
+        );
+        assert_eq!(mapper.map_target(), Some(pos(12000, 9000)));
+        assert!(!mapper.mouse_pointer_on_terrain());
+        assert!(!mapper.mouse_pointer_on_surface());
+    }
+    mapper.handle(&InputEvent::new(4, map_event()), &world, Tick(0));
+    assert!(mapper.mouse_pointer_on_surface());
+    mapper.warp_cursor(pos(30, 40));
+    assert!(!mapper.mouse_pointer_on_surface());
+}

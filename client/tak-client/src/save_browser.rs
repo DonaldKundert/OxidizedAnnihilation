@@ -312,7 +312,7 @@ pub(super) fn input(
             gameplay.last_axes.clear();
             gameplay.last_pointer = None;
             minimap.mouse_drag = false;
-            minimap.ui_held = false;
+            minimap.ui_held = [false; 3];
             minimap.swallow_release = false;
             minimap.pad_swallow = false;
             state.model.message =

@@ -41,6 +41,39 @@ pub struct UnitInfo {
     pub under_construction: bool,
 }
 
+/// A snapped mobile-construction site supplied by the world adapter.
+///
+/// Bounds are a half-open world-space rectangle `[min, max)`. They describe
+/// the actual footprint, not a screen-pixel radius. Adjacent edges may touch;
+/// overlapping footprints are not distinct sites within one input stroke.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PlacementCandidate {
+    /// Centre used by the existing `Build { at: Some(..) }` command.
+    pub center: WorldPos,
+    /// Inclusive footprint minimum.
+    pub min: WorldPos,
+    /// Exclusive footprint maximum.
+    pub max: WorldPos,
+}
+
+impl PlacementCandidate {
+    pub(crate) fn valid(self) -> bool {
+        self.min.x < self.max.x
+            && self.min.y < self.max.y
+            && self.center.x >= self.min.x
+            && self.center.x < self.max.x
+            && self.center.y >= self.min.y
+            && self.center.y < self.max.y
+    }
+
+    pub(crate) fn overlaps(self, other: Self) -> bool {
+        self.min.x < other.max.x
+            && other.min.x < self.max.x
+            && self.min.y < other.max.y
+            && other.min.y < self.max.y
+    }
+}
+
 /// Read-only access to the world for the local player. Implemented by the
 /// sim adapter in the client, and by plain structs in tests.
 ///
@@ -83,6 +116,59 @@ pub trait WorldView {
         })
     }
 
+    /// Whether a unit may receive factory rally/production controls. Adapters
+    /// should additionally reject dying units and factories unable to build.
+    fn can_factory_control(&self, unit: UnitId) -> bool {
+        self.unit(unit).is_some_and(|u| {
+            u.owner == self.local_player()
+                && u.selectable
+                && !u.under_construction
+                && u.builder == Some(BuilderKind::Factory)
+        })
+    }
+
+    /// Whether `target` may be stored as a factory's standing Guard target.
+    /// The default requires a current, selectable, non-hostile unit. Sim
+    /// adapters should additionally reject dead/dying targets. This capability
+    /// applies only to factory standing orders, not ordinary mobile Guard.
+    ///
+    /// The mapper still checks the handle, visibility and hostility when an
+    /// adapter overrides this capability.
+    fn can_factory_guard_target(&self, target: UnitId) -> bool {
+        self.unit(target)
+            .is_some_and(|u| u.id == target && u.selectable && !self.is_enemy(u.owner))
+    }
+
+    /// Active plus pending production items of `def` at this factory.
+    /// Used for presentation and explicit cancellation before a new Stop
+    /// gesture. Adapters with active production must report accurate counts;
+    /// the sim remains authoritative and the default preserves legacy Stop.
+    fn production_count(&self, unit: UnitId, def: UnitDefId) -> u32 {
+        let _ = (unit, def);
+        0
+    }
+
+    /// The continuous-production recipe currently enabled at this factory.
+    /// Used only for presentation; the sim remains authoritative.
+    fn factory_repeat(&self, unit: UnitId) -> Option<UnitDefId> {
+        let _ = unit;
+        None
+    }
+
+    /// Whether `unit` can receive construction orders now. Construction
+    /// frames remain selectable and valid assistance targets, but cannot
+    /// queue their own work until complete. Menus describe definitions;
+    /// use this capability separately when choosing an actionable builder.
+    fn can_build(&self, unit: UnitId) -> bool {
+        self.unit(unit).is_some_and(|u| {
+            u.owner == self.local_player()
+                && u.selectable
+                && !u.under_construction
+                && u.builder.is_some()
+                && (u.builder != Some(BuilderKind::Factory) || self.can_factory_control(unit))
+        })
+    }
+
     /// What `unit` can build, in menu order. Empty for non-builders.
     fn build_options(&self, unit: UnitId) -> Vec<UnitDefId> {
         let _ = unit;
@@ -106,6 +192,19 @@ pub trait WorldView {
     fn can_place(&self, def: UnitDefId, pos: WorldPos) -> bool {
         let _ = (def, pos);
         true
+    }
+
+    /// A legal, snapped candidate for mouse construction painting, including
+    /// its actual footprint. `None` means unsupported geometry or no legal
+    /// candidate here. The mapper never guesses geometry from screen pixels.
+    /// Snapping must be idempotent: querying the returned centre yields the
+    /// same candidate while its geometry and legality remain unchanged.
+    ///
+    /// This is only a preview filter for the new drag gesture. Ordinary click
+    /// dispatch never depends on it, and the simulation validates every Build.
+    fn placement_candidate(&self, def: UnitDefId, pos: WorldPos) -> Option<PlacementCandidate> {
+        let _ = (def, pos);
+        None
     }
 
     /// `true` if `unit` has no orders (for idle-builder cycling).

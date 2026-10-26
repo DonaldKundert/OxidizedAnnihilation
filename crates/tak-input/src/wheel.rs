@@ -240,7 +240,9 @@ pub fn context_slots(
         .copied()
         .filter(|a| match a {
             Action::CastSpellMode | Action::CastSpell { .. } => has_casters,
-            Action::BuildOption { .. } => has_builders,
+            Action::BuildOption { .. }
+            | Action::CancelBuildOption { .. }
+            | Action::RepeatBuildOption { .. } => has_builders,
             _ => true,
         })
         .collect()
@@ -285,7 +287,13 @@ pub fn context_slots_fixed(
         .iter()
         .map(|a| match a {
             Action::CastSpellMode | Action::CastSpell { .. } if !has_casters => BLANK,
-            Action::BuildOption { .. } if !has_builders => BLANK,
+            Action::BuildOption { .. }
+            | Action::CancelBuildOption { .. }
+            | Action::RepeatBuildOption { .. }
+                if !has_builders =>
+            {
+                BLANK
+            }
             Action::OpenRing { ring } if !ring_usable(*ring) => BLANK,
             other => *other,
         })

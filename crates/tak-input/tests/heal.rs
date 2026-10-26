@@ -361,6 +361,7 @@ fn wheel_profile(fixed: bool, slots: Vec<Action>) -> Profile {
     p.fixed_slots = fixed;
     p.command_wheel = slots;
     p.bindings.push(Binding {
+        with_all: Vec::new(),
         input: Input::Key(Key::new("q")),
         with: None,
         gesture: Gesture::Press,
@@ -469,6 +470,7 @@ fn empty_menu_healer_does_not_hide_a_mixed_selections_real_build_menu() {
     let mut p = Profile::classic_tak();
     p.bindings.clear();
     p.bindings.push(Binding {
+        with_all: Vec::new(),
         input: Input::Key(Key::new("b")),
         with: None,
         gesture: Gesture::Press,

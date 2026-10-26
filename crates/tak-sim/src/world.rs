@@ -157,6 +157,12 @@ impl Unit {
     /// so construction can still send its pending StopBuilding notification.
     pub(crate) fn cancel_player_orders(&mut self) {
         self.orders.clear();
+        // Replacing orders end continuous production even if its recipe was
+        // already disabled. Preserve the frame until pre-helper refund cleanup.
+        self.build.factory_repeat = None;
+        if self.build.factory.product_from_repeat && self.build.factory.product.is_some() {
+            self.build.factory.cancel_product = true;
+        }
         self.combat.cancel_orders();
         if let Some(heal) = &mut self.build.heal {
             heal.cancelled = true;

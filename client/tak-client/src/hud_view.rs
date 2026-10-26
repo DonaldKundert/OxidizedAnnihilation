@@ -7,7 +7,7 @@
 //! and the bottom bar shows button prompts. Logic without Bevy is in
 //! `crate::hud`.
 
-use tak_input::{CursorKind, Feedback, Refusal};
+use tak_input::{CursorKind, Feedback, Refusal, WorldView};
 
 use super::*;
 use crate::hud::{
@@ -81,16 +81,22 @@ fn key_label(p: &Profile, action: Action) -> Option<String> {
             return None;
         }
         let k = k.0.to_ascii_uppercase();
-        Some(match &b.with {
-            Some(tak_input::Input::Key(m)) => {
+        let mut names: Vec<String> = b
+            .modifiers()
+            .iter()
+            .map(|i| {
+                let tak_input::Input::Key(m) = i else {
+                    return None;
+                };
                 let mut m = m.0.clone();
                 if let Some(c) = m.get_mut(..1) {
                     c.make_ascii_uppercase();
                 }
-                format!("{m}+{k}")
-            }
-            _ => k,
-        })
+                Some(m)
+            })
+            .collect::<Option<_>>()?;
+        names.push(k);
+        Some(names.join("+"))
     })
 }
 
@@ -110,7 +116,10 @@ pub(super) struct BuildGrid;
 #[derive(Component)]
 pub(super) struct BuildCellPic(usize);
 #[derive(Component)]
-pub(super) struct BuildCellText(usize);
+pub(super) struct BuildCellText {
+    index: usize,
+    queue: bool,
+}
 #[derive(Component)]
 pub(super) struct UnitCard;
 #[derive(Component)]
@@ -119,6 +128,12 @@ pub(super) struct CardPic;
 pub(super) struct CardName;
 #[derive(Component)]
 pub(super) struct CardText;
+/// The bottom-left details and selection strip, growing upward above the art.
+#[derive(Component)]
+pub(super) struct SelectionStack;
+/// The visible, wrapping selection text surface (also captures mouse clicks).
+#[derive(Component)]
+pub(super) struct SelectionDetails;
 /// Bar fill: 0 health, 1 mana, 2 build progress.
 #[derive(Component)]
 pub(super) struct CardBar(u8);
@@ -397,7 +412,28 @@ pub(super) fn setup_hud_view(
                 padding: UiRect::axes(Val::Px(2.0), Val::Px(0.0)),
                 ..default()
             },
-            BuildCellText(i),
+            BuildCellText {
+                index: i,
+                queue: false,
+            },
+            ChildOf(c),
+        ));
+        commands.spawn((
+            Text::new(""),
+            hud_text(13.0),
+            TextLayout::no_wrap(),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(1.0),
+                top: Val::Px(0.0),
+                padding: UiRect::axes(Val::Px(2.0), Val::Px(0.0)),
+                ..default()
+            },
+            BuildCellText {
+                index: i,
+                queue: true,
+            },
             ChildOf(c),
         ));
     }
@@ -449,19 +485,6 @@ pub(super) fn setup_hud_view(
         CardPic,
         ChildOf(card),
     ));
-    commands.spawn((
-        Text::new(""),
-        hud_text(14.0),
-        TextLayout::no_wrap(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(114.0),
-            top: Val::Px(4.0),
-            ..default()
-        },
-        CardName,
-        ChildOf(card),
-    ));
     for (k, y) in [(0u8, 25.0), (1, 33.0), (2, 41.0)] {
         let track = commands
             .spawn((
@@ -489,35 +512,92 @@ pub(super) fn setup_hud_view(
             ChildOf(track),
         ));
     }
-    commands.spawn((
-        Text::new(""),
-        hud_text(11.0),
-        TextLayout::no_wrap(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(234.0),
-            top: Val::Px(5.0),
-            ..default()
-        },
-        CardText,
-        ChildOf(card),
-    ));
-    // Multi-selection strip above the card.
-    let strip = commands
+    // Chosen layout: full names and order details live above the original
+    // 512x49 art. Let text grow upward rather than overlap the card's bars
+    // or the separate command hints at x=520. Only visible child surfaces
+    // capture clicks, not the transparent stack or its inter-widget gaps.
+    let stack = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 bottom: Val::Px(CARD_SIZE[1] + 3.0),
+                width: Val::Px(CARD_SIZE[0]),
+                max_width: Val::Percent(100.0),
+                flex_direction: FlexDirection::ColumnReverse,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(3.0),
+                ..default()
+            },
+            SelectionStack,
+        ))
+        .id();
+    let details = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                min_width: Val::Px(0.0),
+                max_width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                row_gap: Val::Px(2.0),
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            HudPanel,
+            SelectionDetails,
+            ChildOf(stack),
+        ))
+        .id();
+    let text_node = Node {
+        width: Val::Percent(100.0),
+        min_width: Val::Px(0.0),
+        max_width: Val::Percent(100.0),
+        flex_shrink: 0.0,
+        ..default()
+    };
+    // Keep words together normally, but even an unbroken custom unit name
+    // must wrap inside the panel instead of hiding the remaining status.
+    let wrap = TextLayout::linebreak(bevy::text::LineBreak::WordOrCharacter);
+    commands.spawn((
+        Text::new(""),
+        hud_text(14.0),
+        wrap,
+        text_node.clone(),
+        CardName,
+        ChildOf(details),
+    ));
+    commands.spawn((
+        Text::new(""),
+        hud_text(11.0),
+        wrap,
+        text_node,
+        CardText,
+        ChildOf(details),
+    ));
+    // Multi-selection strip above the auto-height details, never beside
+    // or underneath them. Ten cells plus gaps can exceed 512px, so wrap.
+    let strip = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                min_width: Val::Px(0.0),
+                max_width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                flex_shrink: 0.0,
                 column_gap: Val::Px(3.0),
+                row_gap: Val::Px(3.0),
                 padding: UiRect::all(Val::Px(3.0)),
+                display: Display::None,
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
             Visibility::Hidden,
             HudPanel,
             SelStrip,
+            ChildOf(stack),
         ))
         .id();
     for i in 0..STRIP_CELLS {
@@ -526,6 +606,7 @@ pub(super) fn setup_hud_view(
                 Node {
                     width: Val::Px(48.0),
                     height: Val::Px(36.0),
+                    flex_shrink: 0.0,
                     border: UiRect::all(Val::Px(2.0)),
                     display: Display::None,
                     ..default()
@@ -772,7 +853,7 @@ pub(super) fn panel_system(
     }
 }
 
-/// Build menu: the first own builder's options with portraits and costs,
+/// Build menu: the first operational builder's options with portraits and costs,
 /// greyed when the player's mana is short, the option being placed lit.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_grid_system(
@@ -783,21 +864,33 @@ pub(super) fn build_grid_system(
     mut portraits: ResMut<controls::Portraits>,
     mut images: ResMut<Assets<Image>>,
     mut grid: Query<&mut Visibility, (With<BuildGrid>, Without<ButtonKind>)>,
-    mut cells: Query<(&ButtonKind, &mut Node, &mut BorderColor), Without<BuildGrid>>,
+    mut cells: Query<
+        (
+            &ButtonKind,
+            &mut Node,
+            &mut BorderColor,
+            &ComputedNode,
+            &UiGlobalTransform,
+        ),
+        Without<BuildGrid>,
+    >,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut hover: ResMut<HudHover>,
     mut pics: Query<(&BuildCellPic, &mut ImageNode)>,
     mut texts: Query<(&BuildCellText, &mut Text)>,
 ) {
     let s = &sim.session;
     let w = s.sim.world();
-    let sel = own_selection(w, s.local, input.mapper.selection());
-    let opts: Vec<tak_commands::UnitDefId> = sel
+    let view = s.view();
+    let opts = input
+        .mapper
+        .selection()
         .iter()
-        .find_map(|(_, u)| {
-            w.defs()
-                .get(u.def)
-                .filter(|d| d.build.builder && !d.build.canbuild.is_empty())
+        .filter(|&&id| view.can_build(id))
+        .find_map(|&id| {
+            let opts = view.build_options(id);
+            (!opts.is_empty()).then_some(opts)
         })
-        .map(|d| d.build.canbuild.clone())
         .unwrap_or_default();
     let show = !mode.console && !opts.is_empty();
     for mut v in &mut grid {
@@ -816,7 +909,11 @@ pub(super) fn build_grid_system(
     let mana = tak_sim::economy::player(w, s.local).map_or(0.0, |e| mana(e.mana));
     let m = input.mapper.mode();
     let mut short = [false; BUILD_CELLS];
-    for (kind, mut node, mut border) in &mut cells {
+    let mouse = windows
+        .single()
+        .ok()
+        .and_then(|window| window.cursor_position());
+    for (kind, mut node, mut border, computed, transform) in &mut cells {
         let ButtonKind::Build(i) = *kind else {
             continue;
         };
@@ -832,6 +929,31 @@ pub(super) fn build_grid_system(
         if let Some(o) = opt {
             let cost = w.defs().get(o).map_or(0, |d| d.build.buildcost);
             short[i] = cost as f64 > mana;
+            if mouse.is_some_and(|p| {
+                let c = transform.translation;
+                let h = computed.size / 2.0;
+                computed.size.min_element() > 0.0
+                    && p.x >= c.x - h.x
+                    && p.x <= c.x + h.x
+                    && p.y >= c.y - h.y
+                    && p.y <= c.y + h.y
+            }) {
+                let name = s.def(o).map_or("?", |d| d.display.as_str());
+                hover.0 = Some(
+                    match input.mapper.factory_production_count(i as u8, &s.view()) {
+                        Some(count) => {
+                            let (repeating, eligible) = input
+                                .mapper
+                                .factory_repeat_counts(i as u8, &s.view())
+                                .unwrap_or((0, 0));
+                            format!(
+                                "{name}: {cost} mana | queued {count} | Repeating at {repeating} of {eligible} factories | LMB +1 / RMB -1; Shift five; Ctrl+LMB repeat, RMB stops"
+                            )
+                        }
+                        None => format!("{name}: {cost} mana | LMB choose placement"),
+                    },
+                );
+            }
             *border = BorderColor::all(if m == Mode::Build(o) {
                 Color::srgb(1.0, 0.8, 0.3)
             } else {
@@ -853,13 +975,29 @@ pub(super) fn build_grid_system(
         }
     }
     for (t, mut text) in &mut texts {
-        let want = opts.get(t.0).map_or(String::new(), |o| {
+        let want = opts.get(t.index).map_or(String::new(), |o| {
+            if t.queue {
+                let count = input
+                    .mapper
+                    .factory_production_count(t.index as u8, &s.view())
+                    .unwrap_or(0);
+                let repeating = input
+                    .mapper
+                    .factory_repeat_counts(t.index as u8, &s.view())
+                    .is_some_and(|(repeating, _)| repeating > 0);
+                return match (count, repeating) {
+                    (0, false) => String::new(),
+                    (0, true) => "+++".into(),
+                    (_, false) => format!("x{count}"),
+                    (_, true) => format!("x{count} +++"),
+                };
+            }
             let cost = w.defs().get(*o).map_or(0, |d| d.build.buildcost);
             match input
                 .mapper
                 .profile()
                 .grid_build_keys
-                .then(|| tak_input::GRID_KEYS.get(t.0))
+                .then(|| tak_input::GRID_KEYS.get(t.index))
                 .flatten()
             {
                 Some(k) => format!("{} {cost}", k.to_ascii_uppercase()),
@@ -946,7 +1084,23 @@ pub(super) fn unit_card_system(
             let [r, g, b] = health_rgb(hf);
             let mana = tak_sim::economy::unit_mana(w, id)
                 .map(|m| (f(m.mana) / f(m.max).max(1.0), Color::srgb(0.3, 0.5, 1.0)));
-            let left = u.build.percent_left();
+            // A selected frame owns its construction bar. Once complete, a
+            // local factory shows its actual product, not its queue or repeat
+            // recipe (which can change while that product remains on the pad).
+            let left = if u.build.is_complete()
+                && u.owner == s.local
+                && w.defs()
+                    .get(u.def)
+                    .is_some_and(|d| d.build.builder && !d.build.mobile)
+            {
+                u.build
+                    .factory
+                    .product
+                    .and_then(|id| w.unit(id))
+                    .map_or(0, |product| product.build.percent_left())
+            } else {
+                u.build.percent_left()
+            };
             let build =
                 (left > 0).then(|| ((100 - left) as f32 / 100.0, Color::srgb(0.95, 0.75, 0.25)));
             [Some((hf, Color::srgb(r, g, b))), mana, build]
@@ -981,8 +1135,8 @@ pub(super) fn strip_system(
     input: Res<InputRes>,
     mut portraits: ResMut<controls::Portraits>,
     mut images: ResMut<Assets<Image>>,
-    mut strip: Query<&mut Visibility, With<SelStrip>>,
-    mut cells: Query<(&StripCell, &mut Node, &mut BorderColor)>,
+    mut strip: Query<(&mut Visibility, &mut Node), With<SelStrip>>,
+    mut cells: Query<(&StripCell, &mut Node, &mut BorderColor), Without<SelStrip>>,
     mut pics: Query<(&StripPic, &mut ImageNode)>,
     mut counts: Query<(&StripCount, &mut Text)>,
 ) {
@@ -1001,7 +1155,7 @@ pub(super) fn strip_system(
     let groups = group_by_type(&units);
     let active = sub.and_then(|ss| ss.types.get(ss.index).copied());
     let show = units.len() > 1;
-    for mut v in &mut strip {
+    for (mut v, mut node) in &mut strip {
         let want = if show {
             Visibility::Inherited
         } else {
@@ -1009,6 +1163,10 @@ pub(super) fn strip_system(
         };
         if *v != want {
             *v = want;
+        }
+        let display = if show { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
         }
     }
     if !show {

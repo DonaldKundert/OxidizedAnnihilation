@@ -452,14 +452,17 @@ fn scripted_intents_match_and_issue_orders() {
             SimCommand::CastSpell { .. } => "cast",
             SimCommand::Stop { .. } => "stop",
             SimCommand::SetFireState { .. } => "fire",
+            SimCommand::SetFactoryRally { .. } => "rally",
+            SimCommand::CancelProduction { .. } => "cancel_production",
+            SimCommand::SetFactoryRepeat { .. } => "set_factory_repeat",
         })
         .collect();
     assert_eq!(
         kinds,
         [
             "move", "move", "attack", "fire", "patrol", "stop", "place", "produce",
-            // The factory build intent's trailing X is a plain context order.
-            "move", "cast", "guard"
+            // The factory build intent's trailing X sets a rally point.
+            "rally", "cast", "guard"
         ]
     );
 }

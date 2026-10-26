@@ -166,6 +166,7 @@ fn minimap_custom_left_context_binding_is_not_replaced_with_pan() {
         .bindings
         .retain(|b| b.input != tak_input::Input::Button(InButton::MouseLeft));
     profile.bindings.push(tak_input::Binding {
+        with_all: Vec::new(),
         input: tak_input::Input::Button(InButton::MouseLeft),
         with: None,
         gesture: tak_input::Gesture::Press,
@@ -227,7 +228,7 @@ fn minimap_target_click_does_not_activate_hud_behind_fullscreen_map() {
     assert_eq!(sim.session.recorded.entries().len(), 1);
     assert!(matches!(&sim.session.recorded.entries()[0].command,
         SimCommand::Patrol { to, .. } if *to == expected));
-    assert!(!app.world().resource::<MinimapState>().ui_held);
+    assert_eq!(app.world().resource::<MinimapState>().ui_held, [false; 3]);
 }
 
 #[test]
@@ -354,6 +355,7 @@ fn minimap_stationary_mouse_does_not_steal_held_gamepad_cursor() {
 fn minimap_left_order_chord_overrides_plain_selection_binding() {
     let mut profile = Profile::classic_tak();
     profile.bindings.push(tak_input::Binding {
+        with_all: Vec::new(),
         input: tak_input::Input::Button(InButton::MouseLeft),
         with: Some(tak_input::Input::Key(Key("alt".into()))),
         gesture: tak_input::Gesture::Press,
@@ -552,6 +554,7 @@ fn minimap_pad_remapped_a_and_same_poll_chord_issue_orders_not_pan() {
                 .retain(|b| b.input != tak_input::Input::Button(InButton::A));
         }
         profile.bindings.push(tak_input::Binding {
+            with_all: Vec::new(),
             input: tak_input::Input::Button(InButton::A),
             with: chord.then_some(tak_input::Input::Button(InButton::Rb)),
             gesture: tak_input::Gesture::Press,
@@ -696,6 +699,7 @@ fn minimap_original_left_context_orders_with_selection_and_pans_without_it() {
 fn minimap_pad_custom_release_is_not_swallowed_by_selection_pan() {
     let mut profile = Profile::default_combined();
     profile.bindings.push(tak_input::Binding {
+        with_all: Vec::new(),
         input: tak_input::Input::Button(InButton::A),
         with: None,
         gesture: tak_input::Gesture::Release,

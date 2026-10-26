@@ -52,7 +52,10 @@ pub use cursor::{
 };
 pub use event::{Axis, Button, EventKind, Input, InputEvent, Key};
 pub use keys_tdf::{KeyLine, KeysError, KeysImport, LineStatus, parse_keys_tdf};
-pub use mapper::{BOOKMARKS, CursorKind, Feedback, Mapper, Output, Refusal, SubSelect};
+pub use mapper::{
+    BOOKMARKS, CursorKind, Feedback, MAX_AREA_ATTACK_TARGETS, MAX_BUILD_DRAG_SITES, Mapper, Output,
+    Refusal, SubSelect,
+};
 pub use record::{
     FrameIo, Ghost, RECORDING_VERSION, RecFrame, Recorder, Recording, RecordingError, Summary,
 };
@@ -61,4 +64,4 @@ pub use wheel::{
     BLANK, PAGE, Wheel, WheelKind, context_slots, context_slots_fixed, expand_spells, is_blank,
     ring_slots, ring_usable, slot_direction, slot_for,
 };
-pub use world::{BuilderKind, Camera, UnitInfo, WorldView, units_sorted};
+pub use world::{BuilderKind, Camera, PlacementCandidate, UnitInfo, WorldView, units_sorted};

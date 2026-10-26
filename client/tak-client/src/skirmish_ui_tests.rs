@@ -287,6 +287,7 @@ fn opening_clears_mapper_gestures_and_minimap_drag_without_clearing_selection() 
             );
             let mut profile = input.mapper.profile().clone();
             profile.bindings.push(tak_input::Binding {
+                with_all: Vec::new(),
                 input: tak_input::Input::Key(tak_input::Key("test-wheel".into())),
                 with: None,
                 gesture: tak_input::Gesture::Press,
@@ -314,7 +315,7 @@ fn opening_clears_mapper_gestures_and_minimap_drag_without_clearing_selection() 
     {
         let mut mm = app.world_mut().resource_mut::<MinimapState>();
         mm.mouse_drag = true;
-        mm.ui_held = true;
+        mm.ui_held = [true; 3];
         mm.pad_swallow = true;
     }
     key(&mut app, KeyCode::F7);
@@ -323,7 +324,7 @@ fn opening_clears_mapper_gestures_and_minimap_drag_without_clearing_selection() 
     assert_eq!(input.mapper.selection(), &selection);
     assert!(input.last_axes.is_empty());
     let mm = app.world().resource::<MinimapState>();
-    assert!(!mm.mouse_drag && !mm.ui_held && !mm.pad_swallow);
+    assert!(!mm.mouse_drag && mm.ui_held == [false; 3] && !mm.pad_swallow);
 }
 #[test]
 fn verification_modes_cannot_open_or_launch_skirmish() {

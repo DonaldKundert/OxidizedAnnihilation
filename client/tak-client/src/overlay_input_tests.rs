@@ -149,6 +149,7 @@ fn closing_pad_menu_or_b_consumes_other_pad_actions_but_keeps_quicksave() {
                     .bindings
                     .retain(|binding| binding.input != tak_input::Input::Button(InButton::X));
                 profile.bindings.push(tak_input::Binding {
+                    with_all: Vec::new(),
                     input: tak_input::Input::Button(InButton::X),
                     with: None,
                     gesture: tak_input::Gesture::Press,
@@ -268,6 +269,12 @@ fn captured_frame_neutralizes_sticks_and_does_not_accumulate_camera_motion() {
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_millis(16));
     app.update();
+    // The first sample establishes the held axis; move on an ordinary poll.
+    // Opening settings now rolls back all same-poll camera movement.
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.update();
     app.world_mut()
         .resource_mut::<ButtonInput<KeyCode>>()
         .press(KeyCode::F11);
@@ -350,7 +357,7 @@ fn captured_frame_blocks_hud_click_minimap_drag_and_scroll() {
         app.update();
         assert_eq!(app.world().resource::<InputRes>().mapper.mode(), Mode::None);
         assert_eq!(app.world().resource::<CamState>().geom.zoom, zoom);
-        assert!(!app.world().resource::<MinimapState>().ui_held);
+        assert_eq!(app.world().resource::<MinimapState>().ui_held, [false; 3]);
         assert!(app.world().non_send::<SimRes>().session.recorded.is_empty());
 
         // A second captured frame targets the actual minimap rectangle.

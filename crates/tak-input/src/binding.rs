@@ -94,8 +94,13 @@ pub enum Action {
         /// Group.
         group: ControlGroup,
     },
-    /// Recall a control group.
+    /// Recall a control group (additive while the queue modifier is held).
     RecallGroup {
+        /// Group.
+        group: ControlGroup,
+    },
+    /// Add a control group to the selection without modifying the saved group.
+    RecallGroupAdd {
         /// Group.
         group: ControlGroup,
     },
@@ -128,9 +133,23 @@ pub enum Action {
         index: u8,
     },
     /// Pick build option `index` of the selection's first builder: factories
-    /// queue it immediately, mobile builders enter placement mode.
+    /// append it immediately (five with the queue modifier), while mobile
+    /// builders enter placement mode.
     BuildOption {
         /// Index into the builder's options.
+        index: u8,
+    },
+    /// Continuously produce this option at eligible selected factories.
+    /// Enables the recipe rather than toggling it; mobile placement is unchanged.
+    RepeatBuildOption {
+        /// Index into the first builder's options.
+        index: u8,
+    },
+    /// Remove this build option from selected factories: one item, or five
+    /// with the queue modifier, and stop its matching continuous recipe.
+    /// Mobile builder placement is unchanged.
+    CancelBuildOption {
+        /// Index into the first builder's options.
         index: u8,
     },
     /// *Held.* Precision cursor: reduced speed, magnetism off.
@@ -380,7 +399,8 @@ impl Action {
 
 /// One binding. `with` names a chord modifier that must already be down when
 /// `input` goes down (RB + D-pad, Ctrl + 1). A chorded binding wins over an
-/// unchorded one, and the modifier's own tap/hold is suppressed once used.
+/// unchorded one. `with_all` allows additional modifiers; the most-specific
+/// satisfied chord wins. Every used modifier's own tap/hold is suppressed.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
@@ -389,6 +409,10 @@ pub struct Binding {
     /// Chord modifier, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub with: Option<Input>,
+    /// Additional chord modifiers. All must be held; more-specific chords
+    /// win over less-specific ones. Existing `with` bindings remain valid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub with_all: Vec<Input>,
     /// Gesture.
     pub gesture: Gesture,
     /// Action.
@@ -416,6 +440,9 @@ pub enum ProfileError {
     /// A binding uses its own input as its modifier.
     #[error("binding {0}: input is its own chord modifier")]
     SelfChord(usize),
+    /// The same modifier appears more than once in a chord.
+    #[error("binding {0}: duplicate chord modifier")]
+    DuplicateModifier(usize),
     /// A held action is bound to a gesture without a duration.
     #[error("binding {0}: held action {1:?} needs a press or hold gesture")]
     HeldOnInstantGesture(usize, Action),
@@ -425,6 +452,15 @@ pub enum ProfileError {
     /// More wheel slots than `tuning.wheel_max_slots`.
     #[error("command wheel has {0} slots, more than the limit {1}")]
     WheelTooLarge(usize, u8),
+}
+
+impl Binding {
+    /// Required modifiers in canonical order, including the legacy `with`.
+    pub fn modifiers(&self) -> Vec<Input> {
+        let mut modifiers: Vec<_> = self.with.iter().chain(&self.with_all).cloned().collect();
+        modifiers.sort();
+        modifiers
+    }
 }
 
 /// A complete input profile.
@@ -507,16 +543,19 @@ impl Profile {
     /// Check the invariants [`Profile::from_json`] enforces.
     pub fn validate(&self) -> Result<(), ProfileError> {
         for (i, b) in self.bindings.iter().enumerate() {
-            if b.with.as_ref() == Some(&b.input) {
+            let modifiers = b.modifiers();
+            if modifiers.contains(&b.input) {
                 return Err(ProfileError::SelfChord(i));
+            }
+            if modifiers.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(ProfileError::DuplicateModifier(i));
             }
             if b.action.is_held() && !matches!(b.gesture, Gesture::Press | Gesture::Hold) {
                 return Err(ProfileError::HeldOnInstantGesture(i, b.action));
             }
-            if let Some(prev) = self.bindings[..i]
-                .iter()
-                .find(|p| p.input == b.input && p.with == b.with && p.gesture == b.gesture)
-            {
+            if let Some(prev) = self.bindings[..i].iter().find(|p| {
+                p.input == b.input && p.modifiers() == modifiers && p.gesture == b.gesture
+            }) {
                 return Err(ProfileError::Duplicate {
                     index: i,
                     input: prev.input.clone(),
@@ -656,18 +695,45 @@ impl Profile {
             .expect("embedded WP-S mouse/keyboard profile is valid")
     }
 
-    /// The binding for `input` + `with` + `gesture`, if any.
+    /// The binding for one legacy modifier and gesture, if any.
     pub fn find(&self, input: &Input, with: Option<&Input>, gesture: Gesture) -> Option<Action> {
+        self.find_chord(
+            input,
+            &with.into_iter().cloned().collect::<Vec<_>>(),
+            gesture,
+        )
+    }
+
+    /// The binding for a canonical, sorted set of chord modifiers.
+    pub fn find_chord(
+        &self,
+        input: &Input,
+        modifiers: &[Input],
+        gesture: Gesture,
+    ) -> Option<Action> {
         self.bindings
             .iter()
-            .find(|b| &b.input == input && b.with.as_ref() == with && b.gesture == gesture)
+            .find(|b| &b.input == input && b.modifiers() == modifiers && b.gesture == gesture)
             .map(|b| b.action)
+    }
+
+    /// Most-specific satisfied chord, with deterministic lexical tie-breaking.
+    pub fn held_chord(&self, input: &Input, held: impl Fn(&Input) -> bool) -> Vec<Input> {
+        let mut chords: Vec<_> = self
+            .bindings
+            .iter()
+            .filter(|b| &b.input == input)
+            .map(Binding::modifiers)
+            .filter(|modifiers| modifiers.iter().all(&held))
+            .collect();
+        chords.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        chords.into_iter().next().unwrap_or_default()
     }
 
     /// `true` if any binding for `input` uses modifier `with`.
     pub fn has_chord(&self, input: &Input, with: &Input) -> bool {
         self.bindings
             .iter()
-            .any(|b| &b.input == input && b.with.as_ref() == Some(with))
+            .any(|b| &b.input == input && b.modifiers().contains(with))
     }
 }
