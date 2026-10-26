@@ -242,9 +242,11 @@ enum Terrain<'a> {
 pub fn movement(world: &mut World) {
     let pathing = std::mem::take(&mut world.pathing);
     for id in world.unit_ids() {
-        let Some(def_id) = world.unit(id).map(|u| u.def) else {
+        let Some(u) = world.unit(id) else { continue };
+        if world.is_inert_player(u.owner) {
             continue;
-        };
+        }
+        let def_id = u.def;
         let terr = match pathing.grid_for(def_id) {
             Some(g) => Terrain::Grid(g),
             None if pathing.is_built() => Terrain::Free,

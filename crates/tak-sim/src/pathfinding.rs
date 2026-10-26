@@ -958,7 +958,7 @@ pub(crate) fn separate(world: &mut World, ps: &PathState) {
                 id,
                 pos: u.pos,
                 r: Fx::from_int(i32::from(k.fx.max(k.fz)) * 8),
-                mobile: def.maxvelocity > Fx::ZERO,
+                mobile: def.maxvelocity > Fx::ZERO && !world.is_inert_player(u.owner),
             })
         })
         .collect();

@@ -226,7 +226,7 @@ maps author any. **Known** (no keys in `kmap/`), **Believed** (TA).
 | Defeated player's units | `DefeatedUnits::SelfDestruct` (default): each living unit takes 30000 damage (explosion kind) through the normal damage path, in slot order, and plays its death; `Remain`: they stay, keep defending, take no orders | Believed (TA's owner sweep, 30000 self-damage); Remain is Chosen |
 | Units that survive the sweep | units outside combat or with more than 30000 health stay, inert | Believed (TA uses the same damage path) |
 | Commands | dropped for defeated players (`apply_commands`) | Chosen |
-| Teams | `VictorySetup::teams` (per player, `None` = alone); only victory reads them, combat still treats every other player as an enemy | Known (lobby teams), Chosen representation |
+| Teams | `VictorySetup::teams` (per player, `None` = alone); allies win together and do not automatically target each other; explicit attacks and splash stay unchanged | Known lobby teams; Believed automatic targeting |
 | Over | when the undefeated players all share one team; `winners` = those players; a simultaneous wipe-out is a draw (`winners: []`) | Believed (TA kind-2 sweep: no non-allied slot with units) |
 | One team from the start | never ends by elimination (sandboxes, tests) | Chosen |
 | After Over | nothing in victory changes again; the sim keeps ticking | Chosen |
@@ -309,3 +309,25 @@ OTA `[UNITS]` is the campaign loader's job (not built).
 - Footprint-aware blocking, feature footprint anchoring (`content.md`),
   road/water speed multipliers, slopes slowing units.
 - Flight (`canfly`), water units, per-movement-class passability grids.
+
+
+### Default defeat-sweep survivors (October 2026 fidelity pass)
+
+The 30000-damage sweep can leave a high-health unit, or a unit outside combat,
+alive. **Believed** (TA sweep semantics): these survivors are inert. Previously
+only new player commands were rejected; surviving units kept their old movement,
+weapon targets and production work in a continuing three-player match. The new
+synthetic regression reproduced 300 units of movement after defeat over 300 ticks.
+
+After the default sweep, surviving units now end their work/weapon callbacks,
+clear standing and queued production and movement, and stop moving, fighting,
+actively healing or building. The construction, movement and combat lanes exclude these
+inert owners. Death animations, damage and already launched projectiles still
+process normally. This applies to skirmish `SelfDestruct` only: the explicit
+`DefeatedUnits::Remain` option retains its defensive fire and missions retain their
+existing condition behavior. Income/storage of surviving units are unchanged;
+allied resource sharing remains unimplemented.
+
+`tests/victory.rs` verifies a three-player match with moving, armed and producing
+50000-HP survivors, outside-combat survivors, post-defeat removal, defensive
+Remain behavior and cross-process survivor hashes. No retail fixture is committed.

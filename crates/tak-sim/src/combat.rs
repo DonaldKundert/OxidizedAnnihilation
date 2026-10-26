@@ -511,7 +511,8 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
     for &id in &ids {
         // Units still under construction (WP-O) can be hit but never act.
         let active = world.unit(id).is_some_and(|u| {
-            u.combat.ready
+            !world.is_inert_player(u.owner)
+                && u.combat.ready
                 && u.combat.max_health > 0
                 && !u.combat.is_dying()
                 && u.build.is_complete()
@@ -689,6 +690,7 @@ struct Core {
     tolerance: u16,
     spell: bool,
     mana: i32,
+    no_air_weapon: bool,
 }
 
 fn cores(world: &World, def: UnitDefId) -> Vec<Core> {
@@ -704,6 +706,7 @@ fn cores(world: &World, def: UnitDefId) -> Vec<Core> {
                 tolerance: w.aim_tolerance.unwrap_or(DEFAULT_AIM_TOLERANCE),
                 spell: w.is_spell(),
                 mana: w.mana_per_shot,
+                no_air_weapon: w.no_air_weapon,
             })
             .collect()
     })
@@ -745,7 +748,24 @@ fn reach(world: &World, shooter: UnitId, core: &Core, t: Target) -> i32 {
     }
 }
 
+/// Weapon target compatibility is independent of range: incompatible targets
+/// must not start a chase, even when outside the weapon's reach.
+fn can_target(world: &World, no_air_weapon: bool, t: Target) -> bool {
+    match t {
+        Target::Ground(_) => true,
+        Target::Unit(id) => world.unit(id).is_some_and(|u| {
+            world
+                .defs()
+                .get(u.def)
+                .is_some_and(|d| !no_air_weapon || !d.motion.canfly)
+        }),
+    }
+}
+
 fn in_reach(world: &World, shooter: UnitId, pos: WorldPos, core: &Core, t: Target) -> bool {
+    if !can_target(world, core.no_air_weapon, t) {
+        return false;
+    }
     let Some(tp) = target_pos(world, t) else {
         return false;
     };
@@ -876,8 +896,22 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
 
     // Validate the order.
     order = match order {
-        Some(CombatOrder::Attack(t)) if target_pos(world, t).is_none() => None,
-        Some(CombatOrder::Cast { target, .. }) if target_pos(world, target).is_none() => None,
+        Some(CombatOrder::Attack(t))
+            if target_pos(world, t).is_none()
+                || !cores
+                    .iter()
+                    .any(|c| !c.spell && can_target(world, c.no_air_weapon, t)) =>
+        {
+            None
+        }
+        Some(CombatOrder::Cast { slot, target })
+            if target_pos(world, target).is_none()
+                || !cores
+                    .get(slot as usize)
+                    .is_some_and(|c| can_target(world, c.no_air_weapon, target)) =>
+        {
+            None
+        }
         Some(CombatOrder::Cast { slot, .. })
             if !cores.get(slot as usize).is_some_and(|c| c.spell) =>
         {
@@ -957,7 +991,7 @@ fn unit_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, now: u
                 })
             }
         };
-        new_targets.push(t);
+        new_targets.push(t.filter(|&t| can_target(world, core.no_air_weapon, t)));
     }
 
     // 2. Movement: close on the order target, guard, or chase.
@@ -1114,15 +1148,16 @@ fn attack_move_step(
             avoided: BTreeMap::new(),
         });
     let auto: Vec<&Core> = cores.iter().filter(|c| !c.spell).collect();
-    let look = auto
-        .iter()
-        .filter(|c| c.kind != WeaponKind::Melee)
-        .map(|c| c.range)
-        .max()
-        .unwrap_or(0)
-        .max(sight);
+    let look = |target| {
+        auto.iter()
+            .filter(|c| c.kind != WeaponKind::Melee && can_target(world, c.no_air_weapon, target))
+            .map(|c| c.range)
+            .max()
+            .unwrap_or(0)
+            .max(sight)
+    };
     let allowed = |oid: UnitId| {
-        !auto.is_empty()
+        auto.iter().any(|c| can_target(world, c.no_air_weapon, Target::Unit(oid)))
             && world
                 .unit(oid)
                 .is_some_and(|u| world.are_hostile(owner, u.owner))
@@ -1145,7 +1180,7 @@ fn attack_move_step(
             && is_target(world, t)
             && (fire_state == FireState::Defensive
                 || world.unit(t).is_some_and(|u| {
-                    state.origin.distance(u.pos).to_int_floor() <= leash.max(look)
+                    state.origin.distance(u.pos).to_int_floor() <= leash.max(look(Target::Unit(t)))
                 }));
         if !keep {
             if is_target(world, t) && allowed(t) {
@@ -1160,7 +1195,7 @@ fn attack_move_step(
         state.target = nearest_enemy(world, owner, pos, |oid, _, d| {
             allowed(oid)
                 && (fire_state == FireState::Defensive
-                    || (d <= look && !state.avoided.contains_key(&oid)))
+                    || (d <= look(Target::Unit(oid)) && !state.avoided.contains_key(&oid)))
         });
         if state.target.is_some() {
             state.origin = pos;
@@ -1210,16 +1245,19 @@ fn chase_target(
     }
     // Melee `range` is not a reach (see `melee_reach`); only ranged weapons
     // see past `sightdistance`.
-    let look = auto
-        .iter()
-        .filter(|c| c.kind != WeaponKind::Melee)
-        .map(|c| c.range)
-        .max()
-        .unwrap_or(0)
-        .max(sight);
+    let look = |target| {
+        auto.iter()
+            .filter(|c| c.kind != WeaponKind::Melee && can_target(world, c.no_air_weapon, target))
+            .map(|c| c.range)
+            .max()
+            .unwrap_or(0)
+            .max(sight)
+    };
     nearest_enemy(world, owner, pos, |oid, opos, d| {
-        (fire_state != FireState::ReturnFire || Some(oid) == last_attacker)
-            && d <= look
+        auto.iter()
+            .any(|c| can_target(world, c.no_air_weapon, Target::Unit(oid)))
+            && (fire_state != FireState::ReturnFire || Some(oid) == last_attacker)
+            && d <= look(Target::Unit(oid))
             && origin.distance(opos).to_int_floor() <= leash
     })
 }
@@ -1432,6 +1470,9 @@ fn launch(
     else {
         return;
     };
+    if !can_target(world, ws.no_air_weapon, t) {
+        return;
+    }
     let (kind, speed) = (ws.kind, ws.speed_per_tick());
     let Some(tp) = target_pos(world, t) else {
         return;
@@ -1740,4 +1781,30 @@ fn progress_death(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, n
     // The FBI `corpse` feature (WP-P), blocking movement if the
     // definition says so.
     crate::features::spawn_corpse(world, def, pos, heading, corpse);
+}
+
+/// Retire a defeated survivor's pending scripted attacks. Late strike signals
+/// cannot launch because the combat lane also excludes inert owners.
+pub(crate) fn halt_defeated_unit(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    let slots: Vec<_> = world
+        .unit(id)
+        .map(|u| {
+            u.combat
+                .weapons
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| w.target.is_some() || w.launch.is_some())
+                .map(|(slot, _)| slot as i32)
+                .collect()
+        })
+        .unwrap_or_default();
+    for slot in slots {
+        lifecycle::call_script(world, scripts, id, "TargetCleared", &[slot]);
+    }
+    scripts.set_port(id, port::WEAPON_READY, port::NONE);
+    scripts.set_port(id, port::LAUNCH_NOW, port::NONE);
+    if let Some(u) = world.unit_mut(id) {
+        u.combat.cancel_orders();
+        u.combat.weapons.fill(WeaponState::default());
+    }
 }

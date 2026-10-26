@@ -40,7 +40,10 @@ spread across systems.
     gather it faster but cost much more time and mana; some units
     (Mage Archers, the Assassin's cloak) spend a "personal Mana supply";
     spells against groups cost more mana. Its "Mana" / "Personal Mana"
-    page was not in the text we could read.
+    page is now readable in the scan (printed pp. 66–67, PDF p. 34): it
+    describes an individual regenerating spell pool, and labels both player
+    income and expenditure as per-second rates. This confirms the displayed
+    rate convention; the exact FBI-key conversion remains data-derived.
   - [Total Annihilation Wiki: Lodestone (Veruna)](https://totalannihilation.fandom.com/wiki/Lodestone_(TAK_Unit_Veruna)),
     [TAK overview](https://totalannihilation.fandom.com/wiki/Total_Annihilation_Kingdoms?oldid=5552),
     [StrategyWiki walkthrough](https://strategywiki.org/wiki/Total_Annihilation:_Kingdoms/Walkthrough)
@@ -222,8 +225,9 @@ scenario in two processes and compares every hash.
 ## Unknown / open
 
 - What `economybonus` does (option, off by default).
-- Whether income is truly per second (moderate confidence; check against
-  footage: a lone monarch should add 600 mana per minute).
+- Exact retail timing still needs side-by-side observation: the manual
+  confirms the HUD uses per-second rates, while a lone monarch earning
+  600 mana per minute is our current data-derived prediction.
 - Starting mana in skirmish (Chosen 1000) and the start monarch's pool
   (Chosen empty).
 - How the original shares mana in a shortage (TA proportional assumed).

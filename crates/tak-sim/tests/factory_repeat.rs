@@ -882,6 +882,7 @@ fn chain_death_removes_higher_slot_factory_without_orphaning_active_repeat() {
         area_of_effect: 2000,
         edge_effectiveness: tak_math::Fx::ONE,
         aim_tolerance: None,
+        no_air_weapon: false,
         mana_per_shot: 0,
         damage_kind: tak_sim::combat::kind::NORMAL,
         damage: tak_sim::combat::DamageStats {

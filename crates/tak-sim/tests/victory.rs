@@ -492,6 +492,7 @@ fn duel_hashes() -> String {
         out.push_str(&format!("{:016x}\n", s.step(&[])));
     }
     out.push_str(&format!("{}\n", s.world().victory().summary()));
+    out.push_str(&defeated_survivor_hashes());
     out
 }
 
@@ -526,4 +527,173 @@ fn victory_hashes_agree_across_processes() {
     );
     assert!(mine.contains("over at tick"));
     assert_eq!(child, mine, "child process diverged");
+}
+
+fn defeated_survivor_hashes() -> String {
+    let mut sc = scenario(3, VictorySetup::default());
+    sc.unit_defs[SOLDIER.0 as usize].combat.max_damage = 50_000;
+    sc.unit_defs[SOLDIER.0 as usize].combat.weapons = vec![combat_common::ballistic(10, 200, 0, 0)];
+    sc.unit_defs[TOWER.0 as usize].combat.max_damage = 50_000;
+    sc.unit_defs[TOWER.0 as usize].build = tak_sim::construction::BuildDef {
+        builder: true,
+        mobile: false,
+        workertime: 30,
+        buildcost: 10,
+        buildtime: 60 << 16,
+        canbuild: vec![SOLDIER],
+        ..Default::default()
+    };
+    sc.unit_defs[SOLDIER.0 as usize].build.buildcost = 10;
+    sc.unit_defs[SOLDIER.0 as usize].build.buildtime = 60 << 16;
+    sc.unit_defs[KING.0 as usize].economy.mogriumstorage = 1000;
+    sc.unit_defs[KING.0 as usize].economy.mogriumincome = 100;
+    let mut s = start(&sc);
+    let mover = place(&mut s, SOLDIER, 0, 300, 300);
+    let gun = place(&mut s, SOLDIER, 0, 400, 800);
+    let factory = place(&mut s, TOWER, 0, 800, 800);
+    let target = place(&mut s, TOWER, 1, 450, 800);
+    let mut log = tak_commands::CommandLog::new();
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::SetFireState {
+            units: UnitSet::single(mover),
+            state: tak_commands::FireState::HoldFire,
+        },
+    );
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::Move {
+            units: UnitSet::single(mover),
+            to: Vec2::from_ints(700, 300),
+            queue: QueueMode::Replace,
+        },
+    );
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::Build {
+            units: UnitSet::single(factory),
+            def: SOLDIER,
+            at: None,
+            queue: QueueMode::Replace,
+        },
+    );
+    s.run(&log, 5);
+    assert!(s.world().unit(mover).unwrap().speed > tak_math::Fx::ZERO);
+    assert!(
+        s.world().unit(gun).unwrap().combat.weapons[0]
+            .target
+            .is_some()
+    );
+    assert!(
+        s.world()
+            .unit(factory)
+            .unwrap()
+            .build
+            .factory
+            .product
+            .is_some()
+    );
+    kill_monarch(&mut s, 0);
+    s.step(&[]);
+    assert_eq!(
+        *s.match_state(),
+        MatchState::Running,
+        "other players still compete"
+    );
+    let pos = s.world().unit(mover).unwrap().pos;
+    let hp = s.world().unit(target).unwrap().combat.health;
+    assert!(
+        !s.world().unit(mover).unwrap().combat.is_dying(),
+        "survived 30000 sweep"
+    );
+    let mut hashes = String::new();
+    for _ in 0..300 {
+        hashes.push_str(&format!("{:016x}\n", s.step(&[])));
+    }
+    assert_eq!(
+        s.world().unit(mover).unwrap().pos,
+        pos,
+        "defeated survivor kept moving"
+    );
+    assert_eq!(
+        s.world().unit(target).unwrap().combat.health,
+        hp,
+        "defeated survivor kept firing"
+    );
+    assert!(
+        s.world()
+            .unit(factory)
+            .unwrap()
+            .build
+            .factory
+            .product
+            .is_none(),
+        "defeated factory retained production"
+    );
+    assert!(s.world().unit(factory).unwrap().orders.is_empty());
+    kill(&mut s, mover);
+    s.step(&[]);
+    assert!(
+        s.world().unit(mover).is_none(),
+        "inert units still process death"
+    );
+    hashes
+}
+
+#[test]
+fn default_defeat_survivors_stop_moving_firing_and_producing() {
+    defeated_survivor_hashes();
+}
+
+#[test]
+fn explicit_remain_option_preserves_defensive_fire() {
+    let mut sc = scenario(
+        3,
+        VictorySetup {
+            defeated_units: DefeatedUnits::Remain,
+            ..Default::default()
+        },
+    );
+    sc.unit_defs[SOLDIER.0 as usize].combat.weapons = vec![combat_common::ballistic(10, 200, 0, 0)];
+    sc.unit_defs[TOWER.0 as usize].combat.max_damage = 50_000;
+    let mut s = start(&sc);
+    let gun = place(&mut s, SOLDIER, 0, 400, 800);
+    let target = place(&mut s, TOWER, 1, 450, 800);
+    s.step(&[]);
+    kill_monarch(&mut s, 0);
+    s.step(&[]);
+    assert!(s.world().is_defeated(PlayerId(0)));
+    assert!(!s.world().is_inert_player(PlayerId(0)));
+    let hp = s.world().unit(target).unwrap().combat.health;
+    steps(&mut s, 100);
+    assert!(s.world().unit(gun).is_some());
+    assert!(s.world().unit(target).unwrap().combat.health < hp);
+}
+
+#[test]
+fn outside_combat_survivors_are_also_inert_after_default_defeat() {
+    let mut sc = scenario(3, VictorySetup::default());
+    sc.unit_defs[SOLDIER.0 as usize].combat = Default::default();
+    let mut s = start(&sc);
+    let mover = place(&mut s, SOLDIER, 0, 300, 300);
+    let mut log = tak_commands::CommandLog::new();
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::Move {
+            units: UnitSet::single(mover),
+            to: Vec2::from_ints(700, 300),
+            queue: QueueMode::Replace,
+        },
+    );
+    s.run(&log, 5);
+    kill_monarch(&mut s, 0);
+    s.step(&[]);
+    let pos = s.world().unit(mover).unwrap().pos;
+    steps(&mut s, 100);
+    assert_eq!(s.world().unit(mover).unwrap().pos, pos);
+    assert!(s.world().unit(mover).unwrap().orders.is_empty());
 }

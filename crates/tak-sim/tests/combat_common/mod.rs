@@ -26,6 +26,7 @@ pub fn melee(default: i32, reload_ticks: u32) -> WeaponStats {
         area_of_effect: 0,
         edge_effectiveness: Fx::ZERO,
         aim_tolerance: None,
+        no_air_weapon: false,
         mana_per_shot: 0,
         damage_kind: kind::NORMAL,
         damage: DamageStats {
@@ -49,6 +50,7 @@ pub fn ballistic(default: i32, range: i32, velocity: i32, aoe: i32) -> WeaponSta
         area_of_effect: aoe,
         edge_effectiveness: Fx::HALF,
         aim_tolerance: None,
+        no_air_weapon: false,
         mana_per_shot: 0,
         damage_kind: kind::NORMAL,
         damage: DamageStats {

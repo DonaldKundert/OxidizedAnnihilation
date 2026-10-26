@@ -25,9 +25,9 @@ pub mod driver;
 /// Checkpoint wire format, independent of the command/scenario versions.
 pub const CHECKPOINT_FORMAT_VERSION: u32 = 1;
 /// Replay-rule compatibility gate. Bump when simulation changes invalidate saves.
-// Rules 2 includes explicit-team automatic targeting and corrected work steering.
+// Rules 3 adds ground-only weapon restrictions and inert default-defeat survivors.
 // Reject older behavioral snapshots rather than silently changing their future.
-pub const REPLAY_RULES_VERSION: u32 = 2;
+pub const REPLAY_RULES_VERSION: u32 = 3;
 /// Maximum serialized checkpoint size, checked before JSON deserialization.
 pub const MAX_CHECKPOINT_BYTES: usize = 32 * 1024 * 1024;
 /// Hard limit on executed commands stored in one checkpoint.
@@ -1077,6 +1077,11 @@ mod tests {
             Checkpoint::from_json(&wire),
             Err(CheckpointError::UnsupportedRules(1))
         ));
+        let previous = wire.replace("\"replay_rules_version\":1", "\"replay_rules_version\":2");
+        assert!(matches!(
+            Checkpoint::from_json(&previous),
+            Err(CheckpointError::UnsupportedRules(2))
+        ));
         let current = wire.replace(
             "\"replay_rules_version\":1",
             &format!("\"replay_rules_version\":{REPLAY_RULES_VERSION}"),
@@ -1085,7 +1090,7 @@ mod tests {
         assert_eq!(parsed.source(), &payload.source);
         assert_eq!(parsed.checksum, checksum);
         assert_eq!(CHECKPOINT_FORMAT_VERSION, 1);
-        assert_eq!(REPLAY_RULES_VERSION, 2);
+        assert_eq!(REPLAY_RULES_VERSION, 3);
     }
 
     #[test]

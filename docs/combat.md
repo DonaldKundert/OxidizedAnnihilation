@@ -33,6 +33,7 @@ then stay outside combat: never targeted, damaged or killed).
 | `areaofeffect` | blast diameter; R = aoe / 2 | TA (NL §9.3) |
 | `edgeeffectiveness` | blast-edge factor | TA |
 | `aimtolerance` | max facing error (angle units) for firing; default 0x1000 | Believed / default Chosen |
+| `noairweapon` | slot cannot select `canfly` units; independent of range | Known flag, Believed semantics |
 | `manapershot` | > 0 marks a spell: fired only by `CastSpell` | Chosen |
 | `damagetype` | damage kind: none 1, `fire` 2, `explosion` 3, `paralyzer` 4 | Believed (script branches, below) |
 | `[DAMAGE]` | `default` × multiplier of the target's category, truncated | Believed (`content.md`) |
@@ -255,3 +256,23 @@ features, the corpse of each unit definition).
 - Ports 21 (aim aborted ack, unused by the engine), 26/31 exact meanings.
 - Corpse placement offset (`corpseadjustx/z`), `decompose_time` units,
   whether features can be shot.
+
+## Ground-only weapon targeting (October 2026 fidelity pass)
+
+**Known**: the owned base and Crusades definitions have 58 weapon slots with
+`noairweapon`; the content parser already preserves that flag. **Believed**:
+these slots cannot select `canfly` units. The sim now preserves the flag and
+checks it separately from range, for explicit attacks/casts, autonomous fire,
+Return Fire, Guard chases and AttackMove engagements. Mixed-slot units may use
+an unrestricted slot against flyers while their ground-only slot stays idle.
+An incompatible explicit order ends without spending spell mana or chasing.
+Script-delayed launches recheck compatibility. Ground-point orders remain
+valid; this change does not infer new airborne splash-immunity rules.
+
+The synthetic `air_targeting` integration tests cover those paths, delayed
+script signals and cross-process hashes; its owned-data test checks every
+base/Crusades weapon's mapping and reports how many flagged slots it exercised.
+Older scenarios without the field deserialize as unrestricted and retain their
+serialized shape/hashes. Owned scenarios whose weapon restrictions changed get
+a different scenario fingerprint; old owned replays/checkpoints are not evidence
+for the corrected rules.
