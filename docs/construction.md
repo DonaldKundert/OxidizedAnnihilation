@@ -320,8 +320,8 @@ trip, and in two child processes, and compares hashes.
 - Product release from the factory yard; frame decay; refunds for
   computer players (TA scales by difficulty).
 - The original's sacred-site tolerance; per-definition slope limits;
-  structures blocking movement (the `pathfinding::add_obstacle` hook now
-  exists; structures do not use it yet).
+  retail gate activation and footprint rotation (immobile structure yards
+  now block movement; see `pathfinding.md`).
 - Repair, reclaim, resurrection; assisting allies.
 
 ## Real-map run (WP-P)

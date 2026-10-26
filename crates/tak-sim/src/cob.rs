@@ -442,6 +442,12 @@ impl Engine for UnitEngine<'_> {
         if !known {
             *self.stats.unknown_writes.entry(p).or_default() += 1;
         }
+        if p == port::YARD_OPEN {
+            let state = u8::from(value != 0);
+            if self.ctx.yard_blocked_states & (1 << state) != 0 {
+                return;
+            }
+        }
         self.regs.insert(p, value);
     }
 
@@ -496,6 +502,7 @@ mod tests {
             fire_state: FireState::FireAtWill,
             health_percent: 100,
             build_percent_left: 0,
+            yard_blocked_states: 0,
         }
     }
 
@@ -529,6 +536,53 @@ mod tests {
             };
             assert_eq!(e.get_unit_value(port::STANDINGFIREORDERS), expected);
         }
+    }
+
+    #[test]
+    fn yard_write_denial_is_visible_to_immediate_readback() {
+        let map = MapInfo::flat(512, 512, vec![]);
+        let mut rng = Rng::new(1);
+        let mut regs = BTreeMap::from([(port::YARD_OPEN, 1)]);
+        let mut stats = ScriptStats::default();
+        let mut c = ctx(Fx::ZERO, 0);
+        c.yard_blocked_states = 1;
+        let mut e = UnitEngine {
+            ctx: &c,
+            map: &map,
+            rng: &mut rng,
+            regs: &mut regs,
+            stats: &mut stats,
+        };
+        e.set(port::YARD_OPEN, 0);
+        assert_eq!(
+            e.get_unit_value(port::YARD_OPEN),
+            1,
+            "same callback must see the denied close"
+        );
+        c.yard_blocked_states = 0;
+        let mut e = UnitEngine {
+            ctx: &c,
+            map: &map,
+            rng: &mut rng,
+            regs: &mut regs,
+            stats: &mut stats,
+        };
+        e.set(port::YARD_OPEN, 0);
+        assert_eq!(e.get_unit_value(port::YARD_OPEN), 0);
+        c.yard_blocked_states = 2;
+        let mut e = UnitEngine {
+            ctx: &c,
+            map: &map,
+            rng: &mut rng,
+            regs: &mut regs,
+            stats: &mut stats,
+        };
+        e.set(port::YARD_OPEN, 1);
+        assert_eq!(
+            e.get_unit_value(port::YARD_OPEN),
+            0,
+            "inverse cells must gate opening too"
+        );
     }
 
     #[test]

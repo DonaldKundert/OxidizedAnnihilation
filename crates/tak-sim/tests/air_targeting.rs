@@ -324,3 +324,66 @@ fn incompatible_long_range_slot_does_not_extend_air_acquisition_range() {
         assert!(u.combat.weapons.iter().all(|w| w.target.is_none()));
     }
 }
+
+#[test]
+fn explicit_guard_never_chases_or_fires_ground_only_slots_at_flyers() {
+    let mut s = sim(&setup());
+    let a = place(&mut s, ARCHER, 0, 800, 800);
+    let guarded = place(&mut s, DUMMY_TARGET, 0, 800, 850);
+    let fly = place(&mut s, FLYER, 1, 1000, 800);
+    s.step(&[]);
+    let start = s.world().unit(a).unwrap().pos;
+    let mut log = CommandLog::new();
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::Guard {
+            units: UnitSet::single(a),
+            target: guarded,
+            queue: QueueMode::Replace,
+        },
+    );
+    s.run(&log, 150);
+    let u = s.world().unit(a).unwrap();
+    assert_eq!(u.pos, start);
+    assert!(u.combat.goal.is_none());
+    assert!(u.combat.weapons[0].target.is_none());
+    assert_eq!(health(&s, fly), Some(1000));
+}
+
+#[test]
+fn a_scripted_strike_that_arrives_after_default_defeat_cannot_fire() {
+    let mut sc = setup();
+    sc.unit_defs[ARCHER.0 as usize].combat.max_damage = 50_000;
+    sc.map
+        .start_positions
+        .push(tak_sim::StartPos { x: 100, y: 1900 });
+    sc.players.push(tak_sim::PlayerSpec {
+        start: 2,
+        monarch: DUMMY,
+    });
+    let mut s = tak_sim::Sim::with_scripts(&sc, Box::<DelayedStrike>::default()).unwrap();
+    s.step(&[]);
+    let a = place(&mut s, ARCHER, 0, 800, 800);
+    let target = place(&mut s, DUMMY_TARGET, 1, 900, 800);
+    s.step(&[]);
+    assert!(
+        s.world().unit(a).unwrap().combat.weapons[0]
+            .launch
+            .is_some()
+    );
+    let king = s.world().players()[0].monarch.unwrap();
+    s.world_mut().despawn(king).unwrap();
+    s.step(&[]);
+    assert!(s.world().is_defeated(PlayerId(0)));
+    assert!(!s.world().unit(a).unwrap().combat.is_dying());
+    assert_eq!(s.match_state(), &tak_sim::MatchState::Running);
+    s.run(&CommandLog::new(), 20);
+    assert_eq!(health(&s, target), Some(1000));
+    assert!(
+        s.world().unit(a).unwrap().combat.weapons[0]
+            .launch
+            .is_none()
+    );
+    assert!(s.world().combat.impacts.is_empty());
+}

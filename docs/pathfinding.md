@@ -56,7 +56,7 @@ slope 30, water depth 20, water slope 30). All five monarchs but Zhon are
 ## Dynamic obstacles (WP-P)
 
 The hook for things that block movement after the map loads (today:
-blocking corpses, `docs/combat.md`; later structures):
+blocking corpses, `docs/combat.md`; structures use the yard plane below):
 
 ```rust
 pathfinding::add_obstacle(world, CellRect { x, z, w, h })    // one more blocker per cell
@@ -211,7 +211,7 @@ this is confirmed for Kingdoms.
 | Path smoothing | none; route keeps only direction-change cells (max 20 published) and is followed with an 80-unit pure-pursuit carrot (§7.3, R-MOV-01 §3) | line-of-sight smoothing (brief) plus the same 80-unit carrot | differs: our units take any-angle lines where TA units walk 8-direction legs |
 | Replanning | blocked or route-exhausted followers re-request at most every 60 ticks, no retry ceiling (R-MOV-01 §7) | stall-triggered, at most every 60 ticks, give up after 3 | close (ceiling Chosen) |
 | Footprint handling | class footprint baked into the layer (window minimum + ring demotion), anchor = top-left, unit at footprint centre (R-SLOPE-01 §3) | same | match |
-| Unit-unit collision | hard occupancy: a step into a cell held by another unit is refused (half speed, position clamped), sequential claims in sweep order, no pushing, sliding or yielding; recently moved units do not block the search (§8.2, R-MOV-02A) | soft separation push; units never block the search or each other's steps | differs (Chosen per the brief; TA's version causes the familiar traffic jams) |
+| Unit-unit collision | hard occupancy: a step into a cell held by another unit is refused (half speed, position clamped), sequential claims in sweep order, no pushing, sliding or yielding; recently moved units do not block the search (§8.2, R-MOV-02A) | mobile units use soft separation; immobile structure yards block routes and steps | differs (Chosen per the brief; TA's version causes the familiar traffic jams) |
 | Slope / water limits | per-cell classifier: feature, occupant, deep (`hmin < sea − MaxWaterDepth`), shallow (`hmax > sea − MinWaterDepth`), slope tier; strict `>` blocks; template 255 / ±10000 (§6.1, R-DOC04-A/B) | same, minus the occupant gate | match |
 | Speed modifiers | half speed below sea level unless `canhover`/`floater`; pitch-table cap for non-`upright` units; no road or water keys (R-MOV-01 §4) | Kingdoms `roadmultiplier`/`watermultiplier` when present, else TA's half speed in water; no pitch cap | close (Kingdoms keys take precedence) |
 | Turning / acceleration | turn clamped by `TurnRate`; accelerate iff aim > 2 × turn distance and the point after beyond braking distance, else brake; speed never reverses (R-MOV-01 §2, §4) | same tests; plus WP-I's exact landing on waypoints | match (landing is extra) |
@@ -238,8 +238,65 @@ because it is what TA does, but at high unit counts it is a known flaw: with
 - `roadmultiplier` / `watermultiplier` semantics (Believed: plain factors on
   the speed cap); whether Kingdoms keeps TA's half-speed rule for units
   without the key.
-- Building occupancy in the layers: the dynamic-obstacle hook exists
-  (below) and wrecks use it; structures do not yet (TA's occupancy also
-  holds structures and units).
+- Kingdoms-specific yard behavior beyond TA's table, exact gate activation,
+  rotated footprints, and mobile frames/parked-unit hard occupancy.
 - Air movement beyond "ignores terrain"; boats and hovers are classified by
   their classes but untested on real water maps.
+
+
+## Structure yards (October 2026 fidelity pass)
+
+**Known original Kingdoms intent:** the [manual](https://retrogamer.biz/wp-content/uploads/2015/10/Total_Annihilation_Kingdoms_Manual.pdf)
+(printed pp. 33–34, PDF pp. 17–18) describes walls stopping ground troops while
+flyers cross and gates permit entry. Previously a building's circular separation
+body could push walkers, but its footprint never appeared in A*, allowing routes
+that stalled at walls. The synthetic regression first failed because the wall
+was absent from the movement layer.
+
+`pathfinding/structures.rs` now synchronizes immobile ground structures before
+planning/movement, including unfinished immobile construction frames. It uses
+the same snapped footprint as placement. **Chosen proxy:** zero `maxvelocity`,
+excluding flyers; parked mobile units and their frames retain soft separation.
+The footprint remains until lifecycle removal, including the death animation.
+A resulting blocking wreck owns a separate feature blocker; removing a structure
+cannot erase an overlapping wreck or another structure. Placement retains its
+structure-specific `Occupied` result and `ignore` support.
+
+**Believed for Kingdoms**, from approved MIT Nanolathe research,
+[R-COLL-01 §4 and §10](https://github.com/nanolathe-gg/nanolathe/blob/main/research/retail-executable-spec/04-units-orders-scripts-and-movement.md):
+`o/f/w/G` block in both yard states; `c/C` only while closed; `O` only while open;
+`./Y/y` never block movement. Kingdoms `S` blocks in both states (**Chosen**).
+Open/closed is the script's port 18 (`YARD_OPEN`). A transition that would newly
+occupy another ground unit's footprint is refused. **Chosen consistency rule:**
+mobile occupancy uses the resolved movement-class footprint (FBI fallback),
+matching the movement grid's anchor and footprint fold; immobile occupancy
+retains the FBI yard/placement extent. Using FBI dimensions for a mobile unit
+could close a door into a larger movement footprint or needlessly hold it open
+for a smaller one. The COB engine enforces the
+world-derived admission mask at the port write, so an immediate read in the same
+callback sees the old value and can retry. The pathing sync also enforces this
+for custom hosts and no-script factories. Flyers do not hold doors open.
+Units without scripts use the factory's active state, retaining an open exit
+while a released product still occupies it (**Chosen fallback**, not original
+script parity). Structure separation circles are disabled when the yard grid
+exists so an open door is not obstructed by a circular push. Maps without a
+terrain grid retain legacy behavior.
+
+Stamps and effective yard state are deterministic, hashed, slot/generation-aware
+and updated incrementally. Changed cells re-stamp all movement layers. A suspended
+search is restarted after any occupancy change, including feature changes; its
+budget remains 1333 steps/tick. Existing routes still use the normal blocked-step
+and stall/repath policy. No path budget or unit stat is increased to obtain wins.
+
+`tests/structure_routing.rs` covers actual ground detours and flying crossings,
+yard transition/readback gates, paid multi-product egress, paid frames through
+death/wreck removal, overlapping blockers, placement reasons, slot reuse, a
+suspended search and JSON/separate-process hashes. Retail gate observation,
+footprint rotation and hard mobile-unit traffic remain outside this claim.
+
+The existing queued-placement checkpoint fixture previously assumed completion
+within 200 ticks while its builder could route through earlier walls. With real
+occupancy it detours and completes the same four paid walls at ticks 30, 60,
+241 and 258. Its 600-tick verification bound now includes that travel and turning
+time; costs, worker speed, path budget and outcome assertions are unchanged.
+The test still compares saved/restored state and command replay across processes.

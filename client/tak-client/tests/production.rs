@@ -234,6 +234,19 @@ fn installed_paid_factory_controls_inherit_orders_refund_and_resume_replay() {
     let move_to = map.clamp(position + Vec2::from_ints(dx, 0));
     let patrol_to = map.clamp(position + Vec2::from_ints(dx, dy));
     assert_ne!(move_to, patrol_to);
+    // Clear the builder's movement footprint from the completed factory's
+    // door before testing sequential production. Leaving the monarch idle
+    // here used to rely on closing the yard through its larger Motion extent.
+    let monarch = live.sim.world().players()[0].monarch.unwrap();
+    submit(
+        &mut live,
+        &mut resumed,
+        SimCommand::Move {
+            units: UnitSet::single(monarch),
+            to: move_to,
+            queue: QueueMode::Replace,
+        },
+    );
     submit(
         &mut live,
         &mut resumed,
