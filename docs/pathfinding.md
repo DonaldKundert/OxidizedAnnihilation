@@ -151,9 +151,15 @@ After movement: ground units whose circles (radius half the larger footprint
 side, 16 for a 2×2 monarch) overlap are pushed apart by the overlap, split
 evenly between two mobile units (an immobile one is not moved), at most 1
 world unit per unit per tick, never onto terrain the unit could not step to.
-Pairs come from 64-unit buckets; pushes are computed from one snapshot and
+Pairs come from 64-unit buckets searched to the sum of the unit radius and
+the largest current ground-unit radius, so large movement footprints also
+interact across nonadjacent buckets. Pushes are computed from one snapshot and
 applied in slot order; coincident units part along an angle hashed from their
 slots. **Chosen** (TA has no pushing at all; see the comparison).
+
+Complete large-footprint candidate discovery advances checkpoint replay rules
+to version 5. Rules 1–4 saves are rejected because their future separation
+behavior can differ; command logs remain readable.
 
 ## Patrol
 
