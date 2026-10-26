@@ -108,6 +108,12 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             for &id in units {
                 if let Some(u) = world.unit_mut_owned(id, player) {
                     u.cancel_player_orders();
+                    // Stop clears both production and explicit standing
+                    // orders. Retain None for legacy hashes and Some(empty)
+                    // for an explicitly cleared rally (no legacy fallback).
+                    if let Some(rally) = &mut u.build.factory_rally {
+                        rally.clear();
+                    }
                 }
             }
         }
@@ -148,6 +154,11 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
             crate::combat::apply_command(world, player, cmd);
         }
         SimCommand::Build { .. } => crate::construction::apply_command(world, player, cmd),
+        SimCommand::SetFactoryRally { .. }
+        | SimCommand::CancelProduction { .. }
+        | SimCommand::SetFactoryRepeat { .. } => {
+            crate::construction::apply_factory_command(world, player, cmd);
+        }
         SimCommand::Heal { .. } => crate::construction::apply_heal_command(world, player, cmd),
         SimCommand::Patrol { .. } => crate::pathfinding::apply_command(world, player, cmd),
     }

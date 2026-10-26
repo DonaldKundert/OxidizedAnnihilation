@@ -22,7 +22,9 @@ mod command;
 mod ids;
 mod log;
 
-pub use command::{ClientCommand, FireState, QueueMode, Scope, SimCommand, Target, UnitSet};
+pub use command::{
+    ClientCommand, FactoryRallyOrder, FireState, QueueMode, Scope, SimCommand, Target, UnitSet,
+};
 pub use ids::{ControlGroup, PlayerId, SpellId, Tick, UnitDefId, UnitId};
 pub use log::{CommandLog, LOG_FORMAT_VERSION, LogError, LoggedCommand};
 

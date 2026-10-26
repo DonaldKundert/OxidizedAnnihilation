@@ -276,7 +276,7 @@ pub struct Hint {
 fn pad_binding(
     p: &Profile,
     want: impl Fn(&Action) -> bool,
-) -> Option<(Button, Option<Button>, Gesture)> {
+) -> Option<(Button, Vec<Button>, Gesture)> {
     p.bindings.iter().find_map(|b| {
         let Input::Button(btn) = b.input else {
             return None;
@@ -287,11 +287,14 @@ fn pad_binding(
         ) {
             return None;
         }
-        let with = match &b.with {
-            None => None,
-            Some(Input::Button(m)) => Some(*m),
-            Some(Input::Key(_)) => return None,
-        };
+        let with = b
+            .modifiers()
+            .into_iter()
+            .map(|i| match i {
+                Input::Button(m) => Some(m),
+                Input::Key(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
         want(&b.action).then_some((btn, with, b.gesture))
     })
 }
@@ -337,6 +340,8 @@ pub struct HintCx {
     pub has_units: bool,
     /// A builder with a nonempty build menu among them.
     pub has_builder: bool,
+    /// An eligible factory whose production portraits support queue editing.
+    pub has_factory: bool,
     /// An operational explicit healer among them, even without a build menu.
     pub has_healer: bool,
     /// A spellcaster among them.
@@ -484,10 +489,9 @@ pub fn key_name_for(p: &Profile, want: impl Fn(&Action) -> bool) -> Option<Strin
             Input::Button(_) => None,
         };
         let k = name(&b.input)?;
-        Some(match b.with.as_ref().and_then(name) {
-            Some(m) => format!("{m}+{k}"),
-            None => k,
-        })
+        let mut names = b.modifiers().iter().map(name).collect::<Option<Vec<_>>>()?;
+        names.push(k);
+        Some(names.join("+"))
     })
 }
 
@@ -527,8 +531,26 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             key_name_for(p, |a| matches!(a, Action::QueueModifier)),
             "+ click: queue",
         ));
+        if matches!(m.mode(), Mode::Build(_))
+            && m.press_action(&Input::Button(Button::MouseLeft)) == Some(Action::DragSelect)
+        {
+            v.push((
+                key_name_for(p, |a| matches!(a, Action::QueueModifier)),
+                "held + drag: queue sites",
+            ));
+        }
+        if m.mode() == Mode::Attack
+            && m.press_action(&Input::Button(Button::MouseLeft)) == Some(Action::DragSelect)
+        {
+            v.push((Some("LMB drag".into()), "queue visible enemies"));
+        }
         v.push((key_name_for(p, |a| matches!(a, Action::Cancel)), "cancel"));
     } else if cx.has_units {
+        if cx.has_factory {
+            v.push((Some("LMB / RMB".into()), "build icon: +1 / -1"));
+            v.push((Some("Shift".into()), "build batch: five"));
+            v.push((Some("Ctrl + LMB".into()), "repeat; RMB stops"));
+        }
         v.push((
             Some(mouse_order_name(m)),
             if primary_mouse_context(m) {
@@ -622,10 +644,13 @@ pub fn action_label(a: &Action) -> String {
         Action::SelectSameType { scope: Scope::Map } => "Same type (map)".into(),
         Action::FollowSelection => "Track".into(),
         Action::BuildOption { index } => format!("Option {}", index + 1),
+        Action::CancelBuildOption { index } => format!("Remove option {}", index + 1),
+        Action::RepeatBuildOption { index } => format!("Repeat option {}", index + 1),
         Action::AttackMode => "Attack".into(),
         Action::AttackMove | Action::AttackMoveMode => "Attack-move".into(),
         Action::MoveMode => "Move".into(),
         Action::RecallGroup { group } => format!("Squad {}", squad_number(group.get())),
+        Action::RecallGroupAdd { group } => format!("Add squad {}", squad_number(group.get())),
         Action::AssignGroup { group } => format!("Set squad {}", squad_number(group.get())),
         Action::JumpToGroup { group } => format!("Go to squad {}", squad_number(group.get())),
         Action::OpenRing { ring } => match ring {
@@ -1007,6 +1032,41 @@ mod tests {
         );
         p.bindings.retain(|b| !context(&b.action));
         assert_eq!(pad_action_name(&p, Layout::Xbox, context), None);
+    }
+
+    #[test]
+    fn prompts_include_every_required_chord_modifier() {
+        let mut p = Profile::default_combined();
+        let context = |a: &Action| matches!(a, Action::Context { append: false });
+        p.bindings.retain(|b| !context(&b.action));
+        p.bindings.push(tak_input::Binding {
+            input: Input::Button(Button::A),
+            with: Some(Input::Button(Button::Lb)),
+            with_all: vec![Input::Button(Button::Rb)],
+            gesture: Gesture::Press,
+            action: Action::Context { append: false },
+        });
+        assert_eq!(
+            pad_action_name(&p, Layout::Xbox, context).as_deref(),
+            Some("LB+RB+A")
+        );
+        assert_eq!(
+            pad_action_name(&p, Layout::PlayStation, context).as_deref(),
+            Some("L1+R1+Cross")
+        );
+        let mut p = Profile::classic_tak();
+        p.bindings.retain(|b| b.action != Action::Stop);
+        p.bindings.push(tak_input::Binding {
+            input: Input::Key(tak_input::Key::new("s")),
+            with: Some(Input::Key(tak_input::Key::new("ctrl"))),
+            with_all: vec![Input::Key(tak_input::Key::new("shift"))],
+            gesture: Gesture::Press,
+            action: Action::Stop,
+        });
+        assert_eq!(
+            key_name_for(&p, |a| *a == Action::Stop).as_deref(),
+            Some("Ctrl+Shift+S")
+        );
     }
 
     #[test]

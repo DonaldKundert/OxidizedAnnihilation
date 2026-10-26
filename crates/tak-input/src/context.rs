@@ -61,7 +61,8 @@ pub fn own_units<W: WorldView + ?Sized>(world: &W, selection: &UnitSet) -> UnitS
         .collect()
 }
 
-/// Units of `units` that can build `def`, optionally only of one kind.
+/// Operational owned builders of `units` that can build `def`, optionally
+/// only of one kind. Incomplete frames may be targets, never workers.
 pub fn builders_for<W: WorldView + ?Sized>(
     world: &W,
     units: &UnitSet,
@@ -72,9 +73,10 @@ pub fn builders_for<W: WorldView + ?Sized>(
         .iter()
         .copied()
         .filter(|&id| {
-            world
-                .unit(id)
-                .is_some_and(|u| u.builder.is_some() && kind.is_none_or(|k| u.builder == Some(k)))
+            world.can_build(id)
+                && world.unit(id).is_some_and(|u| {
+                    u.builder.is_some() && kind.is_none_or(|k| u.builder == Some(k))
+                })
                 && world.build_options(id).contains(&def)
         })
         .collect()

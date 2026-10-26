@@ -896,7 +896,7 @@ fn shot_driver(
         &UiGlobalTransform,
         &InheritedVisibility,
     )>,
-    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<HudPanel>>,
 ) {
     let Some(mut plan) = plan else { return };
     if plan.failed {
@@ -1246,6 +1246,62 @@ fn add_interactive_input(app: &mut App) {
     );
 }
 
+/// Preview only unambiguous keyboard direct-mode presses. Grid keys and alternate
+/// gestures can replace a press; build/spell/heal actions have extra eligibility.
+/// The original events still run once, in their existing order.
+fn map_target_press_pending(
+    mapper: &Mapper,
+    pending_downs: &[tak_input::Input],
+    guaranteed_downs: &[tak_input::Input],
+) -> bool {
+    mapper.wheel().is_none()
+        && pending_downs.iter().any(|pressed| {
+            unambiguous_direct_press(mapper, pressed)
+                && stable_pending_press(mapper, pressed, pending_downs, guaranteed_downs)
+                    .is_some_and(direct_target_mode_action)
+        })
+}
+
+fn unambiguous_direct_press(mapper: &Mapper, pressed: &tak_input::Input) -> bool {
+    let profile = mapper.profile();
+    // Only keyboard-after-mouse timing is changed by this slice. Controller
+    // and mouse-button actions retain their existing surface/axis ordering.
+    // Deliberately conservative even if Alt or a non-builder would bypass
+    // Grid. Do not duplicate the mapper's grid/gesture eligibility here.
+    matches!(pressed, tak_input::Input::Key(_))
+        && !(profile.grid_build_keys
+            && matches!(pressed, tak_input::Input::Key(key) if tak_input::GRID_KEYS.contains(&key.0.as_str()))
+            || profile.bindings.iter().any(|binding| {
+                binding.input == *pressed && binding.gesture != tak_input::Gesture::Press
+            }))
+}
+
+fn stable_pending_press(
+    mapper: &Mapper,
+    pressed: &tak_input::Input,
+    pending_downs: &[tak_input::Input],
+    guaranteed_downs: &[tak_input::Input],
+) -> Option<Action> {
+    if !guaranteed_downs.contains(pressed) {
+        return None;
+    }
+    let action = mapper.press_action_with_pending_downs(pressed, pending_downs);
+    (action == mapper.press_action_with_pending_downs(pressed, guaranteed_downs))
+        .then_some(action)
+        .flatten()
+}
+
+fn direct_target_mode_action(action: Action) -> bool {
+    matches!(
+        action,
+        Action::AttackMode
+            | Action::AttackMoveMode
+            | Action::MoveMode
+            | Action::PatrolMode
+            | Action::GuardMode
+    )
+}
+
 /// Bevy input to `tak-input` events; mapper outputs to the sim's log and
 /// the camera.
 fn input_system(
@@ -1267,7 +1323,7 @@ fn input_system(
         &UiGlobalTransform,
         &InheritedVisibility,
     )>,
-    hud_panel: Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+    hud_panel: Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<HudPanel>>,
     mut feel: ResMut<Feel>,
     skirmish: Option<Res<skirmish_ui::SkirmishState>>,
 ) {
@@ -1307,11 +1363,24 @@ fn input_system(
     }
     let ghost = feel.ghost.is_some();
     // Opening the overlay drops gestures in progress (no stuck holds).
-    let overlay = feel.overlay_open || feel.overlay_captured_input;
+    let mut overlay = feel.overlay_open || feel.overlay_captured_input;
+    // Opening settings may be a profile-bound press, tap, release or hold.
+    // Keep a presentation-only transaction boundary so its winning gesture
+    // can discard this poll's selection/mode/feedback as well as commands.
+    let before_open = (!overlay).then(|| (input.mapper.clone(), cam.geom));
     let t = time.elapsed().as_millis() as u32;
     let mut events = Vec::new();
     let mouse_pos = windows.single().ok().and_then(|w| w.cursor_position());
+    let pointer_focused = windows.single().is_ok_and(|w| w.focused);
     let mm_geom = minimap.geom(geom.size);
+    let pointer_on_map = pointer_focused
+        && mouse_pos.is_some_and(|pos| mm_geom.is_some_and(|mg| mg.contains(pos.x, pos.y)));
+    let hud = mouse_pos.and_then(|pos| {
+        (!mm_geom.is_some_and(|mg| mg.contains(pos.x, pos.y)) && !overlay)
+            .then(|| hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel))
+            .flatten()
+    });
+    let mut pointer_on_terrain = false;
     // Route the pointer through the visible map before considering terrain
     // behind it. Map orders may be far outside the current camera viewport,
     // so virtual terrain pixels (which the mapper clamps) are not sufficient.
@@ -1327,7 +1396,18 @@ fn input_system(
         } else {
             let (o, d) = geom.ray(pos.x, pos.y);
             // Also clear a previous map pointer if the ray leaves the map.
-            let v = ground.0.raycast(o, d).map_or_else(
+            let hit = ground.0.raycast(o, d);
+            // The height ray can extrapolate beyond the rendered map, so a
+            // hit alone is not a playable-terrain boundary check.
+            pointer_on_terrain = pointer_focused
+                && hud.is_none()
+                && hit.is_some_and(|hit| {
+                    hit[0] >= 0.0
+                        && hit[2] >= 0.0
+                        && hit[0] < ground.0.cells.0 as f32 * terrain::CELL
+                        && hit[2] < ground.0.cells.1 as f32 * terrain::CELL
+                });
+            let v = hit.map_or_else(
                 || (pos.x.round() as i32, pos.y.round() as i32),
                 |hit| geom.virtual_px_at(hit[0], hit[2], input_h),
             );
@@ -1342,27 +1422,92 @@ fn input_system(
             events.push(pointer);
         }
     }
+    // MapPointer already terminates world build/Attack drags. A focused map
+    // point still supports short target clicks, so do not report its valid
+    // surface as lost. Genuine HUD, missing terrain, cursor or focus loss must
+    // cancel both terrain gestures and any pending map-origin target click.
+    if !pointer_on_terrain && !pointer_on_map {
+        events.push(EventKind::PointerLeaveTerrain);
+    }
     // Plain selection clicks pan the map. A pending target mode or a
     // remapped order button still goes through the mapper, on press/release,
     // preserving profile gestures, queue modifiers, and cancellation.
-    let left_selects = matches!(
+    let mouse_buttons = [
+        (MouseButton::Left, InButton::MouseLeft),
+        (MouseButton::Right, InButton::MouseRight),
+        (MouseButton::Middle, InButton::MouseMiddle),
+    ];
+    // Preview eligible same-poll downs without moving or dispatching the raw
+    // key events. A fresh modifier can change LMB's binding, and an actual
+    // direct-mode press must not be consumed as a plain camera gesture.
+    let mut map_pending_downs = Vec::new();
+    if !overlay && !ghost {
+        for key in keys.get_just_pressed() {
+            if !matches!(*key, KeyCode::F10 | KeyCode::F8 | KeyCode::F7)
+                && let Some(name) = key_name(*key)
+            {
+                map_pending_downs.push(tak_input::Input::Key(Key(name)));
+            }
+        }
+        for (i, (mouse_button, button)) in mouse_buttons.into_iter().enumerate() {
+            if mouse.just_pressed(mouse_button)
+                && hud.is_none()
+                && !minimap.ui_held[i]
+                && !(mouse_button == MouseButton::Left && minimap.mouse_drag)
+            {
+                map_pending_downs.push(tak_input::Input::Button(button));
+            }
+        }
+        if let Some(pad) = pads.iter().next() {
+            for (gamepad_button, button) in PAD_BUTTONS {
+                if pad.just_pressed(gamepad_button) {
+                    map_pending_downs.push(tak_input::Input::Button(button));
+                }
+            }
+        }
+    }
+    // A may or may not reach the mapper after map/HUD routing. A mode
+    // prediction must agree with and without it; neither presence nor absence
+    // is guaranteed. Already-held mapper A remains effective in both previews.
+    let guaranteed_map_downs: Vec<_> = map_pending_downs
+        .iter()
+        .filter(|input| **input != tak_input::Input::Button(InButton::A))
+        .cloned()
+        .collect();
+    let has_owned_selection = input.mapper.selection().iter().any(|id| {
+        sim.session
+            .sim
+            .world()
+            .unit(*id)
+            .is_some_and(|unit| unit.owner == sim.session.local)
+    });
+    let pending_map_target = has_owned_selection
+        && map_target_press_pending(&input.mapper, &map_pending_downs, &guaranteed_map_downs);
+    let left = tak_input::Input::Button(InButton::MouseLeft);
+    // An A-dependent mouse chord keeps its pre-poll classification rather
+    // than guessing whether A will be delivered. Other fresh chords preview
+    // their actual pending modifiers normally.
+    let left_action = if input
+        .mapper
+        .press_action_with_pending_downs(&left, &map_pending_downs)
+        == input
+            .mapper
+            .press_action_with_pending_downs(&left, &guaranteed_map_downs)
+    {
         input
             .mapper
-            .press_action(&tak_input::Input::Button(InButton::MouseLeft)),
-        Some(Action::Select | Action::DragSelect)
-    ) && !(input.mapper.profile().left_click_context
-        && input.mapper.selection().iter().any(|id| {
-            sim.session
-                .sim
-                .world()
-                .unit(*id)
-                .is_some_and(|unit| unit.owner == sim.session.local)
-        }));
+            .press_action_with_pending_downs(&left, &map_pending_downs)
+    } else {
+        input.mapper.press_action(&left)
+    };
+    let left_selects = matches!(left_action, Some(Action::Select | Action::DragSelect))
+        && !(input.mapper.profile().left_click_context && has_owned_selection);
     if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom)
         && mouse.just_pressed(MouseButton::Left)
         && mg.contains(pos.x, pos.y)
         && left_selects
         && input.mapper.mode() == Mode::None
+        && !pending_map_target
         && !overlay
     {
         minimap.mouse_drag = true;
@@ -1371,7 +1516,10 @@ fn input_system(
         minimap.mouse_drag = false;
         minimap.pad_swallow = false;
     }
-    if minimap.mouse_drag {
+    // A complete click can arrive in one poll: retain this poll's capture
+    // after releasing the persistent drag, so neither edge becomes selection.
+    let map_mouse_captured = minimap.mouse_drag;
+    if map_mouse_captured {
         if let (Some(pos), Some(mg)) = (mouse_pos, mm_geom) {
             cam.geom.target = mg.target_at(pos.x, pos.y);
         }
@@ -1379,34 +1527,36 @@ fn input_system(
             minimap.mouse_drag = false;
         }
     }
-    // HUD panel and buttons: a click there presses the button's key (the
-    // same action as the keyboard) and never reaches the world.
+    // Every mouse button originating on visible HUD is captured until release,
+    // even if the pointer leaves the panel. RMB on production decrements the
+    // queue; it must never become a terrain/rally order behind the portrait.
     let mut pressed: Vec<Action> = Vec::new();
-    if let Some(pos) = mouse_pos
-        && mouse.just_pressed(MouseButton::Left)
-        && !minimap.mouse_drag
-        && !mm_geom.is_some_and(|mg| mg.contains(pos.x, pos.y))
-        && !overlay
-        && let Some(hit) = hud_hit(pos.x, pos.y, &hud_buttons, &hud_panel)
-    {
-        minimap.ui_held = true;
-        if let Some(k) = hit {
-            pressed.push(k.action());
+    for (i, (mb, b)) in mouse_buttons.into_iter().enumerate() {
+        if mouse.just_pressed(mb)
+            && let Some(hit) = hud
+        {
+            minimap.ui_held[i] = true;
+            match (mb, hit) {
+                (MouseButton::Left, Some(k)) => pressed.push(k.action()),
+                (MouseButton::Right, Some(ButtonKind::Build(index))) => {
+                    pressed.push(Action::CancelBuildOption { index: index as u8 });
+                }
+                _ => {}
+            }
         }
-    }
-    let swallow_left = minimap.mouse_drag
-        || minimap.ui_held
-        || mouse.just_released(MouseButton::Left) && minimap.swallow_release;
-    minimap.swallow_release = minimap.mouse_drag || minimap.ui_held;
-    if !mouse.pressed(MouseButton::Left) {
-        minimap.ui_held = false;
-    }
-    for (mb, b) in [
-        (MouseButton::Left, InButton::MouseLeft),
-        (MouseButton::Right, InButton::MouseRight),
-        (MouseButton::Middle, InButton::MouseMiddle),
-    ] {
-        if (mb == MouseButton::Left && swallow_left) || overlay {
+        let swallowed = minimap.ui_held[i]
+            || (mb == MouseButton::Left
+                && (map_mouse_captured || mouse.just_released(mb) && minimap.swallow_release));
+        if !mouse.pressed(mb) {
+            minimap.ui_held[i] = false;
+        }
+        if swallowed || overlay {
+            // A UI/map press is not a continuation of the last world
+            // selection. Record the narrow interruption rather than leaking
+            // a consumed click into the next same-type refinement.
+            if swallowed && !overlay && mouse.just_pressed(mb) {
+                events.push(EventKind::SelectionTapInterrupted);
+            }
             continue;
         }
         if mouse.just_pressed(mb) {
@@ -1416,6 +1566,9 @@ fn input_system(
             events.push(EventKind::ButtonUp { button: b });
         }
     }
+    // Carry only a still-held capture into the next poll. This poll's HUD
+    // release was already consumed; retaining it would eat a fresh fast click.
+    minimap.swallow_release = minimap.mouse_drag || minimap.ui_held[0];
     for k in keys.get_just_pressed() {
         if matches!(*k, KeyCode::F10 | KeyCode::F8 | KeyCode::F7) {
             continue;
@@ -1482,6 +1635,88 @@ fn input_system(
             events.push(EventKind::Scroll { milli });
         }
     }
+    // Bevy's pressed-key set has no chord order. Modifier downs precede
+    // actions, and modifier releases follow them within one poll. Otherwise
+    // Ctrl+Shift+1 can assign a squad, or simultaneous RB+D-pad release can
+    // lose additive recall. The five direct keyboard target-mode presses precede a
+    // simultaneous primary down, preserving point-order semantics for a
+    // complete tap too. Resolve effective profile actions, not key names:
+    // Ctrl+A/G/M remain selection. Other actions retain their relative order.
+    let pending_downs: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventKind::KeyDown { key } => Some(tak_input::Input::Key(key.clone())),
+            EventKind::ButtonDown { button } => Some(tak_input::Input::Button(*button)),
+            _ => None,
+        })
+        .collect();
+    let guaranteed_downs: Vec<_> = pending_downs
+        .iter()
+        .filter(|input| **input != tak_input::Input::Button(InButton::A))
+        .cloned()
+        .collect();
+    let target_mode_presses: Vec<_> = pending_downs
+        .iter()
+        .filter(|button| {
+            // Keep the existing Attack priority exactly. Only newly promoted
+            // modes require the conservative grid/gesture/A-delivery checks.
+            input
+                .mapper
+                .press_action_with_pending_downs(button, &pending_downs)
+                == Some(Action::AttackMode)
+                || unambiguous_direct_press(&input.mapper, button)
+                    && stable_pending_press(
+                        &input.mapper,
+                        button,
+                        &pending_downs,
+                        &guaranteed_downs,
+                    )
+                    .is_some_and(direct_target_mode_action)
+        })
+        .cloned()
+        .collect();
+    let profile = input.mapper.profile();
+    events.sort_by_key(|event| {
+        // A custom chord may use a mouse button with its own selection
+        // gesture. Its press must still see this poll's pointer surface.
+        if matches!(
+            event,
+            EventKind::PointerMove { .. }
+                | EventKind::MapPointer { .. }
+                | EventKind::PointerLeaveTerrain
+        ) {
+            return 0;
+        }
+        let (input, release) = match event {
+            EventKind::KeyDown { key } => (Some(tak_input::Input::Key(key.clone())), false),
+            EventKind::KeyUp { key } => (Some(tak_input::Input::Key(key.clone())), true),
+            EventKind::ButtonDown { button } => (Some(tak_input::Input::Button(*button)), false),
+            EventKind::ButtonUp { button } => (Some(tak_input::Input::Button(*button)), true),
+            _ => (None, false),
+        };
+        let starts_target_mode = !release
+            && input
+                .as_ref()
+                .is_some_and(|input| target_mode_presses.contains(input));
+        let modifier = input.is_some_and(|input| {
+            // Ctrl is also an intrinsic HUD production modifier, even when
+            // a custom keyboard profile has no Ctrl chords of its own.
+            matches!(&input, tak_input::Input::Key(key) if key.0 == "ctrl")
+                || profile.bindings.iter().any(|binding| {
+                    binding.modifiers().contains(&input)
+                        || binding.input == input && binding.action.is_modifier()
+                })
+        });
+        if starts_target_mode {
+            2
+        } else {
+            match (modifier, release) {
+                (true, false) => 1,
+                (true, true) => 4,
+                _ => 3,
+            }
+        }
+    });
     if ghost {
         // Watching a ghost: the camera only (wheel zoom, arrows below).
         events.retain(|e| matches!(e, EventKind::Scroll { .. }));
@@ -1510,7 +1745,23 @@ fn input_system(
     {
         let view = sim.view();
         for kind in &mut events {
-            let mut log_event = true;
+            // A complete Shift/RB + HUD click can arrive within one poll.
+            // Apply its direct action before releases lift the modifier;
+            // otherwise a fast five-unit click becomes a one-unit click.
+            if matches!(
+                kind,
+                EventKind::KeyUp { .. } | EventKind::ButtonUp { .. } | EventKind::Frame
+            ) {
+                for action in pressed.drain(..) {
+                    let action = production_hud_action(action, &input.mapper, &view);
+                    outs.extend(input.mapper.perform(action, &view, tick));
+                }
+            }
+            // Surface loss is checked every poll, but only its transition is
+            // a recording event. Idle mouse checks must not turn every pad
+            // frame into a raw-input frame. Still dispatch the event below.
+            let mut log_event = !matches!(kind, EventKind::PointerLeaveTerrain)
+                || input.mapper.mouse_pointer_on_surface();
             if matches!(kind, EventKind::StickMapPointer { .. }) {
                 let previous_target = input.mapper.map_target();
                 // Advance held-stick motion before sampling the visible
@@ -1580,14 +1831,18 @@ fn input_system(
                         cam.geom.target = mg.target_at(csp[0], csp[1]);
                         minimap.pad_swallow = true;
                     }
-                } else if let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel) {
+                } else if input.mapper.wheel().is_none()
+                    && let Some(hit) = hud_hit(csp[0], csp[1], &hud_buttons, &hud_panel)
+                {
                     minimap.pad_swallow = true;
                     if let Some(k) = hit {
                         pressed.push(k.action());
                     }
                 }
                 if minimap.pad_swallow {
-                    continue;
+                    // Preserve this consumed gesture in raw input replay,
+                    // without dispatching A or changing modes/modifiers.
+                    *kind = EventKind::SelectionTapInterrupted;
                 }
             }
             if matches!(
@@ -1611,12 +1866,30 @@ fn input_system(
         }
         // HUD buttons carry out their action directly.
         for a in pressed {
+            let a = production_hud_action(a, &input.mapper, &view);
             outs.extend(input.mapper.perform(a, &view, tick));
         }
     }
     if overlay {
         // A custom release binding must not escape the overlay either.
         outs.clear();
+    } else if outs.iter().any(|out| matches!(out, Output::ToggleOverlay)) {
+        // Opening settings owns the whole poll, regardless of whether a
+        // keyboard or pad action was collected before its toggle. In
+        // particular, Menu/F11 + production must not submit a hidden order.
+        if let Some((mapper, camera)) = before_open {
+            input.mapper = mapper;
+            cam.geom = camera;
+        }
+        overlay = true;
+        input.last_axes.clear();
+        input.last_pointer = None;
+        minimap.mouse_drag = false;
+        minimap.pad_swallow = false;
+        minimap.ui_held = [false; 3];
+        minimap.swallow_release = false;
+        outs.clear();
+        outs.push(Output::ToggleOverlay);
     }
     let mut submitted = Vec::new();
     for o in &outs {
@@ -3243,8 +3516,8 @@ struct MinimapState {
     mouse_drag: bool,
     swallow_release: bool,
     pad_swallow: bool,
-    /// The left button went down on the HUD panel.
-    ui_held: bool,
+    /// Left/right/middle buttons that went down on visible HUD.
+    ui_held: [bool; 3],
     /// Full-screen Crystal Ball (TA Tab, hold View).
     big: bool,
     /// Height kept free at the bottom right (the Classic TA:K side panel):
@@ -3763,7 +4036,7 @@ fn hud_hit(
         &UiGlobalTransform,
         &InheritedVisibility,
     )>,
-    panel: &Query<(&ComputedNode, &UiGlobalTransform), With<HudPanel>>,
+    panel: &Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<HudPanel>>,
 ) -> Option<Option<ButtonKind>> {
     let inside = |n: &ComputedNode, t: &UiGlobalTransform| {
         let c = t.translation;
@@ -3775,7 +4048,10 @@ fn hud_hit(
             return Some(Some(*k));
         }
     }
-    panel.iter().any(|(n, t)| inside(n, t)).then_some(None)
+    panel
+        .iter()
+        .any(|(n, t, v)| v.get() && inside(n, t))
+        .then_some(None)
 }
 
 fn ground_circle(g: &mut Gizmos, t: &TerrainData, x: f32, z: f32, r: f32, color: Color) {
@@ -3836,6 +4112,7 @@ fn gizmo_system(
     let prev: BTreeMap<UnitId, &UnitSnap> = sim.prev.units.iter().map(|u| (u.id, u)).collect();
     let w = sim.session.sim.world();
     let local = sim.session.local;
+    let order_view = sim.view();
     for u in &sim.curr.units {
         let p = prev.get(&u.id).copied();
         let x = lerp(p.map_or(u.x, |p| p.x), u.x, alpha);
@@ -3914,14 +4191,40 @@ fn gizmo_system(
         // Order lines for own selected units.
         if selected && let Some(unit) = w.unit(u.id) {
             let mut from = Vec3::new(x, u.ground + 2.0, y);
-            for o in crate::hud::orders_for_display(unit) {
-                let to = crate::hud::order_goal(w, o);
-                if let Some(to) = to {
+            if let Some(to) = crate::hud::active_guard_goal(w, unit) {
+                let (tx, tz) = (f(to.x), f(to.y));
+                let point = Vec3::new(tx, t.height_at(tx, tz) + 2.0, tz);
+                g.line(from, point, Color::srgba(0.3, 1.0, 0.7, 0.8));
+                from = point;
+            }
+            for (o, to) in crate::hud::visible_order_goals(&order_view, unit) {
+                let (tx, tz) = (f(to.x), f(to.y));
+                let p = Vec3::new(tx, t.height_at(tx, tz) + 2.0, tz);
+                let [r, green, b, a] = crate::hud::order_rgba(o);
+                g.line(from, p, Color::srgba(r, green, b, a));
+                from = p;
+            }
+            // Standing orders are separate from the paid production queue.
+            // Show their ordered route for selected factories without needing
+            // to manufacture transient Move orders in simulation state.
+            if let Some(rally) = &unit.build.factory_rally {
+                let mut from = Vec3::new(x, u.ground + 3.0, y);
+                for order in rally {
+                    let Some(to) = crate::hud::factory_rally_goal(w, u.id, order) else {
+                        continue;
+                    };
+                    let color = match order {
+                        tak_commands::FactoryRallyOrder::Move { .. } => Color::srgb(0.3, 0.8, 1.0),
+                        tak_commands::FactoryRallyOrder::Patrol { .. } => {
+                            Color::srgb(0.8, 0.5, 1.0)
+                        }
+                        tak_commands::FactoryRallyOrder::Guard { .. } => Color::srgb(0.3, 1.0, 0.7),
+                    };
                     let (tx, tz) = (f(to.x), f(to.y));
-                    let p = Vec3::new(tx, t.height_at(tx, tz) + 2.0, tz);
-                    let [r, green, b, a] = crate::hud::order_rgba(o);
-                    g.line(from, p, Color::srgba(r, green, b, a));
-                    from = p;
+                    let point = Vec3::new(tx, t.height_at(tx, tz) + 3.0, tz);
+                    g.line(from, point, color);
+                    ground_circle(&mut g, t, tx, tz, 4.0, color);
+                    from = point;
                 }
             }
         }
@@ -4038,6 +4341,55 @@ fn gizmo_system(
             Color::srgb(0.3, 1.0, 1.0),
         );
     }
+    // Show only the gesture's bounds, never hidden unit positions or a target
+    // count. Segment the outline so it follows uneven terrain like the brush.
+    if let Some((min, max)) = input.mapper.attack_area_bounds() {
+        let corners = [
+            (f(min.x), f(min.y)),
+            (f(max.x), f(min.y)),
+            (f(max.x), f(max.y)),
+            (f(min.x), f(max.y)),
+            (f(min.x), f(min.y)),
+        ];
+        for edge in corners.windows(2) {
+            // Cross actual attribute-cell boundaries, not arbitrary equal
+            // steps: an axis-aligned edge then follows the bilinear terrain
+            // instead of cutting through a ridge between sample points.
+            let along_x = edge[0].0 != edge[1].0;
+            let start = if along_x { edge[0].0 } else { edge[0].1 };
+            let end = if along_x { edge[1].0 } else { edge[1].1 };
+            if start == end {
+                continue;
+            }
+            let ascending = end > start;
+            let first = if ascending {
+                (start / 16.0).floor() + 1.0
+            } else {
+                (start / 16.0).ceil() - 1.0
+            } * 16.0;
+            let step = if ascending { 16.0 } else { -16.0 };
+            let point = |coordinate| {
+                let (x, z) = if along_x {
+                    (coordinate, edge[0].1)
+                } else {
+                    (edge[0].0, coordinate)
+                };
+                Vec3::new(x, t.height_at(x, z) + 2.0, z)
+            };
+            let mut previous = point(start);
+            // Hard cap rendering work for extreme synthetic views. Ordinary
+            // map-sized rectangles cross far fewer than 1,023 cells per edge.
+            for coordinate in (0..1023)
+                .map(|n| first + n as f32 * step)
+                .take_while(|&v| if ascending { v < end } else { v > end })
+                .chain(std::iter::once(end))
+            {
+                let next = point(coordinate);
+                g.line(previous, next, Color::srgb(1.0, 0.3, 0.2));
+                previous = next;
+            }
+        }
+    }
     if let Mode::Build(def) = input.mapper.mode()
         && let Some(d) = sim.session.def(def)
     {
@@ -4067,6 +4419,23 @@ fn gizmo_system(
     }
 }
 
+// Evaluate modifiers at dispatch, after same-poll downs and before releases.
+// Mobile construction remains placement, even with Ctrl held.
+fn production_hud_action(
+    action: Action,
+    mapper: &Mapper,
+    view: &impl tak_input::WorldView,
+) -> Action {
+    match action {
+        Action::BuildOption { index }
+            if mapper.ctrl_held() && mapper.factory_production_count(index, view).is_some() =>
+        {
+            Action::RepeatBuildOption { index }
+        }
+        _ => action,
+    }
+}
+
 #[cfg(test)]
 #[path = "overlay_input_tests.rs"]
 mod overlay_input_tests;
@@ -4074,3 +4443,23 @@ mod overlay_input_tests;
 #[cfg(test)]
 #[path = "minimap_input_tests.rs"]
 mod minimap_input_tests;
+
+#[cfg(test)]
+#[path = "minimap_fast_click_input_tests.rs"]
+mod minimap_fast_click_input_tests;
+
+#[cfg(test)]
+#[path = "production_input_tests.rs"]
+mod production_input_tests;
+
+#[cfg(test)]
+#[path = "area_attack_input_tests.rs"]
+mod area_attack_input_tests;
+
+#[cfg(test)]
+#[path = "controller_tap_input_tests.rs"]
+mod controller_tap_input_tests;
+
+#[cfg(test)]
+#[path = "stop_gesture_input_tests.rs"]
+mod stop_gesture_input_tests;

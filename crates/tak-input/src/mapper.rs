@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use tak_commands::{
-    ClientCommand, ControlGroup, QueueMode, Scope, SimCommand, Tick, UnitDefId, UnitId, UnitSet,
-    WorldPos,
+    ClientCommand, ControlGroup, FactoryRallyOrder, QueueMode, Scope, SimCommand, Target, Tick,
+    UnitDefId, UnitId, UnitSet, WorldPos,
 };
 use tak_math::{Fx, Vec2};
 
@@ -21,7 +21,9 @@ use crate::tuning::Tuning;
 use crate::wheel::{
     Wheel, WheelKind, context_slots, context_slots_fixed, expand_spells, ring_slots,
 };
-use crate::world::{BuilderKind, Camera, UnitInfo, WorldView, fx_int, units_sorted};
+use crate::world::{
+    BuilderKind, Camera, PlacementCandidate, UnitInfo, WorldView, fx_int, units_sorted,
+};
 
 /// One thing the mapper produced, in order.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -155,6 +157,16 @@ pub enum CursorKind {
 /// Bookmarks the mapper keeps (TA has four, F5..F8).
 pub const BOOKMARKS: usize = 8;
 
+/// Chosen safety bound: at most 64 sampled construction sites / Build commands
+/// per mouse gesture. Each command retains the ordinary eligible-builder set;
+/// the mapper neither interpolates skipped space nor emits per-builder copies.
+pub const MAX_BUILD_DRAG_SITES: usize = 64;
+
+/// Chosen safety bound: at most 64 distinct visible enemies per explicit
+/// mouse Attack rectangle. Target ordering is by full generational unit id,
+/// not a claim about the original game's target priority.
+pub const MAX_AREA_ATTACK_TARGETS: usize = 64;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CursorSource {
     Stick,
@@ -164,18 +176,27 @@ enum CursorSource {
 #[derive(Clone, Debug)]
 struct Press {
     at: u32,
-    with: Option<Input>,
+    /// Stop epoch at the start of this physical gesture.
+    stop_generation: u64,
+    with: Vec<Input>,
     /// Used as a chord modifier or completed a double tap: no tap or hold.
     consumed: bool,
+    /// A wheel-local gesture also suppresses an explicit release binding.
+    suppress_release: bool,
     hold_fired: bool,
+    /// Successful point selection from a custom press binding.
+    selection_target: Option<UnitId>,
+    /// A surface/source/cancel transition interrupted this held gesture.
+    selection_interrupted: bool,
 }
 
 #[derive(Clone, Debug)]
 struct PendingTap {
     released_at: u32,
-    with: Option<Input>,
-    /// Contextual mouse clicks only double-select the same owned unit.
-    /// Other gestures keep their existing unconstrained tap recognition.
+    stop_generation: u64,
+    with: Vec<Input>,
+    /// Actual successful point selection, not merely a selection binding.
+    /// Required by same-type SecondTap; other gestures remain unrestricted.
     selection_target: Option<UnitId>,
 }
 
@@ -190,6 +211,7 @@ struct InputState {
 #[derive(Clone, Debug)]
 struct BrushState {
     input: Input,
+    stop_generation: u64,
     since: u32,
     anchor: WorldPos,
     last_stamp: Option<WorldPos>,
@@ -198,8 +220,64 @@ struct BrushState {
 #[derive(Clone, Debug)]
 struct DragState {
     input: Input,
+    stop_generation: u64,
     start_world: WorldPos,
     start_screen: Vec2,
+}
+
+/// Explicit mouse Attack owns its gesture so cancellation cannot fall through
+/// to selection or a ground attack. Targets are sampled on release and committed
+/// only at the final Frame, after every cancellation edge in that device poll.
+#[derive(Clone, Debug)]
+struct AreaAttackDrag {
+    input: Input,
+    start_world: WorldPos,
+    start_screen: Vec2,
+    selection: UnitSet,
+    /// Map surfaces retain their existing short point-click targeting, but
+    /// never arm a rectangle or survive a transition to terrain.
+    map_click: bool,
+    active: bool,
+    released: Option<AreaAttackRelease>,
+}
+
+#[derive(Clone, Debug)]
+struct AreaAttackRelease {
+    end: WorldPos,
+    targets: UnitSet,
+    queue: QueueMode,
+}
+
+/// A pre-held-queue primary drag, separate from ordinary selection dragging.
+/// Sites include pending and already sent candidates, so both memory and total
+/// dispatch are bounded, and retracing cannot duplicate a previous site.
+#[derive(Clone, Debug)]
+struct BuildDrag {
+    input: Input,
+    def: UnitDefId,
+    units: UnitSet,
+    start_screen: Vec2,
+    active: bool,
+    released: bool,
+    sites: Vec<PlacementCandidate>,
+    sent: usize,
+}
+
+impl BuildDrag {
+    fn sample<W: WorldView + ?Sized>(&mut self, world: &W, pos: WorldPos) {
+        if self.sites.len() >= MAX_BUILD_DRAG_SITES {
+            return;
+        }
+        if let Some(site) = world.placement_candidate(self.def, pos)
+            && site.valid()
+            && !self
+                .sites
+                .iter()
+                .any(|old| old.center == site.center || old.overlaps(site))
+        {
+            self.sites.push(site);
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -228,12 +306,20 @@ pub struct Mapper {
     source: CursorSource,
     /// Absolute map-surface pointer, independent of the gameplay camera.
     map_pointer: Option<WorldPos>,
+    pointer_on_terrain: bool,
+    /// Valid mouse map surface; the last map coordinate can outlive focus.
+    pointer_on_map: bool,
     pan: Vec2,
     selection: UnitSet,
     groups: [UnitSet; ControlGroup::COUNT as usize],
     mode: Mode,
+    /// Local cancellation epoch, so a reentrant Stop also consumes the
+    /// remainder of a release/double-tap currently being dispatched.
+    stop_generation: u64,
     last_idle: Option<UnitId>,
     wheel: Option<(Input, Wheel)>,
+    /// The original opener's epoch, retained by sticky wheels and sub-rings.
+    wheel_generation: u64,
     /// Highlight before consecutive axis events from one device sample.
     /// Re-steer each update from this baseline so X/Y ordering cannot latch
     /// an intermediate cardinal direction when a diagonal returns to centre.
@@ -253,6 +339,8 @@ pub struct Mapper {
     ret_vel: Vec2,
     brush: Option<BrushState>,
     drag: Option<DragState>,
+    build_drag: Option<BuildDrag>,
+    area_attack: Option<AreaAttackDrag>,
     precision_by: Vec<Input>,
     queue_by: Vec<Input>,
     zoom_by: Vec<Input>,
@@ -300,12 +388,16 @@ impl Mapper {
             right: (0, 0),
             source: CursorSource::Stick,
             map_pointer: None,
+            pointer_on_terrain: false,
+            pointer_on_map: false,
             pan: Vec2::ZERO,
             selection: UnitSet::new(),
             groups: Default::default(),
             mode: Mode::None,
+            stop_generation: 0,
             last_idle: None,
             wheel: None,
+            wheel_generation: 0,
             wheel_axis_sample: None,
             wheel_sticky: false,
             wheel_items: Vec::new(),
@@ -318,6 +410,8 @@ impl Mapper {
             ret_vel: Vec2::ZERO,
             brush: None,
             drag: None,
+            build_drag: None,
+            area_attack: None,
             precision_by: Vec::new(),
             queue_by: Vec::new(),
             zoom_by: Vec::new(),
@@ -349,17 +443,38 @@ impl Mapper {
         self.binding_action(input, Gesture::Press)
     }
 
+    /// Resolve a press binding after the listed same-poll modifier downs,
+    /// without advancing input state or triggering an action. Adapters use
+    /// this to order an actual Attack-mode press before a simultaneous mouse
+    /// drag, without mistaking another chord (such as Ctrl+A) for Attack.
+    ///
+    /// Already-held modifiers remain held: adapters deliver modifier releases
+    /// after action edges in a poll. This previews profile binding resolution,
+    /// not wheel-local handling, eligibility, or whether an action succeeds.
+    pub fn press_action_with_pending_downs(
+        &self,
+        input: &Input,
+        pending_downs: &[Input],
+    ) -> Option<Action> {
+        let with = self.profile.held_chord(input, |modifier| {
+            pending_downs.contains(modifier)
+                || self
+                    .inputs
+                    .get(modifier)
+                    .is_some_and(|state| state.press.is_some())
+        });
+        self.profile.find_chord(input, &with, Gesture::Press)
+    }
+
     /// Resolve a gesture with the currently held chord modifier. Surface
     /// adapters use this for tap-bound controllers as well as press-bound mice.
     pub fn binding_action(&self, input: &Input, gesture: Gesture) -> Option<Action> {
-        let with = self
-            .inputs
-            .iter()
-            .find(|(modifier, state)| {
-                state.press.is_some() && self.profile.has_chord(input, modifier)
-            })
-            .map(|(modifier, _)| modifier);
-        self.profile.find(input, with, gesture)
+        let with = self.profile.held_chord(input, |modifier| {
+            self.inputs
+                .get(modifier)
+                .is_some_and(|state| state.press.is_some())
+        });
+        self.profile.find_chord(input, &with, gesture)
     }
 
     /// The tuning in use.
@@ -379,6 +494,8 @@ impl Mapper {
         self.wheel_parents.clear();
         self.brush = None;
         self.drag = None;
+        self.build_drag = None;
+        self.area_attack = None;
         self.precision_by.clear();
         self.queue_by.clear();
         self.zoom_by.clear();
@@ -433,6 +550,13 @@ impl Mapper {
     /// Put the stick cursor at a screen point (clamped), e.g. after the
     /// client warps it or for tests and the feel lab.
     pub fn warp_cursor(&mut self, s: Vec2) {
+        if self.source != CursorSource::Stick {
+            self.invalidate_selection_tap();
+        }
+        self.invalidate_build_drag();
+        self.invalidate_area_attack();
+        self.pointer_on_terrain = false;
+        self.pointer_on_map = false;
         self.source = CursorSource::Stick;
         self.map_pointer = None;
         self.cursor = self.camera.clamp_screen(s);
@@ -446,6 +570,22 @@ impl Mapper {
             return pos;
         }
         self.cursor_world_unmapped()
+    }
+
+    /// Whether the latest mouse surface update identified playable terrain.
+    /// Adapters may use this to omit redundant leave events from recordings,
+    /// while still dispatching every boundary update to the mapper.
+    pub fn mouse_pointer_on_terrain(&self) -> bool {
+        self.pointer_on_terrain
+    }
+
+    /// Whether the latest mouse surface update identified playable terrain
+    /// or a valid map surface. Recording adapters use this to retain genuine
+    /// surface-loss transitions, including interrupted map clicks, without
+    /// recording repeated idle leave events. A stale map coordinate is not
+    /// a valid surface after `PointerLeaveTerrain`.
+    pub fn mouse_pointer_on_surface(&self) -> bool {
+        self.pointer_on_terrain || self.pointer_on_map
     }
 
     /// Explicit order target supplied by the active map surface, if any.
@@ -558,6 +698,15 @@ impl Mapper {
         })
     }
 
+    /// Inclusive world-space bounds of an active mouse Attack rectangle.
+    /// Hidden before the drag threshold and after release/cancellation. This
+    /// describes only gesture geometry, never which enemies are inside it.
+    pub fn attack_area_bounds(&self) -> Option<(WorldPos, WorldPos)> {
+        let stroke = self.area_attack.as_ref()?;
+        (stroke.active && stroke.released.is_none())
+            .then(|| rectangle_bounds(stroke.start_world, self.cursor_world()))
+    }
+
     /// `true` while precision mode is held.
     pub fn precision(&self) -> bool {
         !self.precision_by.is_empty()
@@ -601,7 +750,7 @@ impl Mapper {
         let hovered = pick_unit(world, pos);
         let me = world.local_player();
         let units = own_units(world, &self.selection);
-        match self.mode {
+        let kind = match self.mode {
             Mode::Build(def) => {
                 if world.can_place(def, pos) {
                     CursorKind::Build
@@ -650,6 +799,19 @@ impl Mapper {
                 Some(_) => CursorKind::Guard,
                 None => CursorKind::Move,
             },
+        };
+        // Use the dispatch filters so a factory-only selection never
+        // advertises a rejected target. Mixed selections retain their ordinary
+        // mobile orders; only Guard has a factory target standing order.
+        let has_mobile = !non_factory_units(world, &units).is_empty();
+        let refused_attack = kind == CursorKind::Attack && !has_mobile;
+        let refused_guard = kind == CursorKind::Guard
+            && !has_mobile
+            && hovered.is_none_or(|h| self.guard_factories(world, &units, h.id).is_empty());
+        if refused_attack || refused_guard {
+            CursorKind::Invalid
+        } else {
+            kind
         }
     }
 
@@ -674,7 +836,11 @@ impl Mapper {
         {
             self.wheel_axis_sample = None;
         }
+        self.validate_build_drag(world);
+        self.validate_area_attack();
         self.advance_to(t, &mut cx);
+        self.validate_build_drag(world);
+        self.validate_area_attack();
         match &event.kind {
             EventKind::ButtonDown { button } => self.down(Input::Button(*button), t, &mut cx),
             EventKind::ButtonUp { button } => self.up(Input::Button(*button), t, &mut cx),
@@ -682,15 +848,47 @@ impl Mapper {
             EventKind::KeyUp { key } => self.up(Input::Key(key.clone()), t, &mut cx),
             EventKind::Axis { axis, value } => self.axis(*axis, *value),
             EventKind::PointerMove { x, y } => {
+                if self.source != CursorSource::Pointer {
+                    self.invalidate_selection_tap();
+                }
                 self.map_pointer = None;
+                self.pointer_on_terrain = true;
+                self.pointer_on_map = false;
                 self.source = CursorSource::Pointer;
                 self.cursor = self.camera.clamp_screen(Vec2::new(fx_int(*x), fx_int(*y)));
+                self.sample_build_drag(&mut cx);
+                self.sample_area_attack();
+            }
+            EventKind::PointerLeaveTerrain => {
+                if self.source == CursorSource::Pointer
+                    && (self.pointer_on_terrain || self.pointer_on_map)
+                {
+                    self.invalidate_selection_tap();
+                }
+                self.pointer_on_terrain = false;
+                self.pointer_on_map = false;
+                self.invalidate_build_drag();
+                self.invalidate_area_attack();
             }
             EventKind::MapPointer { x, y, world } => {
+                if self.source != CursorSource::Pointer {
+                    self.invalidate_selection_tap();
+                }
+                self.pointer_on_terrain = false;
+                self.pointer_on_map = true;
+                self.invalidate_build_drag();
+                if self
+                    .area_attack
+                    .as_ref()
+                    .is_some_and(|stroke| !stroke.map_click)
+                {
+                    self.invalidate_area_attack();
+                }
                 self.source = CursorSource::Pointer;
                 self.cursor = self.camera.clamp_screen(Vec2::new(fx_int(*x), fx_int(*y)));
                 self.map_pointer = Some(*world);
                 self.snap_target = None;
+                self.sample_area_attack();
             }
             EventKind::StickMapPointer { world } => {
                 if self.source == CursorSource::Stick {
@@ -699,9 +897,109 @@ impl Mapper {
                 }
             }
             EventKind::Scroll { milli } => self.scroll(*milli),
+            EventKind::SelectionTapInterrupted => self.invalidate_selection_tap(),
             EventKind::Frame => self.frame(t, &mut cx),
         }
+        self.validate_area_attack();
         out
+    }
+
+    /// One factory production item, or five while the queue modifier is held.
+    /// A wheel paging press is deliberately not a held queue modifier.
+    pub fn production_batch_count(&self) -> u32 {
+        if self.queue_held() { 5 } else { 1 }
+    }
+
+    /// Whether the keyboard Ctrl modifier is physically held. HUD adapters
+    /// use this for Ctrl-click repeat without changing keyboard shortcuts.
+    pub fn ctrl_held(&self) -> bool {
+        self.inputs
+            .get(&Input::Key(crate::event::Key::new("ctrl")))
+            .is_some_and(|state| state.press.is_some())
+    }
+
+    /// Active plus pending count across factories that this build option
+    /// controls. `None` means the option instead places a mobile-builder
+    /// structure, or no eligible factory can build it.
+    pub fn factory_production_count<W: WorldView + ?Sized>(
+        &self,
+        index: u8,
+        world: &W,
+    ) -> Option<u32> {
+        let (def, units) = self.factory_build_option(index, world)?;
+        Some(units.iter().fold(0u32, |sum, &id| {
+            sum.saturating_add(world.production_count(id, def))
+        }))
+    }
+
+    /// Factories repeating this option and eligible factories, respectively.
+    /// `None` has the same mobile-placement priority and eligibility meaning
+    /// as [`Self::factory_production_count`]. A partial count represents a
+    /// mixed selection rather than claiming repeat is enabled everywhere.
+    pub fn factory_repeat_counts<W: WorldView + ?Sized>(
+        &self,
+        index: u8,
+        world: &W,
+    ) -> Option<(u32, u32)> {
+        let (def, units) = self.factory_build_option(index, world)?;
+        let repeating = units
+            .iter()
+            .filter(|&&id| world.factory_repeat(id) == Some(def))
+            .count();
+        Some((
+            u32::try_from(repeating).unwrap_or(u32::MAX),
+            u32::try_from(units.len()).unwrap_or(u32::MAX),
+        ))
+    }
+
+    fn controllable_factories<W: WorldView + ?Sized>(&self, world: &W, units: &UnitSet) -> UnitSet {
+        units
+            .iter()
+            .copied()
+            .filter(|&id| {
+                world.unit(id).is_some_and(|u| {
+                    u.owner == world.local_player()
+                        && u.selectable
+                        && !u.under_construction
+                        && u.builder == Some(BuilderKind::Factory)
+                }) && world.can_factory_control(id)
+            })
+            .collect()
+    }
+
+    /// Shared by the actual cursor preview and Guard dispatch. Resolve the
+    /// handle again rather than trusting a potentially stale picked snapshot;
+    /// permissive capability overrides cannot bypass the visible constraints.
+    fn guard_factories<W: WorldView + ?Sized>(
+        &self,
+        world: &W,
+        units: &UnitSet,
+        target: UnitId,
+    ) -> UnitSet {
+        if !world
+            .unit(target)
+            .is_some_and(|u| u.id == target && u.selectable && !world.is_enemy(u.owner))
+            || !world.can_factory_guard_target(target)
+        {
+            return UnitSet::new();
+        }
+        self.controllable_factories(world, units)
+    }
+
+    fn factory_build_option<W: WorldView + ?Sized>(
+        &self,
+        index: u8,
+        world: &W,
+    ) -> Option<(UnitDefId, UnitSet)> {
+        let units = own_units(world, &self.selection);
+        let first = first_builder(world, &units)?;
+        let def = *world.build_options(first).get(usize::from(index))?;
+        if !builders_for(world, &units, def, Some(BuilderKind::Mobile)).is_empty() {
+            return None;
+        }
+        let factories = builders_for(world, &units, def, Some(BuilderKind::Factory));
+        let factories = self.controllable_factories(world, &factories);
+        (!factories.is_empty()).then_some((def, factories))
     }
 
     /// Carry out one instant action as if its binding fired (HUD buttons:
@@ -716,6 +1014,9 @@ impl Mapper {
         if action.is_held() {
             return out;
         }
+        // HUD adapters suppress the raw click/confirm input, so there may
+        // be no `down` edge to consume a held modifier's own tap action.
+        self.consume_modifiers();
         self.wheel_axis_sample = None;
         self.targets = self.assist_targets(world);
         let mut cx = Cx {
@@ -814,7 +1115,7 @@ impl Mapper {
                     && !p.hold_fired
                     && self
                         .profile
-                        .find(input, p.with.as_ref(), Gesture::Hold)
+                        .find_chord(input, &p.with, Gesture::Hold)
                         .is_some()
             }) {
                 consider(p.at.saturating_add(self.tuning.hold_ms), TimerKind::Hold);
@@ -844,13 +1145,14 @@ impl Mapper {
                 let Some(p) = st.press.as_mut() else { return };
                 p.hold_fired = true;
                 let with = p.with.clone();
-                if let Some(a) = self.profile.find(&input, with.as_ref(), Gesture::Hold) {
-                    self.trigger(&input, a, at, cx);
+                let generation = p.stop_generation;
+                if let Some(a) = self.profile.find_chord(&input, &with, Gesture::Hold) {
+                    self.trigger_from(&input, a, at, generation, cx);
                 }
             }
             TimerKind::TapExpired => {
                 if let Some(p) = st.pending.take() {
-                    self.fire_tap(&input, p.with.as_ref(), at, cx);
+                    self.fire_tap(&input, &p.with, at, p.stop_generation, cx);
                 }
             }
         }
@@ -1108,6 +1410,9 @@ impl Mapper {
         }
         if matches!(axis, Axis::LeftX | Axis::LeftY) {
             if self.left_stick() != Vec2::ZERO {
+                if self.source != CursorSource::Stick {
+                    self.invalidate_selection_tap();
+                }
                 self.source = CursorSource::Stick;
                 self.map_pointer = None;
             }
@@ -1212,6 +1517,8 @@ impl Mapper {
             }
         }
         self.paint_brush(cx);
+        self.flush_build_drag(cx);
+        self.flush_area_attack(cx);
     }
 
     fn selection_centre<W: WorldView + ?Sized>(&self, world: &W) -> Option<WorldPos> {
@@ -1225,13 +1532,47 @@ impl Mapper {
         // Another input pressed while a held modifier (queue, zoom,
         // precision) is down uses that modifier: its own tap is dropped.
         self.consume_modifiers();
+        // In a factory build wheel, Y / Triangle enables continuous
+        // production on the down edge. Own the entire gesture so a long
+        // hold cannot open a spell wheel, nor can release cast a spell.
+        if input == Input::Button(crate::event::Button::Y)
+            && let Some((_, wheel)) = self.wheel.as_ref()
+            && wheel.kind == WheelKind::Build
+            && let Some(Action::BuildOption { index }) =
+                wheel.highlighted.and_then(|i| wheel.slots.get(i)).copied()
+            && self.factory_build_option(index, cx.world).is_some()
+        {
+            self.inputs.insert(
+                input,
+                InputState {
+                    press: Some(Press {
+                        at: t,
+                        stop_generation: self.stop_generation,
+                        with: Vec::new(),
+                        consumed: true,
+                        suppress_release: true,
+                        hold_fired: false,
+                        selection_target: None,
+                        selection_interrupted: false,
+                    }),
+                    ..InputState::default()
+                },
+            );
+            self.close_wheel_gesture();
+            self.instant(Action::RepeatBuildOption { index }, cx);
+            return;
+        }
         // Grid build keys (optional add-on) win while a builder is selected.
         if let Some(index) = self.grid_index(&input, cx) {
             self.inputs.entry(input).or_default().press = Some(Press {
                 at: t,
-                with: None,
+                stop_generation: self.stop_generation,
+                with: Vec::new(),
                 consumed: true,
+                suppress_release: false,
                 hold_fired: false,
+                selection_target: None,
+                selection_interrupted: false,
             });
             self.instant(Action::BuildOption { index }, cx);
             return;
@@ -1246,7 +1587,7 @@ impl Mapper {
             .collect();
         for other in others {
             if let Some(p) = self.inputs.get_mut(&other).and_then(|s| s.pending.take()) {
-                self.fire_tap(&other, p.with.as_ref(), t, cx);
+                self.fire_tap(&other, &p.with, t, p.stop_generation, cx);
             }
         }
         for (i, s) in self.inputs.iter_mut() {
@@ -1254,20 +1595,31 @@ impl Mapper {
                 s.last_tap = None;
             }
         }
-        // Chord modifier: the first held input this one has a chord with.
-        let with = self
-            .inputs
-            .iter()
-            .find(|(m, s)| s.press.is_some() && self.profile.has_chord(&input, m))
-            .map(|(m, _)| m.clone());
-        if let Some(p) = with
-            .as_ref()
-            .and_then(|m| self.inputs.get_mut(m))
-            .and_then(|s| s.press.as_mut())
+        // The most specific held chord wins, independent of press order.
+        let with = self.profile.held_chord(&input, |modifier| {
+            self.inputs
+                .get(modifier)
+                .is_some_and(|state| state.press.is_some())
+        });
+        for modifier in &with {
+            if let Some(p) = self.inputs.get_mut(modifier).and_then(|s| s.press.as_mut()) {
+                p.consumed = true;
+            }
+        }
+        // Explicit mouse attacks and queued placement own their gesture,
+        // even when they follow a selection inside the second-tap window.
+        // Other gestures keep their tap recognition.
+        if self.profile.find_chord(&input, &with, Gesture::Press) == Some(Action::DragSelect)
+            && (self.queued_placement(&input, cx.world).is_some()
+                || (self.mode == Mode::Attack
+                    && input == Input::Button(crate::event::Button::MouseLeft)))
+            && let Some(state) = self.inputs.get_mut(&input)
         {
-            p.consumed = true;
+            state.pending = None;
+            state.last_tap = None;
         }
         let mut consumed = false;
+        let stop_generation = self.stop_generation;
         // A second press that completed a double or second tap does not
         // also fire its press binding (a double click is not a new drag).
         let mut second = false;
@@ -1277,7 +1629,7 @@ impl Mapper {
         };
         if let Some(p) = pending {
             let double = (p.with == with && self.tap_target_matches(&p, cx.world))
-                .then(|| self.profile.find(&input, with.as_ref(), Gesture::DoubleTap))
+                .then(|| self.profile.find_chord(&input, &with, Gesture::DoubleTap))
                 .flatten();
             match double {
                 Some(a) => {
@@ -1285,15 +1637,14 @@ impl Mapper {
                     second = true;
                     self.trigger(&input, a, t, cx);
                 }
-                None => self.fire_tap(&input, p.with.as_ref(), t, cx),
+                None => self.fire_tap(&input, &p.with, t, p.stop_generation, cx),
             }
         } else if let Some(p) = last_tap.filter(|p| {
             p.with == with
                 && t.saturating_sub(p.released_at) <= self.tuning.double_tap_ms
                 && self.tap_target_matches(p, cx.world)
-        }) && let Some(a) = self
-            .profile
-            .find(&input, p.with.as_ref(), Gesture::SecondTap)
+        }) && let Some(a) = self.profile.find_chord(&input, &p.with, Gesture::SecondTap)
+            && (!matches!(a, Action::SelectSameType { .. }) || p.selection_target.is_some())
         {
             consumed = true;
             second = true;
@@ -1301,54 +1652,90 @@ impl Mapper {
         }
         self.inputs.entry(input.clone()).or_default().press = Some(Press {
             at: t,
+            stop_generation,
             with: with.clone(),
-            consumed,
+            consumed: consumed || self.stop_generation != stop_generation,
+            suppress_release: self.stop_generation != stop_generation,
             hold_fired: false,
+            selection_target: None,
+            selection_interrupted: false,
         });
-        if second {
+        if second || self.stop_generation != stop_generation {
             return;
         }
-        if let Some(a) = self.profile.find(&input, with.as_ref(), Gesture::Press) {
+        if let Some(a) = self.profile.find_chord(&input, &with, Gesture::Press) {
+            let start = cx.out.len();
+            let wheel_confirm = self.wheel.is_some();
             self.trigger(&input, a, t, cx);
+            let target = (!wheel_confirm)
+                .then(|| self.point_selection_target(&cx.out[start..], cx.world))
+                .flatten();
+            if let Some(press) = self.inputs.get_mut(&input).and_then(|s| s.press.as_mut()) {
+                press.selection_target = target;
+            }
         }
     }
 
     fn up<W: WorldView + ?Sized>(&mut self, input: Input, t: u32, cx: &mut Cx<'_, W>) {
+        let attack_gesture = self
+            .area_attack
+            .as_ref()
+            .is_some_and(|stroke| stroke.input == input && stroke.released.is_none())
+            && self
+                .inputs
+                .get(&input)
+                .is_some_and(|state| state.press.is_some());
+        if attack_gesture {
+            self.sample_area_attack();
+            if let Some(mut stroke) = self.area_attack.take().filter(|stroke| stroke.active) {
+                let end = self.cursor_world();
+                stroke.released = Some(AreaAttackRelease {
+                    end,
+                    targets: area_attack_targets(cx.world, stroke.start_world, end, None),
+                    queue: self.queue_mode(false),
+                });
+                self.consume_drag_input(&input);
+                self.area_attack = Some(stroke);
+            }
+            // Under-threshold Attack clicks use the existing immediate
+            // context path, but never seed legacy same-type double selection.
+        }
+        if self
+            .build_drag
+            .as_ref()
+            .is_some_and(|stroke| stroke.input == input)
+        {
+            if let Some(stroke) = self.build_drag.as_mut().filter(|stroke| stroke.active) {
+                // The final Frame sees all modifier edges from this poll.
+                stroke.released = true;
+            } else {
+                // Under-threshold clicks retain the existing release path,
+                // including context/resume and ordinary unsnapped targets.
+                self.build_drag = None;
+            }
+        }
         let Some(press) = self.inputs.get_mut(&input).and_then(|s| s.press.take()) else {
             return;
         };
-        let contextual_drag = self.profile.left_click_context
-            && self
-                .profile
-                .find(&input, press.with.as_ref(), Gesture::Press)
-                == Some(Action::DragSelect);
-        // Capture the actual click result before ending the gesture. An
-        // order, drag, or cancelled gesture must not arm same-type selection
-        // and swallow the next command click inside the double-tap window.
-        let selection_target = contextual_drag
-            .then(|| {
-                self.drag
-                    .as_ref()
-                    .filter(|d| {
-                        d.input == input
-                            && self.mode == Mode::None
-                            && d.start_screen.distance(self.cursor)
-                                < fx_int(self.tuning.drag_min_px)
-                    })
-                    .and_then(|_| pick_unit(cx.world, self.cursor_world()))
-                    .filter(|u| u.owner == cx.world.local_player())
-                    .map(|u| u.id)
-            })
-            .flatten();
+        // Observe the action's actual result. Wheel confirmations, orders,
+        // brush drags and cancelled clicks are not point selections even if
+        // they leave a selected unit under the cursor and clear the mode.
+        let start = cx.out.len();
+        let wheel_confirm = self.wheel.is_some();
+        let stop_generation = self.stop_generation;
         self.end_held(&input, cx);
-        let with = press.with.as_ref();
-        if let Some(a) = self.profile.find(&input, with, Gesture::Release) {
-            self.trigger(&input, a, t, cx);
-        }
-        if press.consumed || press.hold_fired {
+        if press.suppress_release || self.stop_generation != stop_generation {
             return;
         }
-        if contextual_drag && selection_target.is_none() {
+        let with = &press.with;
+        if let Some(a) = self.profile.find_chord(&input, with, Gesture::Release) {
+            self.trigger_from(&input, a, t, press.stop_generation, cx);
+        }
+        if press.consumed
+            || press.hold_fired
+            || attack_gesture
+            || self.stop_generation != stop_generation
+        {
             return;
         }
         // A long press of an input whose press binding is a held action
@@ -1356,32 +1743,64 @@ impl Mapper {
         if t.saturating_sub(press.at) >= self.tuning.hold_ms
             && self
                 .profile
-                .find(&input, with, Gesture::Press)
+                .find_chord(&input, with, Gesture::Press)
                 .is_some_and(|a| a.is_held())
         {
             return;
         }
         if self
             .profile
-            .find(&input, with, Gesture::DoubleTap)
+            .find_chord(&input, with, Gesture::DoubleTap)
             .is_some()
         {
+            // Keep the old delayed DoubleTap contract. Only original-style
+            // mouse selection had target-constrained delayed tap history.
+            let contextual_drag = self.profile.left_click_context
+                && self.profile.find_chord(&input, with, Gesture::Press)
+                    == Some(Action::DragSelect);
+            let selection_target = contextual_drag
+                .then(|| self.point_selection_target(&cx.out[start..], cx.world))
+                .flatten();
+            if contextual_drag && selection_target.is_none() {
+                return;
+            }
             self.inputs.entry(input).or_default().pending = Some(PendingTap {
                 released_at: t,
+                stop_generation: press.stop_generation,
                 with: press.with,
                 selection_target,
             });
         } else {
-            self.fire_tap(&input, with, t, cx);
-            if self
-                .profile
-                .find(&input, with, Gesture::SecondTap)
-                .is_some()
+            self.fire_tap(&input, with, t, press.stop_generation, cx);
+            if self.stop_generation != stop_generation {
+                return;
+            }
+            let selection_target = if wheel_confirm || press.selection_interrupted {
+                None
+            } else if cx.out.len() == start
+                && self
+                    .profile
+                    .find_chord(&input, with, Gesture::Release)
+                    .is_none()
+                && self
+                    .profile
+                    .find_chord(&input, with, Gesture::Tap)
+                    .is_none()
+            {
+                press.selection_target
+            } else {
+                self.point_selection_target(&cx.out[start..], cx.world)
+            };
+            if let Some(action) = self.profile.find_chord(&input, with, Gesture::SecondTap)
+                && (!matches!(action, Action::SelectSameType { .. }) || selection_target.is_some())
             {
                 self.inputs.entry(input).or_default().last_tap = Some(PendingTap {
                     released_at: t,
+                    stop_generation: press.stop_generation,
                     with: press.with,
-                    selection_target,
+                    selection_target: matches!(action, Action::SelectSameType { .. })
+                        .then_some(selection_target)
+                        .flatten(),
                 });
             }
         }
@@ -1390,21 +1809,83 @@ impl Mapper {
     fn tap_target_matches<W: WorldView + ?Sized>(&self, tap: &PendingTap, world: &W) -> bool {
         tap.selection_target.is_none_or(|id| {
             self.mode == Mode::None
+                && self.selection_surface_valid()
+                && self.wheel.is_none()
                 && self.selection.contains(id)
+                && world
+                    .unit(id)
+                    .is_some_and(|u| u.id == id && u.selectable && u.owner == world.local_player())
                 && pick_unit(world, self.cursor_world())
                     .is_some_and(|u| u.id == id && u.owner == world.local_player())
         })
     }
 
+    /// Chosen input UX: successful world point selection alone arms immediate
+    /// same-type refinement. This is shared by controller A and mouse clicks;
+    /// it does not redefine the original manual's like-unit selection rule or
+    /// the legacy, deliberately delayed DoubleTap shortcut.
+    fn point_selection_target<W: WorldView + ?Sized>(
+        &self,
+        output: &[Output],
+        world: &W,
+    ) -> Option<UnitId> {
+        let [
+            Output::Client {
+                command: ClientCommand::SelectAt { pos, .. },
+            },
+        ] = output
+        else {
+            return None;
+        };
+        pick_unit(world, *pos)
+            .filter(|u| {
+                self.mode == Mode::None
+                    && self.selection_surface_valid()
+                    && self.wheel.is_none()
+                    && u.owner == world.local_player()
+                    && self.selection.contains(u.id)
+                    && world.unit(u.id).is_some_and(|current| {
+                        current.id == u.id
+                            && current.selectable
+                            && current.owner == world.local_player()
+                    })
+            })
+            .map(|u| u.id)
+    }
+
+    fn selection_surface_valid(&self) -> bool {
+        self.source == CursorSource::Stick || self.pointer_on_terrain || self.pointer_on_map
+    }
+
+    /// End only point-selection refinement. Generic double/second taps,
+    /// selection, orders and held modifiers are untouched. Adapters use the
+    /// recorded SelectionTapInterrupted event instead of mutating this state.
+    fn invalidate_selection_tap(&mut self) {
+        for state in self.inputs.values_mut() {
+            if let Some(press) = state.press.as_mut() {
+                press.selection_target = None;
+                press.selection_interrupted = true;
+            }
+            if state
+                .last_tap
+                .as_ref()
+                .is_some_and(|tap| tap.selection_target.is_some())
+            {
+                state.last_tap = None;
+            }
+        }
+    }
+
     fn fire_tap<W: WorldView + ?Sized>(
         &mut self,
         input: &Input,
-        with: Option<&Input>,
+        with: &[Input],
         at: u32,
+        stop_generation: u64,
         cx: &mut Cx<'_, W>,
     ) {
-        if let Some(a) = self.profile.find(input, with, Gesture::Tap) {
-            self.trigger(input, a, at, cx);
+        if let Some(a) = self.profile.find_chord(input, with, Gesture::Tap) {
+            self.trigger_from(input, a, at, stop_generation, cx);
         }
     }
 
@@ -1415,7 +1896,7 @@ impl Mapper {
         for (i, st) in self.inputs.iter_mut() {
             if let Some(p) = st.press.as_mut()
                 && profile
-                    .find(i, p.with.as_ref(), Gesture::Press)
+                    .find_chord(i, &p.with, Gesture::Press)
                     .is_some_and(|a| a.is_modifier())
             {
                 p.consumed = true;
@@ -1454,11 +1935,51 @@ impl Mapper {
         at: u32,
         cx: &mut Cx<'_, W>,
     ) {
+        self.trigger_from(input, action, at, self.stop_generation, cx);
+    }
+
+    fn trigger_from<W: WorldView + ?Sized>(
+        &mut self,
+        input: &Input,
+        action: Action,
+        at: u32,
+        generation: u64,
+        cx: &mut Cx<'_, W>,
+    ) {
+        // A preserved selection gesture may still select, but cannot borrow
+        // a mode or order wheel armed after Stop. Check before wheel routing.
+        if generation != self.stop_generation
+            && (is_order_action(action)
+                || (action == Action::CommandWheel && self.command_wheel_has_orders(cx.world))
+                || (matches!(action, Action::Select | Action::Brush | Action::DragSelect)
+                    && self.selection_would_order()))
+        {
+            return;
+        }
+        let stop_generation = self.stop_generation;
+        self.trigger_action(input, action, at, generation, cx);
+        if self.stop_generation != stop_generation {
+            // The input that actually dispatched Stop owns no later edge,
+            // even when its custom release/tap would ordinarily deselect.
+            self.consume_drag_input(input);
+        }
+    }
+
+    fn trigger_action<W: WorldView + ?Sized>(
+        &mut self,
+        input: &Input,
+        action: Action,
+        at: u32,
+        generation: u64,
+        cx: &mut Cx<'_, W>,
+    ) {
         // A paged wheel: the queue modifier (RB) turns to the next page, the
         // idle-builder button (LB tap, sticky wheels) to the previous one.
         if let Some((_, w)) = self.wheel.as_ref()
             && w.pages > 1
-            && matches!(action, Action::QueueModifier | Action::CycleIdleBuilder)
+            && (action == Action::CycleIdleBuilder
+                || (action == Action::QueueModifier
+                    && *input == Input::Button(crate::event::Button::Rb)))
         {
             let step = if action == Action::QueueModifier {
                 1
@@ -1469,6 +1990,27 @@ impl Mapper {
             if let Some(p) = self.inputs.get_mut(input).and_then(|s| s.press.as_mut()) {
                 p.consumed = true;
             }
+            return;
+        }
+        // Factory build wheels use the context-confirm button (X) to
+        // subtract, leaving Select (A) as add. Close on subtract so a legacy
+        // release-to-confirm opener cannot accidentally add the item again.
+        if matches!(
+            action,
+            Action::Context { .. } | Action::Select | Action::Brush
+        ) && let Some((_, wheel)) = self.wheel.as_ref()
+            && wheel.kind == WheelKind::Build
+            && let Some(Action::BuildOption { index }) =
+                wheel.highlighted.and_then(|i| wheel.slots.get(i)).copied()
+            && self.factory_build_option(index, cx.world).is_some()
+        {
+            self.close_wheel_gesture();
+            let action = if matches!(action, Action::Context { .. }) {
+                Action::CancelBuildOption { index }
+            } else {
+                Action::BuildOption { index }
+            };
+            self.instant(action, cx);
             return;
         }
         // A sticky wheel (confirm on press, sub-rings): select / context /
@@ -1487,10 +2029,132 @@ impl Mapper {
             return;
         }
         if action.is_held() {
-            self.start_held(input, action, at, cx);
+            self.start_held(input, action, at, generation, cx);
         } else {
             self.instant(action, cx);
         }
+    }
+
+    /// Close a wheel and consume its opener, including profiles that bind
+    /// it on press rather than waiting for a hold.
+    fn close_wheel_gesture(&mut self) {
+        if let Some((input, _)) = self.wheel.take()
+            && let Some(state) = self.inputs.get_mut(&input)
+        {
+            if let Some(press) = state.press.as_mut() {
+                press.consumed = true;
+                press.suppress_release = true;
+            }
+            state.pending = None;
+            state.last_tap = None;
+        }
+        self.wheel_sticky = false;
+        self.wheel_axis_sample = None;
+        self.wheel_parents.clear();
+        self.wheel_items.clear();
+    }
+
+    /// Chosen defensive UI reset, not a claim about original Stop targeting
+    /// semantics: unfinished orders cannot survive Stop and fire on an old
+    /// release. Selection-only gestures and physically held modifiers remain.
+    fn disarm_orders<W: WorldView + ?Sized>(&mut self, world: &W) {
+        let previous_generation = self.stop_generation;
+        self.stop_generation = self.stop_generation.wrapping_add(1);
+        let targeting = self.mode != Mode::None;
+        let order_choice =
+            |action: Action| is_order_action(action) || (targeting && action == Action::Select);
+        let order_wheel = self
+            .wheel
+            .as_ref()
+            .is_some_and(|(_, wheel)| wheel.slots.iter().copied().any(order_choice));
+        let command_orders = self.command_wheel_has_orders(world);
+        let contextual = targeting || order_wheel;
+        let target_drag = self
+            .drag
+            .as_ref()
+            .filter(|drag| {
+                drag.stop_generation == previous_generation
+                    && drag.start_screen.distance(self.cursor) < fx_int(self.tuning.drag_min_px)
+                    && (targeting
+                        || (self.profile.left_click_context
+                            && !own_units(world, &self.selection).is_empty()
+                            && !pick_unit(world, self.cursor_world())
+                                .is_some_and(|unit| unit.owner == world.local_player())))
+            })
+            .map(|drag| drag.input.clone());
+        let unfinished = |action: Action| {
+            is_order_action(action)
+                || match action {
+                    Action::CommandWheel => command_orders,
+                    Action::Select | Action::Cancel => contextual,
+                    // Brush confirms a sticky wheel, but is otherwise selection.
+                    Action::Brush => order_wheel,
+                    _ => false,
+                }
+        };
+        for (input, state) in &mut self.inputs {
+            let armed = |with: &[Input], gesture| {
+                self.profile
+                    .find_chord(input, with, gesture)
+                    .is_some_and(unfinished)
+            };
+            if let Some(press) = state.press.as_mut()
+                && (armed(&press.with, Gesture::Release)
+                    || (!press.consumed
+                        && !press.hold_fired
+                        && [
+                            Gesture::Tap,
+                            Gesture::Hold,
+                            Gesture::DoubleTap,
+                            Gesture::SecondTap,
+                        ]
+                        .iter()
+                        .any(|&gesture| armed(&press.with, gesture))))
+            {
+                press.consumed = true;
+                press.suppress_release = true;
+            }
+            if state.pending.as_ref().is_some_and(|tap| {
+                armed(&tap.with, Gesture::Tap) || armed(&tap.with, Gesture::DoubleTap)
+            }) {
+                state.pending = None;
+            }
+            if state
+                .last_tap
+                .as_ref()
+                .is_some_and(|tap| armed(&tap.with, Gesture::SecondTap))
+            {
+                state.last_tap = None;
+            }
+        }
+        if let Some(input) = target_drag {
+            self.consume_drag_input(&input);
+        }
+        self.mode = Mode::None;
+        if order_wheel {
+            self.close_wheel_gesture();
+        }
+    }
+
+    fn command_wheel_has_orders<W: WorldView + ?Sized>(&self, world: &W) -> bool {
+        let slots = if (self.profile.fixed_slots || self.tuning.wheel_context)
+            && own_units(world, &self.selection).is_empty()
+        {
+            &self.profile.idle_wheel
+        } else {
+            &self.profile.command_wheel
+        };
+        slots.iter().any(|&action| {
+            is_order_action(action) || (self.mode != Mode::None && action == Action::Select)
+        })
+    }
+
+    fn selection_would_order(&self) -> bool {
+        self.mode != Mode::None
+            || self
+                .wheel
+                .as_ref()
+                .is_some_and(|(_, wheel)| wheel.slots.iter().copied().any(is_order_action))
     }
 
     fn queue_held(&self) -> bool {
@@ -1549,6 +2213,14 @@ impl Mapper {
         w: Wheel,
         cx: &mut Cx<'_, W>,
     ) {
+        let stop_generation = self.stop_generation;
+        if self.wheel_generation != stop_generation
+            && self.mode != Mode::None
+            && w.clone().confirm() == Some(Action::Select)
+        {
+            self.wheel_parents.clear();
+            return;
+        }
         match w.clone().confirm() {
             Some(Action::OpenRing { ring }) => {
                 self.wheel_parents.push(w);
@@ -1565,6 +2237,11 @@ impl Mapper {
                 self.instant(a, cx);
             }
             None => self.wheel_parents.clear(),
+        }
+        if self.stop_generation != stop_generation {
+            // Confirmation already detached the wheel; retire its opener
+            // explicitly, including a sticky wheel confirmed by another input.
+            self.consume_drag_input(input);
         }
     }
 
@@ -1590,8 +2267,27 @@ impl Mapper {
         input: &Input,
         action: Action,
         at: u32,
+        stop_generation: u64,
         cx: &mut Cx<'_, W>,
     ) {
+        if matches!(
+            action,
+            Action::Brush
+                | Action::CrystalBall
+                | Action::CommandWheel
+                | Action::BuildWheel
+                | Action::SpellWheel
+        ) {
+            self.invalidate_selection_tap();
+            self.invalidate_build_drag();
+            self.invalidate_area_attack();
+        }
+        if matches!(
+            action,
+            Action::CommandWheel | Action::BuildWheel | Action::SpellWheel
+        ) {
+            self.wheel_generation = stop_generation;
+        }
         match action {
             Action::Precision => self.precision_by.push(input.clone()),
             Action::QueueModifier => self.queue_by.push(input.clone()),
@@ -1599,17 +2295,57 @@ impl Mapper {
             Action::Brush => {
                 self.brush = Some(BrushState {
                     input: input.clone(),
+                    stop_generation,
                     since: at,
                     anchor: self.cursor_world(),
                     last_stamp: None,
                 });
             }
             Action::DragSelect => {
+                self.invalidate_build_drag();
+                self.invalidate_area_attack();
+                if self.mode == Mode::Attack
+                    && *input == Input::Button(crate::event::Button::MouseLeft)
+                {
+                    let map_click = self.source == CursorSource::Pointer
+                        && self.pointer_on_map
+                        && self.map_pointer.is_some()
+                        && self.wheel.is_none();
+                    if !self.area_attack_surface() && !map_click {
+                        self.consume_drag_input(input);
+                        return;
+                    }
+                    self.area_attack = Some(AreaAttackDrag {
+                        input: input.clone(),
+                        start_world: self.cursor_world(),
+                        start_screen: self.cursor,
+                        selection: self.selection.clone(),
+                        map_click,
+                        active: false,
+                        released: None,
+                    });
+                }
                 self.drag = Some(DragState {
                     input: input.clone(),
+                    stop_generation,
                     start_world: self.cursor_world(),
                     start_screen: self.cursor,
                 });
+                if let Some((def, units)) = self.queued_placement(input, cx.world) {
+                    let mut stroke = BuildDrag {
+                        input: input.clone(),
+                        def,
+                        units,
+                        start_screen: self.cursor,
+                        active: false,
+                        released: false,
+                        sites: Vec::new(),
+                        sent: 0,
+                    };
+                    // This is an observed press sample, not interpolation.
+                    stroke.sample(cx.world, self.cursor_world());
+                    self.build_drag = Some(stroke);
+                }
             }
             Action::CrystalBall => self.crystal_by.push(input.clone()),
             Action::CommandWheel | Action::BuildWheel | Action::SpellWheel
@@ -1709,6 +2445,9 @@ impl Mapper {
     fn end_held<W: WorldView + ?Sized>(&mut self, input: &Input, cx: &mut Cx<'_, W>) {
         self.precision_by.retain(|i| i != input);
         self.queue_by.retain(|i| i != input);
+        if !self.queue_held() {
+            self.invalidate_build_drag();
+        }
         self.zoom_by.retain(|i| i != input);
         if !self.wheel_sticky
             && let Some((i, w)) = self.wheel.take_if(|(i, _)| i == input)
@@ -1716,7 +2455,9 @@ impl Mapper {
             self.confirm_wheel(&i, w, cx);
         }
         self.crystal_by.retain(|i| i != input);
-        if let Some(b) = self.brush.take_if(|b| &b.input == input) {
+        if let Some(b) = self.brush.take_if(|b| &b.input == input)
+            && (b.stop_generation == self.stop_generation || !self.selection_would_order())
+        {
             let radius = brush_radius(self.now.saturating_sub(b.since), &self.tuning);
             let additive = b.last_stamp.is_some() || self.queue_held();
             let center = self.cursor_world();
@@ -1729,13 +2470,22 @@ impl Mapper {
                 cx,
             );
         }
-        if let Some(d) = self.drag.take_if(|d| &d.input == input) {
+        if let Some(d) = self.drag.take_if(|d| &d.input == input)
+            && (d.stop_generation == self.stop_generation || !self.selection_would_order())
+        {
             let end = self.cursor_world();
             if d.start_screen.distance(self.cursor) < fx_int(self.tuning.drag_min_px) {
+                let own_target =
+                    pick_unit(cx.world, end).is_some_and(|u| u.owner == cx.world.local_player());
+                if d.stop_generation != self.stop_generation
+                    && self.profile.left_click_context
+                    && !own_target
+                {
+                    return;
+                }
                 let contextual_order = self.profile.left_click_context
                     && !own_units(cx.world, &self.selection).is_empty()
-                    && !pick_unit(cx.world, end)
-                        .is_some_and(|u| u.owner == cx.world.local_player());
+                    && !own_target;
                 if self.mode != Mode::None || contextual_order {
                     self.context(false, cx);
                 } else {
@@ -1757,10 +2507,231 @@ impl Mapper {
         }
     }
 
+    /// Eligibility for the new mouse gesture, independent of tap history.
+    fn queued_placement<W: WorldView + ?Sized>(
+        &self,
+        input: &Input,
+        world: &W,
+    ) -> Option<(UnitDefId, UnitSet)> {
+        if *input != Input::Button(crate::event::Button::MouseLeft)
+            || !self.queue_held()
+            || !self.pointer_on_terrain
+            || self.source != CursorSource::Pointer
+            || self.map_pointer.is_some()
+            || self.wheel.is_some()
+            || self.crystal_ball()
+        {
+            return None;
+        }
+        let Mode::Build(def) = self.mode else {
+            return None;
+        };
+        let units = self.placement_builders(world, def);
+        (!units.is_empty()).then_some((def, units))
+    }
+
+    /// Recheck visible invariants as well as adapter capabilities; permissive
+    /// overrides cannot accidentally include factories, enemies or frames.
+    fn placement_builders<W: WorldView + ?Sized>(&self, world: &W, def: UnitDefId) -> UnitSet {
+        builders_for(world, &self.selection, def, Some(BuilderKind::Mobile))
+            .iter()
+            .copied()
+            .filter(|&id| {
+                world.unit(id).is_some_and(|u| {
+                    u.id == id
+                        && u.owner == world.local_player()
+                        && u.selectable
+                        && !u.under_construction
+                        && u.builder == Some(BuilderKind::Mobile)
+                })
+            })
+            .collect()
+    }
+
+    fn consume_drag_input(&mut self, input: &Input) {
+        self.drag.take_if(|drag| &drag.input == input);
+        if let Some(state) = self.inputs.get_mut(input) {
+            if let Some(press) = state.press.as_mut() {
+                press.consumed = true;
+                press.suppress_release = true;
+            }
+            state.pending = None;
+            state.last_tap = None;
+        }
+    }
+
+    fn area_attack_surface(&self) -> bool {
+        self.pointer_on_terrain
+            && self.source == CursorSource::Pointer
+            && self.map_pointer.is_none()
+            && self.wheel.is_none()
+            && !self.crystal_ball()
+    }
+
+    fn invalidate_area_attack(&mut self) {
+        if let Some(stroke) = self.area_attack.take() {
+            self.consume_drag_input(&stroke.input);
+        }
+    }
+
+    fn validate_area_attack(&mut self) {
+        if self.area_attack.as_ref().is_some_and(|stroke| {
+            self.mode != Mode::Attack
+                || self.selection != stroke.selection
+                || if stroke.map_click {
+                    self.source != CursorSource::Pointer
+                        || !self.pointer_on_map
+                        || self.map_pointer.is_none()
+                        || self.wheel.is_some()
+                } else {
+                    !self.area_attack_surface()
+                }
+        }) {
+            self.invalidate_area_attack();
+        }
+    }
+
+    fn sample_area_attack(&mut self) {
+        self.validate_area_attack();
+        if let Some(stroke) = self.area_attack.as_mut()
+            && !stroke.active
+            && stroke.released.is_none()
+            && stroke.start_screen.distance(self.cursor) >= fx_int(self.tuning.drag_min_px.max(0))
+        {
+            let input = stroke.input.clone();
+            if stroke.map_click {
+                // A minimap point click remains supported; a map-origin
+                // drag must never become a rectangle or selection brush.
+                self.invalidate_area_attack();
+            } else {
+                stroke.active = true;
+                self.consume_drag_input(&input);
+            }
+        }
+    }
+
+    fn flush_area_attack<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        self.validate_area_attack();
+        let Some(stroke) = self.area_attack.take_if(|stroke| stroke.released.is_some()) else {
+            return;
+        };
+        let Some(released) = stroke.released else {
+            return;
+        };
+        let units: UnitSet = stroke
+            .selection
+            .iter()
+            .copied()
+            .filter(|&id| {
+                cx.world.unit(id).is_some_and(|u| {
+                    u.id == id && u.owner == cx.world.local_player() && u.selectable
+                })
+            })
+            .collect();
+        let targets = area_attack_targets(
+            cx.world,
+            stroke.start_world,
+            released.end,
+            Some(&released.targets),
+        );
+        // Empty boxes and unavailable armies do not replace selection or
+        // spend Attack mode. Factories retain their existing order exclusion.
+        if targets.is_empty() || non_factory_units(cx.world, &units).is_empty() {
+            return;
+        }
+        let mut queue = released.queue;
+        for &target in targets.iter() {
+            self.sim(
+                SimCommand::Attack {
+                    units: units.clone(),
+                    target: Target::Unit(target),
+                    queue,
+                },
+                cx,
+            );
+            queue = QueueMode::Append;
+        }
+        if released.queue == QueueMode::Replace {
+            self.mode = Mode::None;
+        }
+    }
+
+    fn invalidate_build_drag(&mut self) {
+        if let Some(stroke) = self.build_drag.take() {
+            self.consume_drag_input(&stroke.input);
+        }
+    }
+
+    fn validate_build_drag<W: WorldView + ?Sized>(&mut self, world: &W) {
+        if self.build_drag.as_ref().is_some_and(|stroke| {
+            !self.queue_held()
+                || !self.pointer_on_terrain
+                || self.source != CursorSource::Pointer
+                || self.map_pointer.is_some()
+                || self.mode != Mode::Build(stroke.def)
+                || self.wheel.is_some()
+                || self.crystal_ball()
+                || self.placement_builders(world, stroke.def) != stroke.units
+        }) {
+            self.invalidate_build_drag();
+        }
+    }
+
+    fn sample_build_drag<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        self.validate_build_drag(cx.world);
+        let Some(mut stroke) = self.build_drag.take() else {
+            return;
+        };
+        if !stroke.released {
+            if !stroke.active
+                && stroke.start_screen.distance(self.cursor)
+                    >= fx_int(self.tuning.drag_min_px.max(0))
+            {
+                stroke.active = true;
+                self.consume_drag_input(&stroke.input);
+            }
+            if stroke.active {
+                stroke.sample(cx.world, self.cursor_world());
+            }
+        }
+        self.build_drag = Some(stroke);
+    }
+
+    fn flush_build_drag<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        self.validate_build_drag(cx.world);
+        let Some(mut stroke) = self.build_drag.take() else {
+            return;
+        };
+        if stroke.active {
+            for site in &stroke.sites[stroke.sent..] {
+                // A site may have become occupied since its pointer sample.
+                // A stale or changed adapter candidate must not be submitted.
+                if cx.world.placement_candidate(stroke.def, site.center) == Some(*site) {
+                    self.sim(
+                        SimCommand::Build {
+                            units: stroke.units.clone(),
+                            def: stroke.def,
+                            at: Some(site.center),
+                            queue: QueueMode::Append,
+                        },
+                        cx,
+                    );
+                }
+            }
+            stroke.sent = stroke.sites.len();
+        }
+        if !stroke.released {
+            self.build_drag = Some(stroke);
+        }
+    }
+
     /// Brush painting: once the brush has moved half its radius from its
     /// last stamp, stamp the old spot (first time only) and the new one.
     fn paint_brush<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
         let Some(b) = self.brush.clone() else { return };
+        if b.stop_generation != self.stop_generation && self.selection_would_order() {
+            return;
+        }
         let center = self.cursor_world();
         let radius = brush_radius(self.now.saturating_sub(b.since), &self.tuning);
         let reference = b.last_stamp.unwrap_or(b.anchor);
@@ -1793,6 +2764,36 @@ impl Mapper {
     }
 
     fn instant<W: WorldView + ?Sized>(&mut self, action: Action, cx: &mut Cx<'_, W>) {
+        // Explicit new orders/modal actions invalidate even a release waiting
+        // for the frame boundary. Cancel preserves its usual layered behavior.
+        if matches!(
+            action,
+            Action::Stop
+                | Action::PatrolMode
+                | Action::GuardMode
+                | Action::HealMode
+                | Action::CastSpellMode
+                | Action::CastSpell { .. }
+                | Action::BuildOption { .. }
+                | Action::AttackMode
+                | Action::AttackMoveMode
+                | Action::MoveMode
+                | Action::ToggleOverlay
+                | Action::ToggleCrystalBall
+                | Action::TogglePause
+                | Action::Select
+                | Action::Context { .. }
+                | Action::AttackMove
+        ) {
+            if action != Action::Select {
+                self.invalidate_selection_tap();
+            }
+            self.invalidate_build_drag();
+            self.invalidate_area_attack();
+        }
+        if action == Action::Cancel {
+            self.invalidate_selection_tap();
+        }
         match action {
             Action::Select => {
                 if self.mode != Mode::None {
@@ -1823,7 +2824,17 @@ impl Mapper {
             }
             Action::SelectAll { scope } => self.select_all(scope, cx),
             Action::AssignGroup { group } => self.client(ClientCommand::AssignGroup { group }, cx),
-            Action::RecallGroup { group } => self.client(ClientCommand::RecallGroup { group }, cx),
+            Action::RecallGroup { group } => {
+                let command = if self.queue_held() {
+                    ClientCommand::RecallGroupAdd { group }
+                } else {
+                    ClientCommand::RecallGroup { group }
+                };
+                self.client(command, cx);
+            }
+            Action::RecallGroupAdd { group } => {
+                self.client(ClientCommand::RecallGroupAdd { group }, cx);
+            }
             Action::JumpToAlert => self.client(ClientCommand::JumpToAlert, cx),
             Action::CenterOnMonarch => self.client(ClientCommand::CenterOnMonarch, cx),
             Action::CycleIdleBuilder => self.cycle_idle_builder(cx),
@@ -1835,7 +2846,37 @@ impl Mapper {
             }
             Action::ToggleOverlay => cx.out.push(Output::ToggleOverlay),
             Action::Stop => {
+                self.disarm_orders(cx.world);
                 let units = own_units(cx.world, &self.selection);
+                // Legacy Stop infers finite-product cancellation from the final
+                // queue. A later Build in the same simulation tick can therefore
+                // keep the old paid frame under a different queue head. Normalize
+                // new input through explicit cancellation, without changing old
+                // command logs or simulation admission semantics.
+                let mut production: BTreeMap<UnitDefId, UnitSet> = BTreeMap::new();
+                for &id in &self.controllable_factories(cx.world, &units) {
+                    for def in cx.world.build_options(id) {
+                        if cx.world.production_count(id, def) > 0 {
+                            production.entry(def).or_default().insert(id);
+                        }
+                    }
+                }
+                for (def, factories) in production {
+                    // Counts came from the pre-poll view. Cancel all matching
+                    // work, including earlier same-tick additions, rather than
+                    // letting pending-tail removal exhaust a stale count first.
+                    // The sim iterates only its bounded queue, not this budget.
+                    cx.out.push(Output::Sim {
+                        tick: cx.tick,
+                        command: SimCommand::CancelProduction {
+                            units: factories,
+                            def,
+                            count: u32::MAX,
+                        },
+                    });
+                }
+                // One user gesture, one feedback acknowledgement. Stop still
+                // clears repeat/rally and retains mobile/stance semantics.
                 self.sim(SimCommand::Stop { units }, cx);
             }
             Action::SetFireState { state } => {
@@ -1857,12 +2898,20 @@ impl Mapper {
             Action::CastSpellMode => self.cast_spell_mode(0, cx),
             Action::CastSpell { index } => self.cast_spell_mode(usize::from(index), cx),
             Action::BuildOption { index } => self.build_option(usize::from(index), cx),
+            Action::CancelBuildOption { index } => self.cancel_build_option(index, cx),
+            Action::RepeatBuildOption { index } => self.repeat_build_option(index, cx),
             Action::SubSelectCycle => self.sub_select_cycle(cx),
             Action::SelectMonarch { track } => {
                 let me = cx.world.local_player();
                 match cx.world.monarch().and_then(|id| cx.world.unit(id)) {
                     Some(u) if u.owner == me => {
-                        self.set_selection(UnitSet::single(u.id));
+                        let mut selection = if self.queue_held() {
+                            own_units(cx.world, &self.selection)
+                        } else {
+                            UnitSet::new()
+                        };
+                        selection.insert(u.id);
+                        self.set_selection(selection);
                         if track {
                             self.follow = true;
                         }
@@ -2072,6 +3121,14 @@ impl Mapper {
     }
 
     fn cancel<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
+        if self.build_drag.is_some() {
+            self.invalidate_build_drag();
+            return;
+        }
+        if self.area_attack.is_some() {
+            self.invalidate_area_attack();
+            return;
+        }
         if let Some((input, _)) = self.wheel.take() {
             // A sub-ring goes back to its parent (still open, sticky).
             if let Some(mut parent) = self.wheel_parents.pop() {
@@ -2109,23 +3166,51 @@ impl Mapper {
             return;
         }
         let factories = builders_for(cx.world, &units, def, Some(BuilderKind::Factory));
-        let queue = self.queue_mode(false);
+        let factories = self.controllable_factories(cx.world, &factories);
+        for _ in 0..self.production_batch_count() {
+            self.sim(
+                SimCommand::Build {
+                    units: factories.clone(),
+                    def,
+                    at: None,
+                    queue: QueueMode::Append,
+                },
+                cx,
+            );
+        }
+    }
+
+    fn repeat_build_option<W: WorldView + ?Sized>(&mut self, index: u8, cx: &mut Cx<'_, W>) {
+        let Some((def, units)) = self.factory_build_option(index, cx.world) else {
+            return;
+        };
         self.sim(
-            SimCommand::Build {
-                units: factories,
+            SimCommand::SetFactoryRepeat {
+                units,
+                def: Some(def),
+            },
+            cx,
+        );
+    }
+
+    fn cancel_build_option<W: WorldView + ?Sized>(&mut self, index: u8, cx: &mut Cx<'_, W>) {
+        let Some((def, units)) = self.factory_build_option(index, cx.world) else {
+            return;
+        };
+        self.sim(
+            SimCommand::CancelProduction {
+                units,
                 def,
-                at: None,
-                queue,
+                count: self.production_batch_count(),
             },
             cx,
         );
     }
 
     fn cycle_idle_builder<W: WorldView + ?Sized>(&mut self, cx: &mut Cx<'_, W>) {
-        let me = cx.world.local_player();
         let idle: Vec<UnitId> = units_sorted(cx.world)
             .into_iter()
-            .filter(|u| u.owner == me && u.selectable && u.builder.is_some())
+            .filter(|u| cx.world.can_build(u.id))
             .map(|u| u.id)
             .filter(|&id| cx.world.is_idle(id))
             .collect();
@@ -2141,7 +3226,103 @@ impl Mapper {
         });
     }
 
-    fn sim<W: WorldView + ?Sized>(&mut self, command: SimCommand, cx: &mut Cx<'_, W>) {
+    fn sim<W: WorldView + ?Sized>(&mut self, mut command: SimCommand, cx: &mut Cx<'_, W>) {
+        // Only Move, Patrol and Guard have factory standing-order support.
+        // Never let another contextual/targeted order fall through to legacy
+        // queue replacement and silently discard factory production.
+        let targeted_units = match &mut command {
+            SimCommand::Attack { units, .. }
+            | SimCommand::AttackMove { units, .. }
+            | SimCommand::Heal { units, .. }
+            | SimCommand::CastSpell { units, .. } => Some(units),
+            _ => None,
+        };
+        if let Some(units) = targeted_units {
+            let previous_len = units.len();
+            *units = non_factory_units(cx.world, units);
+            if units.len() < previous_len {
+                self.refuse(Refusal::CannotDo);
+            }
+        }
+        let patrol = matches!(command, SimCommand::Patrol { .. });
+        match command {
+            SimCommand::Guard {
+                units,
+                target,
+                queue,
+            } => {
+                let factories = self.guard_factories(cx.world, &units, target);
+                let mobiles = non_factory_units(cx.world, &units);
+                if factories.len() + mobiles.len() < units.len() {
+                    self.refuse(Refusal::CannotDo);
+                }
+                // Never put a legacy Guard in a factory's production queue,
+                // including when the target or factory became ineligible.
+                // Splitting one gesture into two recipient groups still
+                // produces only one acknowledgement (sound/rumble).
+                if !mobiles.is_empty() || !factories.is_empty() {
+                    self.feedback.push(Feedback::Order);
+                }
+                for command in [
+                    SimCommand::Guard {
+                        units: mobiles,
+                        target,
+                        queue,
+                    },
+                    SimCommand::SetFactoryRally {
+                        units: factories,
+                        order: Some(FactoryRallyOrder::Guard { target }),
+                        queue,
+                    },
+                ] {
+                    if !command.units().is_empty() {
+                        cx.out.push(Output::Sim {
+                            tick: cx.tick,
+                            command,
+                        });
+                    }
+                }
+            }
+            SimCommand::Move { units, to, queue } | SimCommand::Patrol { units, to, queue } => {
+                let factories = self.controllable_factories(cx.world, &units);
+                // Even an ineligible factory must not receive a normal Move:
+                // that legacy command could cancel its production queue.
+                let mobiles = non_factory_units(cx.world, &units);
+                if !mobiles.is_empty() {
+                    let command = if patrol {
+                        SimCommand::Patrol {
+                            units: mobiles,
+                            to,
+                            queue,
+                        }
+                    } else {
+                        SimCommand::Move {
+                            units: mobiles,
+                            to,
+                            queue,
+                        }
+                    };
+                    self.emit_sim(command, cx);
+                }
+                let order = if patrol {
+                    FactoryRallyOrder::Patrol { to }
+                } else {
+                    FactoryRallyOrder::Move { to }
+                };
+                self.emit_sim(
+                    SimCommand::SetFactoryRally {
+                        units: factories,
+                        order: Some(order),
+                        queue,
+                    },
+                    cx,
+                );
+            }
+            _ => self.emit_sim(command, cx),
+        }
+    }
+
+    fn emit_sim<W: WorldView + ?Sized>(&mut self, command: SimCommand, cx: &mut Cx<'_, W>) {
         if !command.units().is_empty() {
             self.feedback.push(Feedback::Order);
             cx.out.push(Output::Sim {
@@ -2154,6 +3335,8 @@ impl Mapper {
     fn set_selection(&mut self, s: UnitSet) {
         self.sub_select = None;
         if s != self.selection {
+            self.invalidate_build_drag();
+            self.invalidate_area_attack();
             self.selection = s;
             self.mode = Mode::None;
             self.selected_at = Some(self.now);
@@ -2222,6 +3405,17 @@ impl Mapper {
                 let s = own_units(world, &self.groups[usize::from(group.get())]);
                 self.set_selection(s);
             }
+            ClientCommand::RecallGroupAdd { group } => {
+                let selection = own_units(world, &self.selection);
+                let squad = own_units(world, &self.groups[usize::from(group.get())]);
+                let union = selection
+                    .iter()
+                    .chain(squad.iter())
+                    .copied()
+                    .filter(|&id| world.unit(id).is_some_and(|u| u.selectable))
+                    .collect();
+                self.set_selection(union);
+            }
             ClientCommand::ClearSelection => self.set_selection(UnitSet::new()),
             ClientCommand::JumpToAlert
             | ClientCommand::CycleIdleBuilder
@@ -2229,6 +3423,93 @@ impl Mapper {
         }
         cx.out.push(Output::Client { command });
     }
+}
+
+fn rectangle_bounds(a: WorldPos, b: WorldPos) -> (WorldPos, WorldPos) {
+    (
+        WorldPos::new(a.x.min(b.x), a.y.min(b.y)),
+        WorldPos::new(a.x.max(b.x), a.y.max(b.y)),
+    )
+}
+
+/// Visible hostile centres, not pick-radius intersections or the legacy drag
+/// circle. Both ends are inclusive. Frame revalidation intersects the release
+/// snapshot so a newly revealed/recycled target cannot join a queued gesture.
+fn area_attack_targets<W: WorldView + ?Sized>(
+    world: &W,
+    a: WorldPos,
+    b: WorldPos,
+    released: Option<&UnitSet>,
+) -> UnitSet {
+    let (min, max) = rectangle_bounds(a, b);
+    let eligible = |u: &UnitInfo| {
+        u.selectable
+            && world.is_enemy(u.owner)
+            && u.pos.x >= min.x
+            && u.pos.x <= max.x
+            && u.pos.y >= min.y
+            && u.pos.y <= max.y
+    };
+    let mut targets = BTreeSet::new();
+    world.for_each_unit(&mut |u| {
+        if eligible(u)
+            && released.is_none_or(|ids| ids.contains(u.id))
+            && !targets.contains(&u.id)
+            && (targets.len() < MAX_AREA_ATTACK_TARGETS
+                || targets.last().is_some_and(|&last| u.id < last))
+            && world
+                .unit(u.id)
+                .is_some_and(|current| current.id == u.id && eligible(&current))
+        {
+            targets.insert(u.id);
+            if targets.len() > MAX_AREA_ATTACK_TARGETS {
+                targets.pop_last();
+            }
+        }
+    });
+    targets.into_iter().collect()
+}
+
+/// Recipients of ordinary orders, excluding factories whose production queue
+/// must be kept separate. Shared by dispatch and the context cursor preview.
+fn non_factory_units<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> UnitSet {
+    units
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .unit(id)
+                .is_some_and(|u| u.builder != Some(BuilderKind::Factory))
+        })
+        .collect()
+}
+
+/// Actions that issue or arm an order, including order-bearing sub-rings.
+/// Command wheels and contextual selection need their current UI context.
+fn is_order_action(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Stop
+            | Action::Context { .. }
+            | Action::AttackMove
+            | Action::SetFireState { .. }
+            | Action::PatrolMode
+            | Action::GuardMode
+            | Action::HealMode
+            | Action::CastSpellMode
+            | Action::CastSpell { .. }
+            | Action::BuildOption { .. }
+            | Action::CancelBuildOption { .. }
+            | Action::RepeatBuildOption { .. }
+            | Action::AttackMode
+            | Action::AttackMoveMode
+            | Action::MoveMode
+            | Action::BuildWheel
+            | Action::SpellWheel
+            | Action::OpenRing {
+                ring: Ring::Stance | Ring::Unit
+            }
+    )
 }
 
 /// Hide unusable Heal slots without disturbing a fixed wheel's positions.
@@ -2284,11 +3565,12 @@ fn centre_of<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<WorldP
     (n > 0).then(|| Vec2::new(Fx::from_raw((x / n) as i32), Fx::from_raw((y / n) as i32)))
 }
 
-/// The lowest-id builder with a nonempty build menu among `units`.
+/// The lowest-id operational builder with a nonempty build menu among `units`.
 fn first_builder<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> Option<UnitId> {
-    units.iter().copied().find(|&id| {
-        world.unit(id).is_some_and(|u| u.builder.is_some()) && !world.build_options(id).is_empty()
-    })
+    units
+        .iter()
+        .copied()
+        .find(|&id| world.can_build(id) && !world.build_options(id).is_empty())
 }
 
 /// The first unit of `units` with spells, and its spells (menu order).

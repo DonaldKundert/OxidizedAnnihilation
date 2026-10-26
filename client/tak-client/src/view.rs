@@ -3,7 +3,7 @@
 //! No Bevy types.
 
 use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId};
-use tak_input::{BuilderKind, Camera, Category, UnitInfo, WorldView};
+use tak_input::{BuilderKind, Camera, Category, PlacementCandidate, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 use tak_sim::World;
 
@@ -43,6 +43,30 @@ impl SimView<'_> {
         self.fog
             .is_none_or(|g| g.at(f(pos.x), f(pos.y)) == crate::fog::FogCell::Seen)
     }
+
+    /// Shared visibility and metadata for enumeration and exact-ID lookup.
+    fn unit_info(&self, id: UnitId, u: &tak_sim::world::Unit) -> Option<UnitInfo> {
+        let d = self.world.defs().get(u.def)?;
+        if !self.sees(u.owner, u.pos) {
+            return None;
+        }
+        let builder = d.build.builder.then_some(if d.build.mobile {
+            BuilderKind::Mobile
+        } else {
+            BuilderKind::Factory
+        });
+        let r = pick_radius(d.footprintx, d.footprintz);
+        Some(UnitInfo {
+            id,
+            pos: u.pos,
+            radius: Fx::from_raw((r * 65536.0) as i32),
+            owner: u.owner,
+            def: u.def,
+            selectable: !u.combat.is_dying(),
+            builder,
+            under_construction: !u.build.is_complete(),
+        })
+    }
 }
 
 /// Pick radius for a unit: half its footprint's larger side plus a margin.
@@ -56,33 +80,21 @@ impl WorldView for SimView<'_> {
     }
 
     fn for_each_unit(&self, f: &mut dyn FnMut(&UnitInfo)) {
-        let defs = self.world.defs();
         for (id, u) in self.world.units() {
-            let Some(d) = defs.get(u.def) else { continue };
-            if !self.sees(u.owner, u.pos) {
-                continue;
+            if let Some(info) = self.unit_info(id, u) {
+                f(&info);
             }
-            let builder = d.build.builder.then_some(if d.build.mobile {
-                BuilderKind::Mobile
-            } else {
-                BuilderKind::Factory
-            });
-            let r = pick_radius(d.footprintx, d.footprintz);
-            f(&UnitInfo {
-                id,
-                pos: u.pos,
-                radius: Fx::from_raw((r * 65536.0) as i32),
-                owner: u.owner,
-                def: u.def,
-                selectable: !u.combat.is_dying(),
-                builder,
-                under_construction: !u.build.is_complete(),
-            });
         }
     }
 
+    fn unit(&self, id: UnitId) -> Option<UnitInfo> {
+        // Avoid a full-world scan per queued target while retaining the
+        // exact same generation, fog and selectability rules as enumeration.
+        self.world.unit(id).and_then(|u| self.unit_info(id, u))
+    }
+
     fn is_enemy(&self, owner: PlayerId) -> bool {
-        owner != self.local
+        self.world.are_hostile(self.local, owner)
     }
 
     fn can_heal(&self, unit: UnitId) -> bool {
@@ -98,12 +110,59 @@ impl WorldView for SimView<'_> {
             .unwrap_or_default()
     }
 
+    fn can_factory_control(&self, unit: UnitId) -> bool {
+        self.world.unit(unit).is_some_and(|u| u.owner == self.local)
+            && tak_sim::construction::can_factory_control(self.world, unit)
+    }
+
+    fn can_factory_guard_target(&self, target: UnitId) -> bool {
+        self.world.unit(target).is_some_and(|u| {
+            !u.combat.is_dying()
+                && (u.combat.max_health == 0 || u.combat.health > 0)
+                && !self.world.are_hostile(self.local, u.owner)
+        })
+    }
+
+    fn factory_repeat(&self, unit: UnitId) -> Option<UnitDefId> {
+        self.world
+            .unit(unit)
+            .filter(|u| u.owner == self.local)
+            .and_then(|_| tak_sim::construction::factory_repeat(self.world, unit))
+    }
+
+    fn production_count(&self, unit: UnitId, def: UnitDefId) -> u32 {
+        if self.world.unit(unit).is_some_and(|u| u.owner == self.local) {
+            tak_sim::construction::production_count(self.world, unit, def)
+        } else {
+            0
+        }
+    }
+
     fn can_place(&self, def: UnitDefId, pos: tak_commands::WorldPos) -> bool {
         use tak_sim::construction::placement::{check_site, site_center};
         let Some(d) = self.world.defs().get(def) else {
             return false;
         };
         check_site(self.world, def, site_center(d, pos), None).is_ok()
+    }
+
+    fn placement_candidate(
+        &self,
+        def: UnitDefId,
+        pos: tak_commands::WorldPos,
+    ) -> Option<PlacementCandidate> {
+        use tak_sim::construction::placement::{Rect, SQUARE, check_site, site_center};
+        let d = self.world.defs().get(def)?;
+        let center = site_center(d, pos);
+        check_site(self.world, def, center, None).ok()?;
+        let r = Rect::around(center, d.footprintx, d.footprintz);
+        // Reserve the whole footprint for drag spacing, including open yard
+        // cells. The half-open bounds let adjacent footprints touch.
+        Some(PlacementCandidate {
+            center,
+            min: Vec2::from_ints(r.x * SQUARE, r.z * SQUARE),
+            max: Vec2::from_ints((r.x + r.w) * SQUARE, (r.z + r.h) * SQUARE),
+        })
     }
 
     fn spells(&self, unit: UnitId) -> Vec<SpellId> {
@@ -120,7 +179,13 @@ impl WorldView for SimView<'_> {
     }
 
     fn is_idle(&self, unit: UnitId) -> bool {
-        self.world.unit(unit).is_some_and(|u| u.orders.is_empty())
+        self.world.unit(unit).is_some_and(|u| {
+            u.build.is_complete()
+                && !u.combat.is_dying()
+                && u.orders.is_empty()
+                && u.build.factory_repeat.is_none()
+                && u.build.factory.product.is_none()
+        })
     }
 
     fn monarch(&self) -> Option<UnitId> {
@@ -521,6 +586,332 @@ pub fn f(v: Fx) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn placement_view(world: &World) -> SimView<'_> {
+        SimView {
+            world,
+            local: PlayerId(0),
+            defs: None,
+            fog: None,
+        }
+    }
+
+    fn world_hash(world: &World) -> u64 {
+        let mut hash = tak_sim::hash::StateHasher::new();
+        world.hash_into(&mut hash);
+        hash.finish()
+    }
+
+    #[test]
+    fn placement_candidate_snaps_even_and_odd_whole_footprints() {
+        for (footprint, request, center, min, max) in [
+            ((2, 4), (103, 103), (96, 96), (80, 64), (112, 128)),
+            ((2, 4), (104, 104), (112, 112), (96, 80), (128, 144)),
+            ((3, 1), (111, 111), (104, 104), (80, 96), (128, 112)),
+            ((3, 1), (112, 112), (120, 120), (96, 112), (144, 128)),
+        ] {
+            let mut scenario = tak_sim::testing::example_scenario(1, 1);
+            scenario.unit_defs[0].footprintx = footprint.0;
+            scenario.unit_defs[0].footprintz = footprint.1;
+            // Sparse yard maps still reserve the entire rectangular footprint.
+            scenario.unit_defs[0].build.yardmap = "o".to_owned()
+                + &".".repeat(usize::from(footprint.0) * usize::from(footprint.1) - 1);
+            let world = World::new(&scenario).unwrap();
+            let before = world_hash(&world);
+            let view = placement_view(&world);
+            let pos = Vec2::new(
+                Fx::from_raw((request.0 << 16) + 65_535),
+                Fx::from_raw((request.1 << 16) + 32_768),
+            );
+            let candidate = view.placement_candidate(UnitDefId(0), pos).unwrap();
+            assert_eq!(candidate.center, Vec2::from_ints(center.0, center.1));
+            assert_eq!(candidate.min, Vec2::from_ints(min.0, min.1));
+            assert_eq!(candidate.max, Vec2::from_ints(max.0, max.1));
+            assert_eq!(
+                candidate.max.x - candidate.min.x,
+                Fx::from_int(i32::from(footprint.0) * 16)
+            );
+            assert_eq!(
+                candidate.max.y - candidate.min.y,
+                Fx::from_int(i32::from(footprint.1) * 16)
+            );
+            assert!(view.can_place(UnitDefId(0), pos));
+            assert_eq!(world_hash(&world), before);
+        }
+    }
+
+    #[test]
+    fn placement_candidate_rejects_unknown_defs_negative_and_map_edge_sites() {
+        let scenario = tak_sim::testing::example_scenario(1, 1);
+        let world = World::new(&scenario).unwrap();
+        let before = world_hash(&world);
+        let view = placement_view(&world);
+        assert!(
+            view.placement_candidate(UnitDefId(u32::MAX), Vec2::from_ints(96, 96))
+                .is_none()
+        );
+        for (x, y) in [
+            (-16, 96),
+            (96, -16),
+            (16, 96),
+            (96, 16),
+            (2032, 96),
+            (96, 2032),
+        ] {
+            let pos = Vec2::from_ints(x, y);
+            assert!(
+                view.placement_candidate(UnitDefId(0), pos).is_none(),
+                "{pos:?}"
+            );
+            assert!(!view.can_place(UnitDefId(0), pos));
+        }
+        for (x, y) in [(32, 32), (2016, 2016)] {
+            assert!(
+                view.placement_candidate(UnitDefId(0), Vec2::from_ints(x, y))
+                    .is_some()
+            );
+        }
+        assert_eq!(world_hash(&world), before);
+    }
+
+    #[test]
+    fn placement_candidate_checks_every_occupied_terrain_cell() {
+        use tak_sim::map::{TerrainGrid, terrain};
+        for blocked in [terrain::DEEP, terrain::STEEP, terrain::FEATURE] {
+            let mut scenario = tak_sim::testing::example_scenario(1, 1);
+            let mut flags = vec![0; 128 * 128];
+            // At (96, 96), a 2x2 footprint covers cells [5, 7) on each axis.
+            flags[6 * 128 + 6] = blocked;
+            scenario.map.terrain = Some(TerrainGrid {
+                cols: 128,
+                rows: 128,
+                cell_size: 16,
+                flags,
+            });
+            let world = World::new(&scenario).unwrap();
+            let before = world_hash(&world);
+            let view = placement_view(&world);
+            assert!(
+                view.placement_candidate(UnitDefId(0), Vec2::from_ints(96, 96))
+                    .is_none()
+            );
+            assert!(
+                view.placement_candidate(UnitDefId(0), Vec2::from_ints(128, 96))
+                    .is_some(),
+                "a footprint adjacent to the blocked one is still legal"
+            );
+            assert_eq!(world_hash(&world), before);
+        }
+    }
+
+    #[test]
+    fn placement_candidate_obeys_structure_and_frame_occupancy_without_mutation() {
+        for (stationary, frame) in [(true, false), (false, true), (false, false)] {
+            let mut scenario = tak_sim::testing::example_scenario(1, 1);
+            if stationary {
+                scenario.unit_defs[0].maxvelocity = Fx::ZERO;
+            }
+            let mut world = World::new(&scenario).unwrap();
+            let pos = Vec2::from_ints(96, 96);
+            let unit = world
+                .spawn(UnitDefId(0), PlayerId(0), pos, tak_math::Angle::ZERO)
+                .unwrap();
+            if frame {
+                world.unit_mut(unit).unwrap().build.frame =
+                    Some(tak_sim::construction::Frame::new(10));
+            }
+            let before = world_hash(&world);
+            let view = placement_view(&world);
+            assert_eq!(
+                view.placement_candidate(UnitDefId(0), pos).is_some(),
+                !stationary && !frame,
+                "completed mobile units do not block placement; structures and owned frames do"
+            );
+            assert!(
+                view.placement_candidate(UnitDefId(0), Vec2::from_ints(128, 96))
+                    .is_some(),
+                "touching the occupied footprint's exclusive edge is legal"
+            );
+            assert_eq!(world_hash(&world), before);
+            assert_eq!(world.unit_count(), 1);
+        }
+    }
+
+    #[test]
+    fn factory_guard_view_uses_teams_and_rejects_dead_or_stale_targets() {
+        let mut scenario = tak_sim::testing::example_scenario(1, 3);
+        scenario.victory.teams = vec![Some(0), Some(0), Some(1)];
+        let mut world = World::new(&scenario).unwrap();
+        let target = world
+            .spawn(
+                UnitDefId(0),
+                PlayerId(1),
+                Vec2::from_ints(300, 300),
+                tak_math::Angle::ZERO,
+            )
+            .unwrap();
+        let allowed = |world: &World, target| {
+            let view = SimView {
+                world,
+                local: PlayerId(0),
+                defs: None,
+                fog: None,
+            };
+            assert!(!view.is_enemy(PlayerId(1)));
+            assert!(view.is_enemy(PlayerId(2)));
+            view.can_factory_guard_target(target)
+        };
+        assert!(allowed(&world, target));
+        world.unit_mut(target).unwrap().owner = PlayerId(2);
+        assert!(!allowed(&world, target));
+        world.unit_mut(target).unwrap().owner = PlayerId(1);
+        world.unit_mut(target).unwrap().combat.max_health = 100;
+        world.unit_mut(target).unwrap().combat.health = 0;
+        assert!(!allowed(&world, target));
+        world.unit_mut(target).unwrap().combat.health = 100;
+        assert!(allowed(&world, target));
+        world.despawn(target).unwrap();
+        let replacement = world
+            .spawn(
+                UnitDefId(0),
+                PlayerId(1),
+                Vec2::from_ints(300, 300),
+                tak_math::Angle::ZERO,
+            )
+            .unwrap();
+        assert_eq!(replacement.index, target.index);
+        assert_ne!(replacement, target);
+        assert!(!allowed(&world, target));
+        assert!(allowed(&world, replacement));
+    }
+
+    #[test]
+    fn factory_context_cursor_matches_sim_view_on_terrain_and_minimap() {
+        use tak_commands::{Tick, UnitSet};
+        use tak_input::{Action, CursorKind, EventKind, InputEvent, Key, Mapper, Output, Profile};
+
+        let mut scenario = tak_sim::testing::example_scenario(1, 2);
+        scenario.unit_defs[0].build = tak_sim::construction::BuildDef {
+            builder: true,
+            mobile: false,
+            canbuild: vec![UnitDefId(1)],
+            workertime: 10,
+            ..Default::default()
+        };
+        let mut world = World::new(&scenario).unwrap();
+        let mut spawn = |def, owner, x| {
+            world
+                .spawn(
+                    UnitDefId(def),
+                    PlayerId(owner),
+                    Vec2::from_ints(x, 100),
+                    tak_math::Angle::ZERO,
+                )
+                .unwrap()
+        };
+        let factory = spawn(0, 0, 100);
+        let mobile = spawn(1, 0, 200);
+        let friendly = spawn(1, 0, 300);
+        let enemy = spawn(1, 1, 400);
+        let view = SimView {
+            world: &world,
+            local: PlayerId(0),
+            defs: None,
+            fog: None,
+        };
+        assert!(view.can_factory_control(factory));
+        assert_eq!(
+            view.unit(factory).unwrap().builder,
+            Some(BuilderKind::Factory)
+        );
+        assert_eq!(view.unit(mobile).unwrap().builder, None);
+        let event = |m: &mut Mapper, kind| {
+            m.handle(&InputEvent::new(m.now() + 1, kind), &view, Tick(1));
+        };
+
+        for minimap in [false, true] {
+            for selected in [&[factory][..], &[mobile][..], &[factory, mobile][..]] {
+                let mut m = Mapper::new(Profile::default_combined());
+                event(
+                    &mut m,
+                    EventKind::KeyDown {
+                        key: Key::new("shift"),
+                    },
+                );
+                for &id in selected {
+                    event(
+                        &mut m,
+                        EventKind::PointerMove {
+                            x: view.unit(id).unwrap().pos.x.raw() / 65536,
+                            y: 100,
+                        },
+                    );
+                    m.perform(Action::Select, &view, Tick(1));
+                }
+                event(
+                    &mut m,
+                    EventKind::KeyUp {
+                        key: Key::new("shift"),
+                    },
+                );
+                assert_eq!(m.selection(), &UnitSet::from(selected.to_vec()));
+                for (target, expected) in
+                    [(friendly, CursorKind::Guard), (enemy, CursorKind::Attack)]
+                {
+                    let to = view.unit(target).unwrap().pos;
+                    event(
+                        &mut m,
+                        if minimap {
+                            EventKind::MapPointer {
+                                x: 1200,
+                                y: 50,
+                                world: to,
+                            }
+                        } else {
+                            EventKind::PointerMove {
+                                x: to.x.raw() / 65536,
+                                y: 100,
+                            }
+                        },
+                    );
+                    let has_mobile = selected.contains(&mobile);
+                    let has_factory = selected.contains(&factory);
+                    assert_eq!(
+                        m.cursor_kind(&view),
+                        if has_mobile || target == friendly {
+                            expected
+                        } else {
+                            CursorKind::Invalid
+                        }
+                    );
+                    let commands: Vec<_> = m
+                        .perform(Action::Context { append: false }, &view, Tick(1))
+                        .into_iter()
+                        .filter_map(|out| match out {
+                            Output::Sim { command, .. } => Some(command),
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(
+                        commands.len(),
+                        usize::from(has_mobile) + usize::from(has_factory && target == friendly)
+                    );
+                    for command in commands {
+                        if matches!(command, tak_commands::SimCommand::SetFactoryRally { .. }) {
+                            assert_eq!(command.units(), &UnitSet::single(factory));
+                            assert!(matches!(command,
+                                tak_commands::SimCommand::SetFactoryRally {
+                                    order: Some(tak_commands::FactoryRallyOrder::Guard { target }), ..
+                                } if target == friendly
+                            ));
+                        } else {
+                            assert_eq!(command.units(), &UnitSet::single(mobile));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn spell_menu_keeps_weapon_slots_and_the_actual_casters_mana() {

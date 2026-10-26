@@ -199,6 +199,7 @@ fn opening_drops_queue_brush_wheel_and_minimap_gestures_without_losing_selection
                 ("test-wheel", Action::CommandWheel),
             ] {
                 profile.bindings.push(tak_input::Binding {
+                    with_all: Vec::new(),
                     input: tak_input::Input::Key(tak_input::Key(name.into())),
                     with: None,
                     gesture: tak_input::Gesture::Press,

@@ -14,10 +14,7 @@ fn k(name: &str) -> Input {
 }
 
 fn find(p: &Profile, key: &str, with: Option<&str>) -> Option<Action> {
-    p.bindings
-        .iter()
-        .find(|b| b.input == k(key) && b.with == with.map(k))
-        .map(|b| b.action)
+    p.find(&k(key), with.map(k).as_ref(), tak_input::Gesture::Press)
 }
 
 const SYNTHETIC: &str = r#"
@@ -121,7 +118,7 @@ fn synthetic_keys_tdf_maps_reserves_and_reports() {
             .unwrap()
     };
     assert_eq!(status("LOWER_D"), LineStatus::Unsupported);
-    assert_eq!(status("CTRLSHIFT_K"), LineStatus::Skipped);
+    assert_eq!(status("CTRLSHIFT_K"), LineStatus::Mapped);
     assert_eq!(status("SYMBOL_23"), LineStatus::Skipped);
     assert_eq!(status("XCHAR_E9"), LineStatus::Skipped);
     assert_eq!(status("WIBBLE"), LineStatus::Skipped);

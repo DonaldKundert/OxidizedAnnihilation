@@ -69,6 +69,7 @@ fn selected(w: &impl WorldView, actor: UnitId) -> Mapper {
     profile.command_wheel = vec![Action::HealMode, Action::Stop];
     for (key, action) in [("f6", Action::BuildWheel), ("f7", Action::CommandWheel)] {
         profile.bindings.push(Binding {
+            with_all: Vec::new(),
             input: Input::Key(Key::new(key)),
             with: None,
             gesture: Gesture::Press,

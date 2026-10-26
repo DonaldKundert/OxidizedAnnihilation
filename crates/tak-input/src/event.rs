@@ -17,7 +17,11 @@
 //!   `"shift"`, `"ctrl"`, `"alt"`, `"escape"`, `"space"`, `"home"`,
 //!   `"period"`, ... (left/right variants folded into one name).
 //! - Send a [`EventKind::Frame`] once per rendered frame; magnetism and
-//!   brush painting update on frames.
+//!   brush painting update on frames. Queued mouse construction samples and
+//!   released mouse Attack rectangles commit on this final frame boundary,
+//!   after all button/modifier edges from that device poll. This lets same-poll
+//!   cancellation discard an Attack rectangle, and Shift release discard
+//!   unsubmitted construction sites. Surface updates must precede button edges.
 
 use serde::{Deserialize, Serialize};
 
@@ -134,6 +138,17 @@ pub enum EventKind {
         /// Pixels from the top edge.
         y: i32,
     },
+    /// The mouse is no longer over playable terrain (HUD, missing ray hit,
+    /// window exit or focus loss). Cancels an armed construction/Attack stroke and
+    /// consumes its old release without moving the cursor. A later terrain
+    /// `PointerMove` allows a fresh gesture, never resumes the old stroke.
+    PointerLeaveTerrain,
+    /// An adapter consumed a selection-confirming input outside world
+    /// selection (for example, a HUD control or map-pan action). End only
+    /// point-selection second-tap history, including an in-flight press's
+    /// provenance; do not cancel selection, orders, wheels or modifiers.
+    /// Record this event so raw input replay preserves the interruption.
+    SelectionTapInterrupted,
     /// Pointer over a map surface. Screen coordinates still describe the
     /// gesture, but orders use the exact world point, even off-camera.
     /// Unlike a terrain pointer, this does not trigger edge panning.

@@ -94,6 +94,9 @@ fn construction_is_deterministic_across_runs_and_processes() {
     let sc = scenario();
     let log = log();
     let a = run(&sc, &log);
+    // Captured from main dae5865 before additive factory controls. Old command
+    // logs must keep their exact hashes, not merely agree across new runs.
+    assert_eq!(digest(&a), "bcc6937b19080a4f 72a633fd2b4257fc 2400");
     if std::env::var_os(CHILD_ENV).is_some() {
         println!("DIGEST {}", digest(&a));
         return;

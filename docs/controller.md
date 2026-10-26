@@ -118,7 +118,7 @@ Patrol           Move          centre: portrait, name, cost and
        Unit >                  shortfall in red when short
 Stance >: Offensive / Defensive / Passive
 Unit >:   Squads > (5-9), Heal, Load, Unload, Cloak, Activate
-          (all reserved until the sim has them)
+          (Load, Unload, Cloak and Activate remain reserved)
 ```
 
 - Slots never move (`Profile::fixed_slots`): a slot the selection cannot
@@ -131,10 +131,59 @@ Unit >:   Squads > (5-9), Heal, Load, Unload, Cloak, Activate
   sub-ring stays open after LT is released: the stick chooses, A / X
   confirms, B goes back one ring, LT closes. The title says where you are
   ("Orders > Stance").
-- Build options and spells come from the selection's first builder and
-  caster (lowest unit id). A spell the caster cannot pay for is greyed and
+- Build options come from the selection's first eligible completed builder;
+  spells use the first caster (lowest unit id). A spell the caster cannot pay for is greyed and
   refused with "Not enough mana"; a build short of mana is allowed (TA:K
   drains mana while building) but greyed with the shortfall.
+
+Construction frames remain selectable for inspection and assistance, but cannot
+queue their own construction work. Their card says "Under construction"; build
+menus and idle-builder cycling become available when construction completes.
+
+### Factory production and standing orders
+
+- Factory build options add one unit, or five with Shift / the queue modifier.
+  Ordinary mobile-builder options still enter placement mode.
+- In the build wheel, A/Cross adds; X/Square removes the highlighted factory
+  product. Hold RB/R1 **before opening** for a batch of five. Pressing RB/R1
+  inside a paged wheel still changes page. Removing closes the wheel so a
+  later LB release cannot accidentally add the removed unit again.
+- With mouse HUD controls, left-click adds one and right-click removes one;
+  Shift changes either to five. Both press and release are captured by the HUD,
+  even if the pointer leaves it. Blank HUD space does not issue terrain orders.
+- Ctrl+left-click enables continuous production for that portrait; Ctrl+Shift
+  also enables repeat, rather than adding five. Y/Triangle does the same for a
+  highlighted factory option in the build wheel. The wheel closes and consumes
+  the gesture, so holding Y or releasing LB does not cast or add another unit.
+  `RepeatBuildOption` is also available for explicit keyboard rebinding.
+- `+++` marks a repeating recipe; details report how many selected eligible
+  factories repeat it. Ordinary queued units run first, after any active frame.
+  Right-click/X stops the matching recipe and applies the normal decrement;
+  changing the recipe keeps paid work already in progress. Stop clears it all.
+- Counts include active and waiting products, aggregated across selected
+  eligible factories. Decrement removes matching waiting entries newest-first,
+  then the active product. These count/removal details are Chosen.
+- Factory Move, Patrol and friendly-target Guard set standing orders for new products without clearing
+  paid production. The queue modifier appends route points. Selected factories
+  show their standing route separately. Stop explicitly cancels production and
+  clears standing orders. Stop also disarms unfinished targeting and
+  order-bearing wheels, so an old held gesture cannot restart production or
+  enter placement mode. A fresh build gesture remains available. Unsupported factory Attack/AttackMove targets are
+  refused rather than silently destroying production; mixed mobile selections still act.
+- Right-click/X over a live friendly unit gives selected factories a Guard
+  standing order; G or the Guard wheel slot gives the explicit equivalent.
+  Mixed mobile units receive ordinary Guard. Original-style left-click still
+  selects friendly units. Future products escort the target after leaving the
+  yard; existing products are not retasked. A lost/hostile target is marked
+  unavailable and is skipped for future products.
+- RB/R1 plus D-pad squad recall adds that squad to selection. The existing
+  long-hold assignment and squad-wheel assignment gesture remain unchanged.
+  Ctrl+Shift+number performs the same additive recall on keyboard.
+
+The keyboard/mouse queue and standing-order interactions are documented in
+the owned Kingdoms manual, printed pp. 58–59 and 72–74; additive squad recall
+is in its shipped `Keys.TDF`. Controller mappings are an engine adaptation,
+not a claim that the original game supported a gamepad.
 
 ### Glyphs
 
@@ -159,13 +208,16 @@ existing right-context mouse scheme retained for compatibility.
 | Right click | Context order (Shift queues) |
 | A, M, G, P then left click | Attack (unit or ground), Move (even over a unit), Guard, Patrol |
 | S | Stop |
-| C, H, K, L, U, O | Clear, Heal, Cloak, Load, Unload, Open: **reserved** (sim lacks them) |
+| H then left click | Heal / repair with an eligible healer or builder |
+| Alt+A then left click / hold controller X | Attack-move with eligible mobile units |
+| C, K, L, U, O | Clear, Cloak, Load, Unload, Open: **reserved** (sim lacks them) |
 | Ctrl+A / Ctrl+U | All units / all on screen |
 | Ctrl+B / E / F / G / N / R / T / W / Y | Builders / melee / factories / magic / naval / ballistic / troops / armed / fliers (Ctrl+Shift adds) |
 | Ctrl+Z | All of the selected types on the map |
 | Ctrl+M | Select and track the monarch |
 | Ctrl+D | Dismiss: **reserved** |
 | Ctrl+0-9 / 0-9 | Create / retrieve squad (0 is squad 10) |
+| Ctrl+Shift+0-9 | Add squad to selection without replacing the stored squad |
 | Alt+0-9 | Formation: **reserved** |
 | Ctrl+F5-F8 / F5-F8 | Set / go to bookmark |
 | N / T / F3 | Next unit off screen / track the selection / last alert |
@@ -206,6 +258,32 @@ keep this an explicit named option, retain right-click orders and the
 existing circular drag region, and reuse the current guard / queue / order
 mode rules. This is not a claim of complete one-to-one mouse fidelity.
 
+### Queued mobile placement by mouse
+
+After choosing a mobile builder's build option, hold the queue modifier (Shift
+by default) before pressing the primary mouse button and drag across terrain to queue spatial placements. This
+is not the factory batch-of-five control. Selection and existing construction
+remain intact; the new orders append. Release the mouse to end the stroke.
+Ordinary Shift-click placement and controller queued taps keep their existing
+behavior. Controller hold buttons are not repurposed as painting gestures.
+
+**Known (manual)**: the owned manual's printed p. 59 describes Shift-drag queued
+placement, including walls and Zhon forces. **Chosen**: sample actual pointer
+positions rather than interpolate a continuous line, snap using the existing
+construction footprint, and reserve each whole footprint once per stroke.
+Touching footprints are allowed; overlapping or currently invalid candidates
+are skipped. A gesture accepts at most 64 sampled sites, each dispatched as one
+ordinary command to the eligible builder set. Fast movement can leave gaps. Normal simulation execution still
+validates placement and pays construction costs; a preview is not a resource
+reservation or a guarantee that the future site remains free.
+
+Cancel, Stop, queue-modifier release, mode/selection changes, loss of eligible
+builders, modal menus, lost focus/cursor, and entry into HUD/minimap end the
+stroke. Returning while still holding does not resume it, and an old release
+must not become a selection or replacement build. Start a fresh gesture instead.
+The manual's later Shift-after-mouse-down variation is not implemented here;
+neither are interpolated wall drawing, controller painting or queue editing.
+
 ### Keyboard add-ons and imports
 
 - **No build hotkeys by default**, as in TA:K. `--grid-keys` (or
@@ -215,25 +293,21 @@ mode rules. This is not a claim of complete one-to-one mouse fidelity.
 - **`Keys.TDF` import** (`tak_input::parse_keys_tdf`, `Profile::with_keys_tdf`):
   at start the client reads `$TAK_DATA_DIR/Keys.TDF` (or `--keys-tdf FILE`;
   `--no-keys-tdf` skips it; a saved `--input-profile` wins) and replaces
-  every key the file binds or unbinds. On the retail file (344 lines):
-  **68 mapped**, **23 reserved** (Clear, Heal, Cloak, Load, Unload, Open,
-  formations, self-destruct: bound but inert), 54 explicitly empty, 16
-  unsupported (diplomacy, briefing, scorecard, save/load, chat, the debug
-  and clipboard keys: no such screens yet; the profile keeps its own
-  binding there, e.g. F11), 173 skipped (Ctrl+Shift and Alt+Shift lines:
-  our chords take one modifier and TA's Ctrl+Shift lines are the additive
-  versions of the Ctrl lines, which Shift already does; the `XCHAR_` keys
-  of other layouts; symbols listed "for French / German keyboards").
-  **Known**: importing the retail file reproduces Classic TA:K exactly
-  (`tests/keys_tdf.rs`, data-gated; counts only).
+  supported key the file binds or unbinds. The startup report separates mapped,
+  reserved, explicitly empty, unsupported and skipped entries; counts depend on
+  the supplied file and supported engine actions. Ctrl+Shift and Alt+Shift
+  additive squad/category chords are imported explicitly, with more-specific
+  chords taking precedence. Unsupported screens and actions are not evidence of
+  full original-game parity. Synthetic importer tests cover chord semantics;
+  owned-data tests validate the supported subset without publishing retail text.
 
 ## Reserved actions (design system section 9)
 
 The interface offers only what the sim does. These keep their key, wheel
 slot or panel well but do nothing and are hidden (empty well, faint wheel
 frame, no prompt); pressing their key says "Not available yet" in the
-bottom bar: Clear, Heal / repair, Load / Unload / Pickup / Drop, Cloak,
-Open / Activate, attack-move, formations, dismiss, persistent weapon
+bottom bar: Clear, Load / Unload / Pickup / Drop, Cloak,
+Open / Activate, formations, dismiss, persistent weapon
 select, veterancy and kill count (not on the unit card). Adding one to the
 sim is a change of `Action::Reserved { .. }` to the real action; no layout
 moves.
@@ -590,3 +664,70 @@ glides settle).
 - `client/tak-client/tests/recording.rs` (data-gated): scripted Kingdoms
   Console session → recording → identical headless replay; `replay.rs`
   unchanged.
+
+## Explicit Attack box by mouse
+
+**Known (manual):** the owned English manual, printed page 73, describes
+activating Attack and dragging a box over enemies to queue attacks. This is
+separate from factory standing orders and does not add factory Attack support.
+
+With combat units selected, activate Attack (normally A), then drag the primary
+mouse button over visible enemies. A red terrain rectangle shows the targeting
+area; the selected army is retained. The first target replaces existing orders,
+then the rest append. Holding the configured queue modifier (normally Shift) on
+release appends all targets instead. A short click retains existing single-target
+or ground-attack behavior, including minimap targeting. Ordinary selection drags
+and controller brush/context bindings are unchanged.
+
+**Chosen deterministic details:** the inclusive world-space rectangle collects
+at most 64 selectable hostile handles in full generational-ID order, not distance
+or threat order. It samples on release and revalidates visibility, hostility,
+liveness and rectangle membership at the final input Frame; newly entering
+units are not added afterward. Once ordinary Attack commands are issued, existing
+simulation targeting/queue progression applies, including following a surviving
+target outside the original rectangle. The manual does not establish this exact
+ordering, cap, or event-poll policy.
+
+An empty or no-longer-eligible area leaves selection and Attack mode intact.
+Successful unshifted targeting leaves Attack mode; queued targeting retains it.
+Cancel, mode/selection changes, focus/cursor loss, terrain loss, HUD crossing,
+minimap crossing and cursor-source changes discard an interrupted world stroke.
+A minimap-origin drag is not an Attack box. These are mouse gestures only; no new
+controller chord is introduced, and this is not physical-controller acceptance.
+
+## Same-target selection refinement
+
+**Chosen controller/default-mouse UX:** immediate same-type second taps refine
+an actual successful point selection of the same live, owned unit. Thus A then A
+on one unit still selects its type, while quickly selecting a different unit
+selects that unit rather than widening the previous type. Ordinary held-brush
+selection is not a point-selection tap.
+
+Confirming a wheel, issuing an order, clicking empty ground, cancelling, changing
+cursor source, or an adapter-consumed HUD/map click does not arm this refinement.
+Valid map-origin unit selection remains eligible. Target identity includes its
+arena generation, and current ownership, selectability and pointer validity are
+checked again. This does not redefine the legacy deliberately delayed DoubleTap
+shortcut, RB global selection or squad double-tap centering.
+
+Adapters record consumed selection gestures as `SelectionTapInterrupted`, which
+clears only point-selection refinement provenance. It does not issue Cancel,
+change selection/mode, release modifiers, close wheels or alter generic double-
+tap history. Raw-input playback can therefore reproduce the interruption;
+authoritative simulation command/checkpoint formats are unchanged.
+
+## Stop and unfinished input
+
+**Chosen defensive UI behavior:** S, held B, and wheel Stop cancel unfinished
+order targeting and order-bearing wheels as well as issuing the existing Stop
+command. Releasing an old opener or target button afterward cannot cast, build,
+retask units or arm another order. A genuine fresh input remains available.
+
+Stop retains the selected army, physical queue/precision modifiers and ordinary
+selection-only gestures/wheels. A preserved selection gesture stays selection-
+only: if its original friendly short-click target disappears, becomes hostile,
+or the pointer slips off it, the old release is inert. It cannot borrow a new
+mode or order wheel opened after Stop. Existing spatial selection drags and
+valid friendly selection still work. These ownership rules are not claimed as
+experimentally verified original-game details; simulation Stop, paid production
+cancellation and authoritative command/checkpoint formats are unchanged.

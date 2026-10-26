@@ -11,9 +11,9 @@
 //!
 //! What is supported is mapped to [`Action`]s; orders the sim lacks map to
 //! [`Action::Reserved`] (bound, inert, hidden); the rest is reported. Our
-//! chords take one modifier, so `CTRLSHIFT_` and `ALTSHIFT_` lines are
-//! reported as skipped: TA's Ctrl+Shift lines are the additive versions of
-//! the Ctrl lines, which our select actions already do with Shift held.
+//! chords support multiple modifiers, including additive squad recall on
+//! `CTRLSHIFT_`. Redundant Shift variants of the same action are omitted
+//! because the queue modifier already makes those selections additive.
 
 use tak_commands::{ControlGroup, FireState, Scope};
 
@@ -31,7 +31,7 @@ pub enum LineStatus {
     Unbound,
     /// The command has no counterpart here (menus, chat, debug, clipboard).
     Unsupported,
-    /// The key cannot be expressed (two modifiers, or a layout alias).
+    /// The key cannot be expressed (an unknown key or a layout alias).
     Skipped,
 }
 
@@ -55,7 +55,10 @@ pub struct KeysImport {
     /// trigger).
     pub bindings: Vec<Binding>,
     /// Triggers the file explicitly unbinds.
-    pub unbound: Vec<(Input, Option<Input>)>,
+    pub unbound: Vec<(Input, Vec<Input>)>,
+    /// Mapped Shift triggers compacted because their lower-specificity
+    /// binding has the same action. They still replace defaults on import.
+    pub redundant_triggers: Vec<(Input, Vec<Input>)>,
     /// Every line, in file order.
     pub lines: Vec<KeyLine>,
 }
@@ -95,25 +98,24 @@ fn key(name: &str) -> Input {
 }
 
 /// The key and modifier for a TDF key name, or why not.
-fn trigger(name: &str) -> Result<(Input, Option<Input>), &'static str> {
+fn trigger(name: &str) -> Result<(Input, Vec<Input>), &'static str> {
     let up = name.trim().to_ascii_uppercase();
-    for two in ["CTRLSHIFT_", "ALTSHIFT_"] {
-        if up.starts_with(two) {
-            return Err("two modifiers (Shift with the Ctrl or Alt binding adds to the selection)");
-        }
-    }
-    let (with, rest) = if let Some(r) = up.strip_prefix("LOWER_") {
-        (None, r)
+    let (mut modifiers, rest) = if let Some(r) = up.strip_prefix("CTRLSHIFT_") {
+        (vec![key("ctrl"), key("shift")], r)
+    } else if let Some(r) = up.strip_prefix("ALTSHIFT_") {
+        (vec![key("alt"), key("shift")], r)
+    } else if let Some(r) = up.strip_prefix("LOWER_") {
+        (Vec::new(), r)
     } else if let Some(r) = up.strip_prefix("UPPER_") {
-        (Some(key("shift")), r)
+        (vec![key("shift")], r)
     } else if let Some(r) = up.strip_prefix("CTRL_") {
-        (Some(key("ctrl")), r)
+        (vec![key("ctrl")], r)
     } else if let Some(r) = up.strip_prefix("ALT_") {
-        (Some(key("alt")), r)
+        (vec![key("alt")], r)
     } else if let Some(r) = up.strip_prefix("SHIFT_") {
-        (Some(key("shift")), r)
+        (vec![key("shift")], r)
     } else {
-        (None, up.as_str())
+        (Vec::new(), up.as_str())
     };
     let base = match rest {
         r if r.len() == 1 && r.chars().all(|c| c.is_ascii_alphanumeric()) => r.to_ascii_lowercase(),
@@ -129,17 +131,19 @@ fn trigger(name: &str) -> Result<(Input, Option<Input>), &'static str> {
         r if r.starts_with("SYMBOL_") => {
             let (k, shifted) = symbol(&r[7..]).ok_or("a symbol another keyboard layout types")?;
             if shifted {
-                if with.is_some() {
-                    return Err("two modifiers");
+                if !modifiers.contains(&key("shift")) {
+                    modifiers.push(key("shift"));
                 }
-                return Ok((key(k), Some(key("shift"))));
+                modifiers.sort();
+                return Ok((key(k), modifiers));
             }
             k.into()
         }
         r if r.starts_with("XCHAR_") => return Err("a key of a non-English layout"),
         _ => return Err("unknown key name"),
     };
-    Ok((key(&base), with))
+    modifiers.sort();
+    Ok((key(&base), modifiers))
 }
 
 /// US-layout key for an ASCII symbol (hex), and whether Shift types it.
@@ -242,7 +246,10 @@ fn command(value: &str) -> Cmd {
             Some(group) => Cmd::Do(Action::AssignGroup { group }),
             None => Cmd::Unsupported("bad squad number"),
         },
-        "retrievesquadadd" => Cmd::Unsupported("add a squad to the selection"),
+        "retrievesquadadd" => match group(arg) {
+            Some(group) => Cmd::Do(Action::RecallGroupAdd { group }),
+            None => Cmd::Unsupported("bad squad number"),
+        },
         "movetonextunit" => Cmd::Do(Action::NextUnit),
         "trackunit" | "trackunitreverse" => Cmd::Do(Action::FollowSelection),
         "movetolastreport" => Cmd::Do(Action::JumpToAlert),
@@ -283,9 +290,6 @@ pub fn parse_keys_tdf(data: &[u8]) -> Result<KeysImport, KeysError> {
         .find(|s| s.name.eq_ignore_ascii_case("customkeys"))
         .ok_or(KeysError::NoSection)?;
     let mut out = KeysImport::default();
-    // Plain bindings first, so a Shift line identical to its plain one adds
-    // nothing (Shift then just queues, as the plain line would).
-    let mut plain: Vec<((Input, Option<Input>), Action)> = Vec::new();
     for e in &sec.entries {
         let value = e.value.trim().trim_end_matches(';').trim();
         let mut line = KeyLine {
@@ -324,14 +328,16 @@ pub fn parse_keys_tdf(data: &[u8]) -> Result<KeysImport, KeysError> {
                 let taken = out
                     .bindings
                     .iter()
-                    .any(|b| b.input == trig.0 && b.with == trig.1);
-                if trig.1.is_none() {
-                    plain.push((trig.clone(), action));
-                }
+                    .any(|b| b.input == trig.0 && b.modifiers() == trig.1);
                 if !taken {
                     out.bindings.push(Binding {
                         input: trig.0.clone(),
-                        with: trig.1.clone(),
+                        with: (trig.1.len() == 1).then(|| trig.1[0].clone()),
+                        with_all: if trig.1.len() > 1 {
+                            trig.1.clone()
+                        } else {
+                            Vec::new()
+                        },
                         gesture: Gesture::Press,
                         action,
                     });
@@ -340,12 +346,24 @@ pub fn parse_keys_tdf(data: &[u8]) -> Result<KeysImport, KeysError> {
         }
         out.lines.push(line);
     }
+    // Same-action Shift variants can use the lower-specificity binding:
+    // the held queue modifier supplies the additive/append behavior.
+    let bindings = out.bindings.clone();
     out.bindings.retain(|b| {
-        let shift = matches!(&b.with, Some(Input::Key(k)) if k.0 == "shift");
-        !(shift
-            && plain
-                .iter()
-                .any(|((i, w), a)| *i == b.input && w.is_none() && *a == b.action))
+        let mut modifiers = b.modifiers();
+        let before = modifiers.len();
+        modifiers.retain(|m| *m != key("shift"));
+        let redundant = modifiers.len() < before
+            && bindings.iter().any(|other| {
+                other.input == b.input && other.modifiers() == modifiers && other.action == b.action
+            });
+        if redundant {
+            // Even an elided action must erase an existing, more-specific
+            // default before falling back to its imported base binding.
+            out.redundant_triggers
+                .push((b.input.clone(), b.modifiers()));
+        }
+        !redundant
     });
     Ok(out)
 }
@@ -363,11 +381,12 @@ impl Profile {
                 && (import
                     .bindings
                     .iter()
-                    .any(|n| n.input == b.input && n.with == b.with)
+                    .any(|n| n.input == b.input && n.modifiers() == b.modifiers())
                     || import
                         .unbound
                         .iter()
-                        .any(|(i, w)| *i == b.input && *w == b.with))
+                        .chain(&import.redundant_triggers)
+                        .any(|(i, modifiers)| *i == b.input && *modifiers == b.modifiers()))
         };
         p.bindings.retain(|b| !replaced(b));
         p.bindings.extend(import.bindings.iter().cloned());

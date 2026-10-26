@@ -38,6 +38,14 @@ fn fire_state() -> impl Strategy<Value = FireState> {
     ]
 }
 
+fn factory_rally_order() -> impl Strategy<Value = FactoryRallyOrder> {
+    prop_oneof![
+        pos().prop_map(|to| FactoryRallyOrder::Move { to }),
+        pos().prop_map(|to| FactoryRallyOrder::Patrol { to }),
+        unit_id().prop_map(|target| FactoryRallyOrder::Guard { target }),
+    ]
+}
+
 fn sim_command() -> impl Strategy<Value = SimCommand> {
     prop_oneof![
         (units(), pos(), queue()).prop_map(|(units, to, queue)| SimCommand::Move {
@@ -67,6 +75,29 @@ fn sim_command() -> impl Strategy<Value = SimCommand> {
             units,
             target,
             queue
+        }),
+        (
+            units(),
+            proptest::option::of(factory_rally_order()),
+            queue()
+        )
+            .prop_map(|(units, order, queue)| SimCommand::SetFactoryRally {
+                units,
+                order,
+                queue
+            }),
+        (units(), any::<u32>(), any::<u32>()).prop_map(|(units, def, count)| {
+            SimCommand::CancelProduction {
+                units,
+                def: UnitDefId(def),
+                count,
+            }
+        }),
+        (units(), proptest::option::of(any::<u32>())).prop_map(|(units, def)| {
+            SimCommand::SetFactoryRepeat {
+                units,
+                def: def.map(UnitDefId),
+            }
         }),
         (units(), unit_id(), queue()).prop_map(|(units, target, queue)| SimCommand::Heal {
             units,
@@ -113,7 +144,10 @@ fn client_command() -> impl Strategy<Value = ClientCommand> {
         group
             .clone()
             .prop_map(|group| ClientCommand::AssignGroup { group }),
-        group.prop_map(|group| ClientCommand::RecallGroup { group }),
+        group
+            .clone()
+            .prop_map(|group| ClientCommand::RecallGroup { group }),
+        group.prop_map(|group| ClientCommand::RecallGroupAdd { group }),
         Just(ClientCommand::JumpToAlert),
         Just(ClientCommand::CycleIdleBuilder),
         Just(ClientCommand::CenterOnMonarch),
@@ -312,4 +346,24 @@ fn fire_state_tokens_default_and_existing_variant_order_stay_compatible() {
         );
         assert_eq!(CommandLog::from_json(&log.to_json()).unwrap(), log);
     }
+}
+
+#[test]
+fn factory_guard_is_additive_version_one_json_with_exact_generational_target() {
+    let command = SimCommand::SetFactoryRally {
+        units: UnitSet::single(UnitId::new(3, 2)),
+        order: Some(FactoryRallyOrder::Guard {
+            target: UnitId::new(7, 9),
+        }),
+        queue: QueueMode::Append,
+    };
+    let json = serde_json::to_string(&command).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"set_factory_rally","units":[{"index":3,"generation":2}],"order":{"type":"guard","target":{"index":7,"generation":9}},"queue":"append"}"#
+    );
+    assert_eq!(serde_json::from_str::<SimCommand>(&json).unwrap(), command);
+    assert_eq!(command.queue(), Some(QueueMode::Append));
+    assert_eq!(command.units(), &UnitSet::single(UnitId::new(3, 2)));
+    assert_eq!(LOG_FORMAT_VERSION, 1);
 }

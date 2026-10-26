@@ -23,7 +23,9 @@ pub mod repair;
 pub use build_def::{BuildDef, MAX_BUILD_OPTIONS, YARD_CHARS, build_def_from_fbi, expand_yardmap};
 pub use progress::Frame;
 
-use tak_commands::{PlayerId, QueueMode, SimCommand, Tick, UnitDefId, UnitId};
+use tak_commands::{
+    FactoryRallyOrder, PlayerId, QueueMode, SimCommand, Tick, UnitDefId, UnitId, UnitSet,
+};
 use tak_math::{Angle, Fx, Vec2};
 use tak_script::port;
 
@@ -68,10 +70,16 @@ pub struct BuilderJob {
 pub struct FactoryState {
     /// The product on the pad.
     pub product: Option<UnitId>,
+    /// The active product came from the repeat recipe, not a finite order.
+    /// Retained when the recipe changes or is disabled until release/cancel.
+    pub product_from_repeat: bool,
     /// `Activate` was called and `Deactivate` is still owed.
     pub active: bool,
     /// Do not look at the exit spot before this tick.
     pub retry_at: Option<Tick>,
+    /// An explicit queue edit removed the active entry. Cleanup must occur
+    /// before a different queued product can advance, even within one tick.
+    pub cancel_product: bool,
 }
 
 /// Per-unit construction state.
@@ -83,6 +91,15 @@ pub struct UnitBuild {
     pub job: Option<BuilderJob>,
     /// Factories: production.
     pub factory: FactoryState,
+    /// Explicit standing-order recipe, separate from production. `None`
+    /// retains legacy queued-Move rally behavior for old command logs;
+    /// `Some([])` explicitly clears it. The first Patrol needs one extra
+    /// return leg; any Guard recipe reserves a yard-exit leg. Both are
+    /// included in the shared `MAX_ORDERS` admission bound.
+    pub factory_rally: Option<Vec<FactoryRallyOrder>>,
+    /// Continuous recipe used only when no finite production remains.
+    /// No orders are allocated for repeats; active products retain origin.
+    pub factory_repeat: Option<UnitDefId>,
     /// Mobile builders: the frame it helps build because it guards that
     /// frame, its builder or its factory (WP-P).
     pub assist: Option<Assist>,
@@ -180,6 +197,38 @@ impl UnitBuild {
         if let Some(r) = self.repair {
             h.bytes(b"REPAIR");
             r.hash(h);
+        }
+        // Additive commands alone enable this state. Omit empty legacy state
+        // so existing replay/checkpoint hashes remain byte-for-byte stable.
+        if let Some(rally) = &self.factory_rally {
+            h.bytes(b"FACTORY_RALLY");
+            h.len(rally.len());
+            for order in rally {
+                match *order {
+                    FactoryRallyOrder::Move { to } => {
+                        h.u8(0);
+                        h.vec2(to);
+                    }
+                    FactoryRallyOrder::Patrol { to } => {
+                        h.u8(1);
+                        h.vec2(to);
+                    }
+                    FactoryRallyOrder::Guard { target } => {
+                        h.u8(2);
+                        h.unit_id(target);
+                    }
+                }
+            }
+        }
+        if self.factory.cancel_product {
+            h.bytes(b"FACTORY_CANCEL_PRODUCT");
+        }
+        if let Some(def) = self.factory_repeat {
+            h.bytes(b"FACTORY_REPEAT");
+            h.unit_def(def);
+        }
+        if self.factory.product_from_repeat {
+            h.bytes(b"FACTORY_PRODUCT_FROM_REPEAT");
         }
     }
 }
@@ -627,13 +676,211 @@ pub fn apply_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
     }
 }
 
+/// Whether `id` can accept explicit factory production/rally controls.
+pub fn can_factory_control(world: &World, id: UnitId) -> bool {
+    world.unit(id).is_some_and(|u| {
+        u.build.is_complete()
+            && !u.combat.is_dying()
+            && world
+                .defs()
+                .get(u.def)
+                .is_some_and(|d| d.build.builder && !d.build.mobile)
+    })
+}
+
+/// Whether an eligible factory may record this exact Guard target. The
+/// factory itself and allies are allowed; stale, dying or hostile targets
+/// are not. Commanding-player ownership is checked separately at admission.
+/// Each product rechecks the relationship against its own owner at release.
+pub fn can_factory_guard_target(world: &World, factory: UnitId, target: UnitId) -> bool {
+    can_factory_control(world, factory)
+        && world
+            .unit(factory)
+            .is_some_and(|u| valid_guard_target(world, u.owner, target))
+}
+
+fn valid_guard_target(world: &World, owner: PlayerId, target: UnitId) -> bool {
+    world.unit(target).is_some_and(|u| {
+        !u.combat.is_dying()
+            && (u.combat.max_health == 0 || u.combat.health > 0)
+            && !world.are_hostile(owner, u.owner)
+    })
+}
+
+/// Matching finite entries plus an active repeated product, if any.
+/// The standing repeat recipe itself is not a finite entry.
+/// Ineligible, dying, unfinished or stale factories report zero.
+pub fn production_count(world: &World, id: UnitId, def: UnitDefId) -> u32 {
+    if !can_factory_control(world, id) {
+        return 0;
+    }
+    world.unit(id).map_or(0, |u| {
+        let finite = u
+            .orders
+            .iter()
+            .filter(|&&order| order == (Order::Build { def, at: None }))
+            .count() as u32;
+        let repeated = u.build.factory.product_from_repeat
+            && !u.build.factory.cancel_product
+            && u.build
+                .factory
+                .product
+                .and_then(|p| world.unit(p))
+                .is_some_and(|p| p.def == def);
+        finite + u32::from(repeated)
+    })
+}
+
+/// The continuous recipe of an eligible factory. Disabled or ineligible
+/// factories report `None`; an active product can outlive this recipe.
+pub fn factory_repeat(world: &World, id: UnitId) -> Option<UnitDefId> {
+    can_factory_control(world, id)
+        .then(|| world.unit(id).and_then(|u| u.build.factory_repeat))
+        .flatten()
+}
+
+/// Apply explicit standing-order, repeat, or production-removal controls.
+/// Production controls never edit standing rally orders. Tail-first removal
+/// is **Chosen**: the manual does not specify removal priority.
+pub fn apply_factory_command(world: &mut World, player: PlayerId, cmd: &SimCommand) {
+    if !matches!(
+        cmd,
+        SimCommand::SetFactoryRally { .. }
+            | SimCommand::CancelProduction { .. }
+            | SimCommand::SetFactoryRepeat { .. }
+    ) {
+        return;
+    }
+    for &id in cmd.units() {
+        if !can_factory_control(world, id) || !world.unit(id).is_some_and(|u| u.owner == player) {
+            continue;
+        }
+        match cmd {
+            SimCommand::SetFactoryRally { order, queue, .. } => {
+                // Validate before Replace can clear a paid factory's previous
+                // recipe, including its legacy None fallback state.
+                if let Some(FactoryRallyOrder::Guard { target }) = order {
+                    if !can_factory_guard_target(world, id, *target) {
+                        continue;
+                    }
+                }
+                let order = order.map(|order| match order {
+                    FactoryRallyOrder::Move { to } => FactoryRallyOrder::Move {
+                        to: world.map().clamp(to),
+                    },
+                    FactoryRallyOrder::Patrol { to } => FactoryRallyOrder::Patrol {
+                        to: world.map().clamp(to),
+                    },
+                    FactoryRallyOrder::Guard { target } => FactoryRallyOrder::Guard { target },
+                });
+                let Some(u) = world.unit_mut(id) else {
+                    continue;
+                };
+                let rally = u.build.factory_rally.get_or_insert_with(Vec::new);
+                if *queue == QueueMode::Replace || order.is_none() {
+                    rally.clear();
+                }
+                if let Some(order) = order {
+                    let has_patrol = rally
+                        .iter()
+                        .any(|o| matches!(o, FactoryRallyOrder::Patrol { .. }))
+                        || matches!(order, FactoryRallyOrder::Patrol { .. });
+                    let has_guard = rally
+                        .iter()
+                        .any(|o| matches!(o, FactoryRallyOrder::Guard { .. }))
+                        || matches!(order, FactoryRallyOrder::Guard { .. });
+                    // Reserve the automatic return leg so a full recipe can
+                    // never become a one-way patrol on a newly built unit.
+                    // A Guard recipe also reserves one ordinary yard exit,
+                    // even if today's first target/route will not need it.
+                    let cost = rally.len() + 1 + usize::from(has_patrol) + usize::from(has_guard);
+                    if cost <= MAX_ORDERS {
+                        rally.push(order);
+                    }
+                }
+            }
+            SimCommand::SetFactoryRepeat { def, .. } => {
+                if let Some(def) = def {
+                    let valid = world.defs().get(*def).is_some()
+                        && world
+                            .unit(id)
+                            .and_then(|u| world.defs().get(u.def))
+                            .is_some_and(|d| d.build.canbuild.contains(def));
+                    if !valid {
+                        continue;
+                    }
+                }
+                if let Some(u) = world.unit_mut(id) {
+                    u.build.factory_repeat = *def;
+                }
+            }
+            SimCommand::CancelProduction { def, count, .. } => {
+                if *count == 0 {
+                    continue;
+                }
+                let active_repeat_matches = world.unit(id).is_some_and(|u| {
+                    u.build.factory.product_from_repeat
+                        && !u.build.factory.cancel_product
+                        && u.build
+                            .factory
+                            .product
+                            .and_then(|p| world.unit(p))
+                            .is_some_and(|p| p.def == *def)
+                });
+                let Some(u) = world.unit_mut(id) else {
+                    continue;
+                };
+                if u.build.factory_repeat == Some(*def) {
+                    u.build.factory_repeat = None;
+                }
+                let active = if u.build.factory.product.is_some()
+                    && !u.build.factory.product_from_repeat
+                    && !u.build.factory.cancel_product
+                {
+                    first_production(&u.orders).map(|(i, _)| i)
+                } else {
+                    None
+                };
+                let mut remaining = *count;
+                // Descending indices remain valid after each removal. The
+                // active entry is the first production entry, hence last.
+                for i in (0..u.orders.len()).rev() {
+                    if remaining == 0 {
+                        break;
+                    }
+                    if u.orders[i]
+                        == (Order::Build {
+                            def: *def,
+                            at: None,
+                        })
+                    {
+                        u.orders.remove(i);
+                        remaining -= 1;
+                        if active == Some(i) {
+                            u.build.factory.cancel_product = true;
+                        }
+                    }
+                }
+                // A repeated product owns no finite entry. Its cancellation
+                // comes after all matching finite work, even if queued later.
+                if remaining > 0 && active_repeat_matches {
+                    u.build.factory.cancel_product = true;
+                }
+            }
+            _ => unreachable!("factory command checked above"),
+        }
+    }
+}
+
 /// Runs right after commands, before economy.
 ///
 /// 1. Frames are held: orders cleared, speed zero.
-/// 2. Every complete builder, in slot order, advances its job (walk, place,
+/// 2. Explicitly cancelled factory products are removed before any helper can
+///    finish them. Other cancellation keeps its legacy worker ordering.
+/// 3. Every complete builder, in slot order, advances its job (walk, place,
 ///    work) or its factory queue. Work is visible at once to later
 ///    builders, so the lowest-slot builder to finish a frame wins.
-/// 3. Builders and factories whose frame completed this tick call
+/// 4. Builders and factories whose frame completed this tick call
 ///    `StopBuilding` and move on; factory products walk out.
 pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
     let ids = world.unit_ids();
@@ -650,6 +897,22 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
             }
         }
     }
+    // A lower-slot Guard/Heal helper may otherwise finish a cancelled frame
+    // before its factory gets a turn, erasing Frame::paid and bypassing the
+    // refund/removal. Resolve only the new explicit cancellation here, so
+    // legacy command logs keep their existing per-worker cancellation order.
+    let cancelled: Vec<_> = ids
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .unit(id)
+                .is_some_and(|u| u.build.factory.cancel_product)
+        })
+        .collect();
+    for &id in &cancelled {
+        factory_step(world, scripts, id);
+    }
     for &id in &ids {
         // Retire the old explicit interval before another action starts its
         // callbacks; a replacing Build must not be stopped by stale Heal.
@@ -659,8 +922,12 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
                 mobile_step(world, scripts, id);
                 assist_step(world, scripts, id);
             }
-            Some(false) => factory_step(world, scripts, id),
-            None => {}
+            // As with ordinary cancellation, the next product starts on
+            // the following tick, not during the cancellation/refund tick.
+            Some(false) if cancelled.binary_search(&id).is_err() => {
+                factory_step(world, scripts, id);
+            }
+            Some(false) | None => {}
         }
         // Conversely, Build/Guard cleanup precedes a newly activated Heal.
         heal_step(world, scripts, id);
@@ -1125,26 +1392,50 @@ fn factory_idle(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId, had
     set_factory(world, id, f);
 }
 
+/// End continuous production as its factory dies. Resolve a repeated frame
+/// immediately: a chain explosion can remove the factory within this combat
+/// pass, before the next construction tick. Legacy finite production keeps
+/// its historical death handling and hashes.
+pub(crate) fn cancel_repeat_on_death(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    let Some(u) = world.unit_mut(id) else { return };
+    u.build.factory_repeat = None;
+    if u.build.factory.product_from_repeat && u.build.factory.product.is_some() {
+        u.build.factory.cancel_product = true;
+        factory_step(world, scripts, id);
+    }
+}
+
 fn factory_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     let Some(u) = world.unit(id) else { return };
     let owner = u.owner;
     let mut f = u.build.factory;
-    let next = first_production(&u.orders);
+    let repeat_controlled = f.product_from_repeat || u.build.factory_repeat.is_some();
+    let finite = first_production(&u.orders);
+    let next = finite
+        .map(|(_, def)| (def, false))
+        .or_else(|| u.build.factory_repeat.map(|def| (def, true)));
     let Some(fd) = world.defs().get(u.def) else {
         return;
     };
     let workertime = fd.build.workertime;
 
     if let Some(p) = f.product {
-        let Some(pu) = world.unit(p) else {
-            // Product destroyed: TA cancels all the factory's orders.
-            if let Some(u) = world.unit_mut(id) {
-                u.orders.clear();
+        let pu = match world.unit(p) {
+            Some(pu) if !repeat_controlled || !pu.combat.is_dying() => pu,
+            _ => {
+                // Product destroyed: TA cancels all the factory's orders.
+                // Repeat-controlled work must stop at lethal damage, before
+                // one final construction step can detach a dying product.
+                // Leave its death animation to combat; never refund a loss.
+                if let Some(u) = world.unit_mut(id) {
+                    u.orders.clear();
+                    u.build.factory_repeat = None;
+                }
+                factory_idle(world, scripts, id, true);
+                return;
             }
-            factory_idle(world, scripts, id, true);
-            return;
         };
-        if next.is_none() {
+        if (!f.product_from_repeat && finite.is_none()) || f.cancel_product {
             // Cancelled (Stop or a replacing order): refund what was spent
             // and remove the frame (**Known** TA cancel-current).
             if let Some(frame) = pu.build.frame {
@@ -1161,7 +1452,7 @@ fn factory_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
         return;
     }
 
-    let Some((_, def)) = next else {
+    let Some((def, from_repeat)) = next else {
         if f.active {
             factory_idle(world, scripts, id, false);
         }
@@ -1196,6 +1487,7 @@ fn factory_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
         pu.fire_state = fs;
     }
     f.product = Some(p);
+    f.product_from_repeat = from_repeat;
     f.retry_at = None;
     set_factory(world, id, f);
     start(scripts, id, "StartBuilding");
@@ -1261,6 +1553,7 @@ fn factory_finish(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     if !world.unit(p).is_some_and(|pu| pu.build.is_complete()) {
         return;
     }
+    let standing = u.build.factory_rally.clone();
     let rally: Vec<WorldPos> = u
         .orders
         .iter()
@@ -1270,22 +1563,93 @@ fn factory_finish(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
         })
         .collect();
     let (fpos, fdef) = (u.pos, u.def);
-    if let Some(u) = world.unit_mut(id) {
-        if let Some((i, _)) = first_production(&u.orders) {
-            u.orders.remove(i);
+    if !f.product_from_repeat {
+        if let Some(u) = world.unit_mut(id) {
+            if let Some((i, _)) = first_production(&u.orders) {
+                u.orders.remove(i);
+            }
         }
     }
     start(scripts, id, "StopBuilding");
     let mut f2 = f;
     f2.product = None;
+    f2.product_from_repeat = false;
     set_factory(world, id, f2);
     if world
         .unit(id)
-        .is_some_and(|u| first_production(&u.orders).is_none())
+        .is_some_and(|u| first_production(&u.orders).is_none() && u.build.factory_repeat.is_none())
     {
         factory_idle(world, scripts, id, false);
     }
-    release(world, p, fpos, fdef, &rally);
+    match standing {
+        Some(orders) if !orders.is_empty() => release_standing(world, p, fpos, fdef, &orders),
+        Some(_) => release(world, p, fpos, fdef, &[]),
+        None => release(world, p, fpos, fdef, &rally),
+    }
+}
+
+/// Snapshot the factory's recipe at completion, not at build start. Patrol
+/// uses the same return-leg rule as direct unit commands, so Move→Move→Patrol
+/// traverses the two moves once, then patrols from the last move onward.
+fn release_standing(
+    world: &mut World,
+    p: UnitId,
+    fpos: WorldPos,
+    fdef: UnitDefId,
+    orders: &[FactoryRallyOrder],
+) {
+    let Some(owner) = world.unit(p).map(|u| u.owner) else {
+        return;
+    };
+    // Only this new target-bearing recipe path filters or adds egress.
+    // Move/Patrol-only routes retain their exact original behavior/hashes.
+    let effective: Vec<_> = orders
+        .iter()
+        .copied()
+        .filter(|order| match *order {
+            FactoryRallyOrder::Guard { target } => {
+                target != p && valid_guard_target(world, owner, target)
+            }
+            _ => true,
+        })
+        .collect();
+    if effective.is_empty() || matches!(effective.first(), Some(FactoryRallyOrder::Guard { .. })) {
+        // Chosen: always leave the pad before a leading Guard, even when
+        // its target is far away now. A nearby/self-factory target or one
+        // that dies immediately after release must not suppress egress.
+        // This is the existing bounded pathfinding behavior, not a special
+        // movement/combat lifetime rule; impassable exits may still fail.
+        release(world, p, fpos, fdef, &[]);
+    }
+    for order in effective {
+        match order {
+            FactoryRallyOrder::Move { to } => {
+                if let Some(u) = world.unit_mut(p) {
+                    if u.orders.len() < MAX_ORDERS {
+                        u.orders.push_back(Order::Move { to });
+                    }
+                }
+            }
+            FactoryRallyOrder::Patrol { to } => pathfinding::apply_command(
+                world,
+                owner,
+                &SimCommand::Patrol {
+                    units: UnitSet::single(p),
+                    to,
+                    queue: QueueMode::Append,
+                },
+            ),
+            FactoryRallyOrder::Guard { target } => crate::combat::apply_command(
+                world,
+                owner,
+                &SimCommand::Guard {
+                    units: UnitSet::single(p),
+                    target,
+                    queue: QueueMode::Append,
+                },
+            ),
+        }
+    }
 }
 
 /// Send a finished product on its way: the factory's `Move` orders as a

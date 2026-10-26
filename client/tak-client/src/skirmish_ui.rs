@@ -224,7 +224,7 @@ fn reset_gestures(input: &mut InputRes, minimap: &mut MinimapState) {
     input.last_axes.clear();
     input.last_pointer = None;
     minimap.mouse_drag = false;
-    minimap.ui_held = false;
+    minimap.ui_held = [false; 3];
     minimap.swallow_release = false;
     minimap.pad_swallow = false;
 }
