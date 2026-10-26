@@ -1009,39 +1009,41 @@ pub(crate) fn separate(world: &mut World, ps: &PathState) {
         return;
     }
     es.sort_by_key(|e| (e.bucket, e.id.index));
+    let max_radius = es.iter().map(|e| e.r.to_int_floor()).max().unwrap_or(0);
     let mut push = vec![Vec2::ZERO; es.len()];
     for i in 0..es.len() {
-        for by in es[i].bucket.0 - 1..=es[i].bucket.0 + 1 {
-            for bx in es[i].bucket.1 - 1..=es[i].bucket.1 + 1 {
-                let lo = es.partition_point(|e| e.bucket < (by, bx));
-                let hi = es.partition_point(|e| e.bucket <= (by, bx));
-                for j in lo..hi {
-                    if es[j].id.index <= es[i].id.index || !(es[i].mobile || es[j].mobile) {
-                        continue;
-                    }
-                    let d = es[i].pos.distance(es[j].pos);
-                    let min = es[i].r.saturating_add(es[j].r);
-                    if d >= min {
-                        continue;
-                    }
-                    let dir = (es[j].pos - es[i].pos).normalize().unwrap_or_else(|| {
-                        let a = (es[i].id.index.wrapping_mul(40503)
-                            ^ es[j].id.index.wrapping_mul(9973))
-                            as u16;
-                        Vec2::from_angle(tak_math::Angle::from_raw(a))
-                    });
-                    let overlap = min - d;
-                    let (si, sj) = match (es[i].mobile, es[j].mobile) {
-                        (true, true) => (
-                            overlap.saturating_mul(Fx::HALF),
-                            overlap.saturating_mul(Fx::HALF),
-                        ),
-                        (true, false) => (overlap, Fx::ZERO),
-                        _ => (Fx::ZERO, overlap),
-                    };
-                    push[i] -= dir.scale(si);
-                    push[j] += dir.scale(sj);
+        // Large movement footprints can overlap beyond adjacent buckets.
+        // Scan each relevant row once, retaining bucket/slot pair order.
+        let reach = (es[i].r.to_int_floor() + max_radius + 63) / 64;
+        let (z, x) = es[i].bucket;
+        for by in z - reach..=z + reach {
+            let lo = es.partition_point(|e| e.bucket < (by, x - reach));
+            let hi = es.partition_point(|e| e.bucket <= (by, x + reach));
+            for j in lo..hi {
+                if es[j].id.index <= es[i].id.index || !(es[i].mobile || es[j].mobile) {
+                    continue;
                 }
+                let d = es[i].pos.distance(es[j].pos);
+                let min = es[i].r.saturating_add(es[j].r);
+                if d >= min {
+                    continue;
+                }
+                let dir = (es[j].pos - es[i].pos).normalize().unwrap_or_else(|| {
+                    let a = (es[i].id.index.wrapping_mul(40503) ^ es[j].id.index.wrapping_mul(9973))
+                        as u16;
+                    Vec2::from_angle(tak_math::Angle::from_raw(a))
+                });
+                let overlap = min - d;
+                let (si, sj) = match (es[i].mobile, es[j].mobile) {
+                    (true, true) => (
+                        overlap.saturating_mul(Fx::HALF),
+                        overlap.saturating_mul(Fx::HALF),
+                    ),
+                    (true, false) => (overlap, Fx::ZERO),
+                    _ => (Fx::ZERO, overlap),
+                };
+                push[i] -= dir.scale(si);
+                push[j] += dir.scale(sj);
             }
         }
     }
