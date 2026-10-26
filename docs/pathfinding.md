@@ -267,7 +267,12 @@ structure-specific `Occupied` result and `ignore` support.
 `o/f/w/G` block in both yard states; `c/C` only while closed; `O` only while open;
 `./Y/y` never block movement. Kingdoms `S` blocks in both states (**Chosen**).
 Open/closed is the script's port 18 (`YARD_OPEN`). A transition that would newly
-occupy another ground unit's footprint is refused. The COB engine enforces the
+occupy another ground unit's footprint is refused. **Chosen consistency rule:**
+mobile occupancy uses the resolved movement-class footprint (FBI fallback),
+matching the movement grid's anchor and footprint fold; immobile occupancy
+retains the FBI yard/placement extent. Using FBI dimensions for a mobile unit
+could close a door into a larger movement footprint or needlessly hold it open
+for a smaller one. The COB engine enforces the
 world-derived admission mask at the port write, so an immediate read in the same
 callback sees the old value and can retry. The pathing sync also enforces this
 for custom hosts and no-script factories. Flyers do not hold doors open.

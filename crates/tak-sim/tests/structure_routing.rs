@@ -229,6 +229,64 @@ fn yard_door_cannot_close_on_a_ground_unit_but_flyers_do_not_hold_it_open() {
     assert!(!line_clear(&s));
 }
 
+// A one-cell door beside the walker intersects a 3x3 footprint, but not
+// a 1x1 footprint. FBI and movement-class dimensions deliberately disagree.
+fn check_motion_footprint_door(fbi: u8, motion: u8, held_open: bool) {
+    let mut sc = setup();
+    sc.map.start_positions[0] = tak_sim::StartPos { x: 56, y: 56 };
+    let walker = &mut sc.unit_defs[WALKER.0 as usize];
+    walker.footprintx = fbi;
+    walker.footprintz = fbi;
+    walker.motion.footprint_x = motion;
+    walker.motion.footprint_z = motion;
+    let door = &mut sc.unit_defs[WALL.0 as usize];
+    door.footprintx = 1;
+    door.footprintz = 1;
+    door.build.yardmap = "c".into();
+    let host = YardHost::default();
+    let ports = host.0.clone();
+    let mut s = Sim::with_scripts(&sc, Box::new(host)).unwrap();
+    s.step(&[]);
+    let gate = s
+        .spawn_unit(WALL, P0, Vec2::from_ints(72, 56), Angle::ZERO)
+        .unwrap();
+    ports.borrow_mut().insert(gate, 1);
+    s.step(&[]);
+    let pos = s.world().unit(UnitId::new(0, 0)).unwrap().pos;
+    let grid = s.world().pathing.grid_for(WALKER).unwrap();
+    let anchor = grid.anchor_of(pos);
+    assert_eq!(anchor, if motion == 3 { (2, 2) } else { (3, 3) });
+    assert_ne!(grid.tier(anchor), 0, "open door must leave walker passable");
+    let blocked = tak_sim::lifecycle::script_ctx(s.world(), gate)
+        .unwrap()
+        .yard_blocked_states
+        & 1;
+    ports.borrow_mut().insert(gate, 0);
+    s.step(&[]);
+    let grid = s.world().pathing.grid_for(WALKER).unwrap();
+    assert_ne!(
+        grid.tier(grid.anchor_of(pos)),
+        0,
+        "closing door blocked walker's movement footprint"
+    );
+    assert_eq!(
+        ports.borrow()[&gate],
+        i32::from(held_open),
+        "pathing sync admission"
+    );
+    assert_eq!(blocked, u8::from(held_open), "synchronous script admission");
+}
+
+#[test]
+fn larger_motion_footprint_holds_door_open() {
+    check_motion_footprint_door(1, 3, true);
+}
+
+#[test]
+fn smaller_motion_footprint_allows_door_to_close() {
+    check_motion_footprint_door(3, 1, false);
+}
+
 #[test]
 fn inverse_yard_cells_obey_open_state_and_occupied_transition_gate() {
     let mut sc = setup();

@@ -56,7 +56,15 @@ fn closing_occupied(world: &World, id: UnitId, old: bool, new: bool, r: Rect) ->
         if od.motion.canfly {
             continue;
         }
-        let o = Rect::covering(other.pos, od.footprintx, od.footprintz);
+        // Mobile occupancy must match the footprint folded into its movement
+        // grid. Immobile structures retain their FBI yard/placement extent.
+        let (fx, fz) = if od.maxvelocity != Fx::ZERO {
+            let key = od.motion.key(od);
+            (key.fx, key.fz)
+        } else {
+            (od.footprintx, od.footprintz)
+        };
+        let o = Rect::covering(other.pos, fx, fz);
         for z in r.z.max(o.z)..(r.z + r.h).min(o.z + o.h) {
             for x in r.x.max(o.x)..(r.x + r.w).min(o.x + o.w) {
                 let c = d
