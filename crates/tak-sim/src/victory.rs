@@ -498,6 +498,15 @@ impl World {
         self.victory.defeated_at(p).is_some()
     }
 
+    /// Default defeat-sweep survivors are inert. The explicit `Remain`
+    /// option keeps its existing defensive behavior. Missions use their own
+    /// conditions and do not apply the skirmish sweep.
+    pub fn is_inert_player(&self, p: PlayerId) -> bool {
+        self.is_defeated(p)
+            && self.victory.setup.mission.is_none()
+            && self.victory.setup.defeated_units == DefeatedUnits::SelfDestruct
+    }
+
     /// The victory state.
     pub fn victory(&self) -> &VictoryState {
         &self.victory
@@ -554,6 +563,7 @@ fn skirmish_tick(world: &mut World, scripts: &mut dyn ScriptHost, live: &[u32]) 
     if world.victory.setup.defeated_units == DefeatedUnits::SelfDestruct {
         for p in newly {
             self_destruct(world, scripts, p);
+            halt_survivors(world, scripts, p);
         }
     }
     // Over when at least two teams started and at most one is left.
@@ -597,6 +607,25 @@ fn self_destruct(world: &mut World, scripts: &mut dyn ScriptHost, p: PlayerId) {
             pos,
             now,
         );
+    }
+}
+
+/// End active work and weapon handshakes once, after the sweep. Death
+/// animations and already airborne projectiles still complete normally.
+fn halt_survivors(world: &mut World, scripts: &mut dyn ScriptHost, p: PlayerId) {
+    let ids: Vec<_> = world
+        .units()
+        .filter(|(_, u)| u.owner == p && !u.combat.is_dying())
+        .map(|(id, _)| id)
+        .collect();
+    for id in ids {
+        crate::construction::halt_defeated_unit(world, scripts, id);
+        crate::combat::halt_defeated_unit(world, scripts, id);
+        if let Some(u) = world.unit_mut(id) {
+            u.cancel_player_orders();
+            u.path = Default::default();
+            u.speed = tak_math::Fx::ZERO;
+        }
     }
 }
 

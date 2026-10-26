@@ -883,7 +883,15 @@ pub fn apply_factory_command(world: &mut World, player: PlayerId, cmd: &SimComma
 /// 4. Builders and factories whose frame completed this tick call
 ///    `StopBuilding` and move on; factory products walk out.
 pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
-    let ids = world.unit_ids();
+    let ids: Vec<_> = world
+        .unit_ids()
+        .into_iter()
+        .filter(|&id| {
+            world
+                .unit(id)
+                .is_some_and(|u| !world.is_inert_player(u.owner))
+        })
+        .collect();
     for &id in &ids {
         if let Some(u) = world.unit_mut(id) {
             if u.build.is_complete() && u.combat.ready && u.combat.health >= u.combat.max_health {
@@ -1683,4 +1691,19 @@ fn release(world: &mut World, p: UnitId, fpos: WorldPos, fdef: UnitDefId, rally:
         Vec2::new(pu.pos.x, fpos.y + Fx::from_int(sz))
     };
     pathfinding::go_to(world, p, out);
+}
+
+/// Stop surviving builders after the default defeat sweep, without refunding
+/// or advancing their remaining frames. They no longer own active work.
+pub(crate) fn halt_defeated_unit(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
+    cancel_heal(world, scripts, id);
+    let Some(u) = world.unit_mut(id) else { return };
+    let building = u.build.job.take().is_some_and(|j| j.building)
+        | u.build.assist.take().is_some_and(|a| a.building);
+    let product = u.build.factory.product.is_some();
+    u.build.factory_repeat = None;
+    if building {
+        start(scripts, id, "StopBuilding");
+    }
+    factory_idle(world, scripts, id, product);
 }

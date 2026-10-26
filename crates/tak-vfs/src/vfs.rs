@@ -584,7 +584,15 @@ mod tests {
         let mut v = Vfs::new();
         v.mount_dir(&s.0.join("d")).unwrap();
         assert_eq!(v.origins("FOO.TXT").len(), 1);
-        assert_eq!(v.read("foo.txt").unwrap(), b"upper"); // "Foo" sorts first
+        // On case-insensitive filesystems the second write replaces the first;
+        // there is no collision to resolve. Still verify case-insensitive lookup.
+        let distinct = std::fs::read_dir(s.0.join("d")).unwrap().count() == 2;
+        if distinct {
+            assert_eq!(v.read("foo.txt").unwrap(), b"upper"); // "Foo" sorts first
+        } else {
+            assert_eq!(v.read("FOO.txt").unwrap(), b"lower");
+            eprintln!("case-collision fixture: filesystem stores one case-insensitive file");
+        }
     }
 
     #[test]

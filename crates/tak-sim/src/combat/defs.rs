@@ -128,6 +128,10 @@ pub struct WeaponStats {
     /// when it fires (**Believed**); `None` = [`DEFAULT_AIM_TOLERANCE`].
     #[serde(default)]
     pub aim_tolerance: Option<u16>,
+    /// FBI `noairweapon`: this slot cannot target flying units. Splash
+    /// damage remains governed by the ordinary impact rules.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_air_weapon: bool,
     /// `manapershot`. Non-zero marks a spell: only fired by `CastSpell`.
     #[serde(default)]
     pub mana_per_shot: i32,
@@ -169,6 +173,10 @@ impl WeaponStats {
         h.option(self.aim_tolerance, StateHasher::u16);
         h.i32(self.mana_per_shot);
         h.i32(self.damage_kind);
+        // Preserve hashes of older unrestricted synthetic scenarios.
+        if self.no_air_weapon {
+            h.bytes(b"NOAIR");
+        }
         h.i32(self.damage.default);
         h.len(self.damage.multipliers.len());
         for (k, m) in &self.damage.multipliers {
@@ -382,6 +390,7 @@ fn weapon_from_fbi(w: &tak_content::WeaponDef) -> WeaponStats {
         aim_tolerance: w
             .aim_tolerance
             .map(|a| a.clamp(0, i32::from(u16::MAX)) as u16),
+        no_air_weapon: w.no_air_weapon,
         mana_per_shot: w.mana_per_shot.unwrap_or(0).max(0),
         damage_kind,
         damage: DamageStats {
