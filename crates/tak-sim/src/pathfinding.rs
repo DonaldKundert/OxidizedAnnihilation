@@ -21,6 +21,7 @@
 
 mod grid;
 mod search;
+mod structures;
 
 use tak_commands::{PlayerId, QueueMode, SimCommand, UnitDefId, UnitId, WorldPos};
 use tak_math::{Fx, Vec2};
@@ -361,6 +362,9 @@ pub struct PathState {
     /// Dynamic obstacles: blockers per attribute cell, row-major over the
     /// map's terrain grid (empty until the first [`add_obstacle`]).
     obstacles: Vec<u16>,
+    /// Yard-selected cells, kept separate from reclaimable feature blockers.
+    structures: Vec<u16>,
+    structure_stamps: Vec<structures::Stamp>,
 }
 
 impl core::fmt::Debug for PathState {
@@ -430,6 +434,13 @@ impl PathState {
         h.u32(s.searches);
         h.u64(s.pops);
         h.u32(s.unreachable);
+        if !self.structure_stamps.is_empty() {
+            h.bytes(b"STRUCTURES");
+            h.len(self.structure_stamps.len());
+            for stamp in &self.structure_stamps {
+                stamp.hash(h);
+            }
+        }
         // Sparse: (index, count) of every blocked cell.
         let n = self.obstacles.iter().filter(|&&c| c > 0).count();
         h.len(n);
@@ -441,7 +452,7 @@ impl PathState {
         }
     }
 
-    /// Dynamic blockers on attribute cell `(cx, cz)` (0 outside the map or
+    /// Dynamic feature blockers on attribute cell `(cx, cz)` (0 outside the map or
     /// on maps without terrain).
     pub fn obstacles_at(&self, cx: i32, cz: i32, cols: u32) -> u16 {
         if cx < 0 || cz < 0 || cx as u32 >= cols {
@@ -463,6 +474,28 @@ impl PathState {
         self.built
     }
 
+    fn combined_obstacles(&self) -> Vec<u16> {
+        (0..self.obstacles.len().max(self.structures.len()))
+            .map(|i| {
+                self.obstacles
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(self.structures.get(i).copied().unwrap_or(0))
+            })
+            .collect()
+    }
+
+    fn invalidate_search(&mut self, world: &mut World) {
+        if let Some(a) = self.active.take() {
+            if let Some(u) = world.unit_mut(a.unit) {
+                if u.path.status == PathStatus::Searching {
+                    u.path.status = PathStatus::Pending;
+                }
+            }
+        }
+    }
+
     fn ensure_built(&mut self, world: &World) {
         if self.built {
             return;
@@ -472,6 +505,7 @@ impl PathState {
             self.def_grid = vec![None; world.defs().len()];
             return;
         };
+        let blockers = self.combined_obstacles();
         for def in world.defs().as_slice() {
             if def.motion.canfly {
                 self.def_grid.push(None);
@@ -482,13 +516,17 @@ impl PathState {
                 Some(i) => i,
                 None => {
                     self.grids
-                        .push(ClassGrid::build_with(key, world.map(), t, &self.obstacles));
+                        .push(ClassGrid::build_with(key, world.map(), t, &blockers));
                     self.grids.len() - 1
                 }
             };
             self.def_grid.push(Some(i as u16));
         }
     }
+}
+
+pub(crate) fn yard_blocked_states(world: &World, id: UnitId) -> u8 {
+    structures::blocked_states(world, id)
 }
 
 /// Apply a `Patrol` command. Replace: the unit patrols between its
@@ -540,7 +578,7 @@ pub fn go_to(world: &mut World, unit: UnitId, to: WorldPos) {
 // --- Dynamic obstacles (WP-P) ---
 //
 // The hook other lanes use for things that block movement after the map
-// is loaded (blocking features such as wrecks; later, structures). Each
+// is loaded (blocking features such as wrecks; structure yards have a separate plane). Each
 // call adds or removes one blocker on every cell of a rectangle; a cell is
 // blocked while its count is non-zero, exactly like a `FEATURE` cell of
 // the map. Every built layer is re-stamped around the rectangle at once,
@@ -561,7 +599,9 @@ pub fn remove_obstacle(world: &mut World, r: CellRect) {
     change_obstacle(world, r, false);
 }
 
-/// `true` if attribute cell `(cx, cz)` holds a dynamic obstacle.
+/// `true` if attribute cell `(cx, cz)` holds a dynamic feature obstacle.
+/// Structure occupancy is queried separately by placement so its `ignore`
+/// identity and structure-specific error remain intact.
 pub fn is_obstacle(world: &World, cx: i32, cz: i32) -> bool {
     let cols = world.map().terrain.as_ref().map_or(0, |t| t.cols);
     world.pathing.obstacles_at(cx, cz, cols) > 0
@@ -592,11 +632,11 @@ fn change_obstacle(world: &mut World, r: CellRect, add: bool) {
         }
     }
     if let Some(t) = world.map().terrain.as_ref() {
-        let obstacles = std::mem::take(&mut ps.obstacles);
+        let blockers = ps.combined_obstacles();
         for g in &mut ps.grids {
-            g.restamp(world.map(), t, &obstacles, r);
+            g.restamp(world.map(), t, &blockers, r);
         }
-        ps.obstacles = obstacles;
+        ps.invalidate_search(world);
     }
     world.pathing = ps;
 }
@@ -604,8 +644,9 @@ fn change_obstacle(world: &mut World, r: CellRect, add: bool) {
 /// Runs after orders, before movement: builds the layers on the first
 /// call, tracks each unit's goal, detects stalls, finishes unreachable
 /// orders and runs the planner under the step budget.
-pub fn tick(world: &mut World, _scripts: &mut dyn ScriptHost) {
+pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
     let mut ps = std::mem::take(&mut world.pathing);
+    structures::sync(world, scripts, &mut ps);
     ps.ensure_built(world);
     let now = world.tick().0;
     for id in world.unit_ids() {
@@ -949,7 +990,9 @@ pub(crate) fn separate(world: &mut World, ps: &PathState) {
         .units()
         .filter_map(|(id, u)| {
             let def = world.defs().get(u.def)?;
-            if def.motion.canfly {
+            if def.motion.canfly || (def.maxvelocity == Fx::ZERO && ps.grid_for(u.def).is_some()) {
+                // The yard grid enforces structures' actual occupied cells;
+                // a circular push would close their open doors and exits.
                 return None;
             }
             let k = def.motion.key(def);

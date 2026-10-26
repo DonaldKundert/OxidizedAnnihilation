@@ -47,6 +47,10 @@ pub struct ScriptCtx {
     pub health_percent: i32,
     /// Percent still to build (port 17), from the construction lane.
     pub build_percent_left: i32,
+    /// Yard transition admission snapshot: bit 0 refuses closed, bit 1
+    /// refuses open. The COB engine applies it at the port write, allowing
+    /// synchronous readback within the same callback.
+    pub yard_blocked_states: u8,
 }
 
 /// Unit script callbacks. Every method has a default.

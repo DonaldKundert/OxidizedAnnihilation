@@ -17,7 +17,9 @@ use tak_sim::{Order, Scenario, Sim, WorldPos};
 
 const OWNER: PlayerId = PlayerId(0);
 const BUILDER: UnitId = UnitId::new(0, 0);
-const TICKS: u32 = 200;
+// The builder now detours around its own completed walls; allow travel and
+// turning time as well as the 120 mana of paid work (observed completion: 258).
+const TICKS: u32 = 600;
 const BIN: &str = env!("CARGO_BIN_EXE_tak-headless");
 
 fn scenario() -> Scenario {

@@ -24,6 +24,7 @@ pub fn script_ctx(world: &World, id: UnitId) -> Option<ScriptCtx> {
         fire_state: u.fire_state,
         health_percent: u.combat.health_percent(),
         build_percent_left: u.build.percent_left(),
+        yard_blocked_states: crate::pathfinding::yard_blocked_states(world, id),
     })
 }
 

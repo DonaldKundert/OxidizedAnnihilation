@@ -697,3 +697,81 @@ fn outside_combat_survivors_are_also_inert_after_default_defeat() {
     assert_eq!(s.world().unit(mover).unwrap().pos, pos);
     assert!(s.world().unit(mover).unwrap().orders.is_empty());
 }
+
+#[path = "construction_support/mod.rs"]
+mod work_callbacks;
+
+#[test]
+fn default_defeat_cancels_active_heal_and_pairs_its_work_callback() {
+    let mut sc = scenario(3, VictorySetup::default());
+    sc.unit_defs[KING.0 as usize].economy.mogriumstorage = 5000;
+    let healer_def = &mut sc.unit_defs[SOLDIER.0 as usize];
+    healer_def.combat.max_damage = 50_000;
+    healer_def.build.builder = true;
+    healer_def.build.mobile = true;
+    healer_def.build.workertime = 30;
+    healer_def.build.builddistance = 200;
+    healer_def.economy.mogriumstorage = 5000;
+    let target_def = &mut sc.unit_defs[TOWER.0 as usize];
+    target_def.combat.max_damage = 100_000;
+    target_def.build.buildcost = 100;
+    target_def.build.buildtime = 60 << 16;
+    let rec = work_callbacks::Recorder::default();
+    let mut s = Sim::with_scripts(&sc, Box::new(rec.clone())).unwrap();
+    s.step(&[]);
+    let healer = place(&mut s, SOLDIER, 0, 300, 300);
+    let target = place(&mut s, TOWER, 0, 350, 300);
+    s.step(&[]);
+    let now = s.tick().0;
+    tak_sim::combat::apply_damage(
+        s.world_mut(),
+        &mut NoScripts,
+        target,
+        40_000,
+        None,
+        kind::NORMAL,
+        Vec2::from_ints(350, 300),
+        now,
+    );
+    let mut log = tak_commands::CommandLog::new();
+    log.record(
+        s.tick(),
+        PlayerId(0),
+        SimCommand::Heal {
+            units: UnitSet::single(healer),
+            target,
+            queue: QueueMode::Replace,
+        },
+    );
+    s.run(&log, 3);
+    assert!(
+        s.world()
+            .unit(healer)
+            .unwrap()
+            .build
+            .heal
+            .unwrap()
+            .work
+            .building
+    );
+    assert!(s.world().unit(target).unwrap().combat.health > 60_000);
+    kill_monarch(&mut s, 0);
+    s.step(&[]);
+    let hp = s.world().unit(target).unwrap().combat.health;
+    let mana = tak_sim::economy::player(s.world(), PlayerId(0))
+        .unwrap()
+        .mana;
+    assert!(hp > 0 && !s.world().unit(healer).unwrap().combat.is_dying());
+    steps(&mut s, 100);
+    assert_eq!(s.world().unit(target).unwrap().combat.health, hp);
+    assert_eq!(
+        tak_sim::economy::player(s.world(), PlayerId(0))
+            .unwrap()
+            .mana,
+        mana
+    );
+    assert!(s.world().unit(healer).unwrap().build.heal.is_none());
+    let calls = rec.log.borrow();
+    assert_eq!(calls.calls_of(healer, "StartBuilding").len(), 1);
+    assert_eq!(calls.calls_of(healer, "StopBuilding").len(), 1);
+}
