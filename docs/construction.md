@@ -137,7 +137,7 @@ kept as an alias of `load_match`.
 A build order dropped at the site check is logged in
 `ConstructionState.rejections` (the latest 64, hashed): tick, builder,
 player, definition, snapped site and `SiteError`, whose `reason()` gives the
-text ("must be built on a free sacred site", "a wreck is in the way", ...).
+text ("must be built on a free sacred site", "a feature is in the way", ...).
 A UI can also call `placement::check_site` before ordering, to colour the
 footprint.
 

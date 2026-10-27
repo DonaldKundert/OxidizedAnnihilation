@@ -7,17 +7,17 @@
 //!   unit definition's corpse (FBI `corpse`).
 //! - **State** ([`FeatureState`], `World::features`): a generational arena
 //!   of live features in slot order, hashed every tick.
-//! - Placed features block through the map's terrain grid (their `FEATURE`
-//!   flag is already in it). Corpses with `blocking = 1` add a dynamic
-//!   obstacle through [`crate::pathfinding::add_obstacle`] while they lie
-//!   there, so movement layers route around them and placement refuses the
-//!   cells.
+//! - Blocking placed features and corpses own counted dynamic obstacles.
+//!   Real-content scenarios transfer the placed stamps out of static
+//!   terrain; unrelated authored terrain flags remain immutable.
 //! - Corpses with a `decompose_time` vanish after that many seconds
 //!   (**Believed**; only non-blocking infantry corpses carry the key).
 //!
-//! Not yet: reclaim (`reclaimable`, `energy`), feature damage and burning,
-//! resurrection, removing a placed feature (its block lives in the static
-//! terrain grid).
+//! - Positive weapon impacts subtract health, then replace a destroyed
+//!   feature with at most one `featuredead` successor. No mana is awarded.
+//!
+//! Not yet: builder Clear/reclaim (`reclaimable`, `energy`), burning,
+//! resurrection or projectile/feature collision along the flight path.
 
 use serde::{Deserialize, Serialize};
 use tak_commands::UnitDefId;
@@ -129,7 +129,7 @@ pub struct PlacedFeature {
 }
 
 /// The feature part of a scenario. Empty by default (synthetic scenarios).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FeatureSetup {
     /// Definitions used by `placed` and `corpses`.
@@ -138,6 +138,20 @@ pub struct FeatureSetup {
     pub placed: Vec<PlacedFeature>,
     /// Corpse feature of unit definition `i` (FBI `corpse`), if any.
     pub corpses: Vec<Option<u32>>,
+    /// Whether placed features block. Preserves the content passability
+    /// rule; corpses are unaffected. Defaults to true for authored scenarios.
+    pub placed_features_block: bool,
+}
+
+impl Default for FeatureSetup {
+    fn default() -> Self {
+        Self {
+            defs: Vec::new(),
+            placed: Vec::new(),
+            corpses: Vec::new(),
+            placed_features_block: true,
+        }
+    }
 }
 
 impl FeatureSetup {
@@ -147,27 +161,37 @@ impl FeatureSetup {
         map: &tak_content::MapDef,
         rs: &tak_content::Ruleset,
         units: &[crate::UnitDef],
-    ) -> FeatureSetup {
-        let mut s = FeatureSetup::default();
+    ) -> Result<FeatureSetup, ScenarioError> {
+        let mut s = FeatureSetup {
+            placed_features_block: map.passability.rule.features_block,
+            ..FeatureSetup::default()
+        };
         for p in &map.features {
-            if s.placed.len() >= MAX_PLACED_FEATURES {
-                break;
-            }
             let Some(f) = p.def.as_deref().and_then(|d| rs.feature(d)) else {
                 continue;
             };
             if !FeatureDef::from_content(f).matters() {
                 continue;
             }
-            let Some(def) = s.intern(rs, f) else { break };
-            s.placed.push(PlacedFeature {
-                def,
-                x: p.x,
-                z: p.z,
-            });
+            if s.placed.len() >= MAX_PLACED_FEATURES {
+                return Err(ScenarioError::Invalid(
+                    "features: too many placed features".into(),
+                ));
+            }
+            let def = s.intern(rs, f).ok_or_else(|| {
+                ScenarioError::Invalid("features: too many feature definitions".into())
+            })?;
+            let (x, z) = match map.passability.rule.anchor {
+                tak_content::FeatureAnchor::TopLeft => (p.x, p.z),
+                tak_content::FeatureAnchor::Center => (
+                    p.x.saturating_sub(u32::from(f.footprint_x).saturating_sub(1) / 2),
+                    p.z.saturating_sub(u32::from(f.footprint_z).saturating_sub(1) / 2),
+                ),
+            };
+            s.placed.push(PlacedFeature { def, x, z });
         }
         s.resolve_corpses(rs, units);
-        s
+        Ok(s)
     }
 
     /// Fill `corpses` for every unit definition from its FBI `corpse`
@@ -212,7 +236,7 @@ impl FeatureSetup {
                     self.defs.push(FeatureDef::from_content(nf));
                     (self.defs.len() - 1) as u32
                 }
-                None => break,
+                None => return None,
             };
             self.defs[cur as usize].feature_dead = Some(j);
             cur = j;
@@ -221,7 +245,11 @@ impl FeatureSetup {
         Some(me)
     }
 
-    pub(crate) fn validate(&self, unit_defs: usize) -> Result<(), ScenarioError> {
+    pub(crate) fn validate(
+        &self,
+        unit_defs: usize,
+        map: &crate::map::MapInfo,
+    ) -> Result<(), ScenarioError> {
         let bad = |m: &str| Err(ScenarioError::Invalid(format!("features: {m}")));
         if self.defs.len() > MAX_FEATURE_DEFS || self.placed.len() > MAX_PLACED_FEATURES {
             return bad("too many");
@@ -242,11 +270,12 @@ impl FeatureSetup {
                 return bad("bad definition");
             }
         }
-        let side = crate::map::MAX_MAP_SIDE as u32;
+        let cols = (map.width as u32).div_ceil(16);
+        let rows = (map.height as u32).div_ceil(16);
         if self
             .placed
             .iter()
-            .any(|p| p.def >= n || p.x > side || p.z > side)
+            .any(|p| p.def >= n || p.x >= cols || p.z >= rows)
             || self.corpses.iter().flatten().any(|&c| c >= n)
         {
             return bad("index out of range");
@@ -270,6 +299,9 @@ impl FeatureSetup {
         for c in &self.corpses {
             h.option(*c, StateHasher::u32);
         }
+        if !self.placed_features_block {
+            h.bytes(b"PLACED_NONBLOCKING");
+        }
         h.finish()
     }
 }
@@ -277,7 +309,7 @@ impl FeatureSetup {
 /// Where a live feature came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
-    /// Placed on the map; blocks through the map's terrain grid.
+    /// Placed on the map.
     Map,
     /// Left by a dead unit of this definition.
     Corpse(UnitDefId),
@@ -290,6 +322,9 @@ pub struct Feature {
     pub def: u32,
     /// Footprint in attribute cells (anchor top-left).
     pub rect: CellRect,
+    /// Stable world centre used when snapping successor footprints. Kept
+    /// across generations so odd/even footprint cycles cannot drift.
+    pub replacement_center: WorldPos,
     /// Facing (corpses keep the unit's).
     pub heading: Angle,
     /// Hit points (the definition's `damage`).
@@ -298,7 +333,7 @@ pub struct Feature {
     pub origin: Origin,
     /// Tick it appeared.
     pub born: u32,
-    /// It holds a dynamic obstacle (blocking corpse).
+    /// It owns a counted dynamic obstacle.
     pub obstacle: bool,
 }
 
@@ -312,12 +347,44 @@ impl Feature {
         )
     }
 
+    /// Half-open footprint contains `point` (the deterministic direct-hit
+    /// shape; Chosen, not a model collision volume).
+    pub fn contains(&self, point: WorldPos) -> bool {
+        let x = point.x.to_int_floor().div_euclid(16);
+        let z = point.y.to_int_floor().div_euclid(16);
+        self.covers_cell(x, z)
+    }
+
+    fn covers_cell(&self, x: i32, z: i32) -> bool {
+        x >= self.rect.x
+            && x < self.rect.x + self.rect.w
+            && z >= self.rect.z
+            && z < self.rect.z + self.rect.h
+    }
+
+    /// Distance to the nearest point of the footprint, zero inside.
+    /// Chosen blast shape, centralized here for later fidelity corrections.
+    pub fn distance_to(&self, point: WorldPos) -> Fx {
+        let nearest = tak_math::Vec2::new(
+            point.x.clamp(
+                Fx::from_int(self.rect.x * 16),
+                Fx::from_int((self.rect.x + self.rect.w) * 16),
+            ),
+            point.y.clamp(
+                Fx::from_int(self.rect.z * 16),
+                Fx::from_int((self.rect.z + self.rect.h) * 16),
+            ),
+        );
+        point.distance(nearest)
+    }
+
     fn hash(&self, h: &mut StateHasher) {
         h.u32(self.def);
         h.i32(self.rect.x);
         h.i32(self.rect.z);
         h.i32(self.rect.w);
         h.i32(self.rect.h);
+        h.vec2(self.replacement_center);
         h.angle(self.heading);
         h.i32(self.health);
         match self.origin {
@@ -366,7 +433,7 @@ impl FeatureState {
             slots: Vec::new(),
             corpses_spawned: 0,
         };
-        for p in &setup.placed {
+        for p in setup.placed.iter().take(MAX_FEATURES) {
             let Some(d) = setup.defs.get(p.def as usize) else {
                 continue;
             };
@@ -376,14 +443,22 @@ impl FeatureState {
                 w: i32::from(d.footprint_x),
                 h: i32::from(d.footprint_z),
             };
-            s.insert(Feature {
-                def: p.def,
-                rect,
-                heading: Angle::ZERO,
-                health: d.damage,
-                origin: Origin::Map,
-                born: 0,
-                obstacle: false,
+            // Fresh map slots need no free-slot scan (linear initialization).
+            s.slots.push(Slot {
+                generation: 0,
+                feature: Some(Feature {
+                    def: p.def,
+                    rect,
+                    replacement_center: tak_math::Vec2::from_ints(
+                        rect.x * 16 + rect.w * 8,
+                        rect.z * 16 + rect.h * 8,
+                    ),
+                    heading: Angle::ZERO,
+                    health: d.damage,
+                    origin: Origin::Map,
+                    born: 0,
+                    obstacle: d.blocking && setup.placed_features_block,
+                }),
             });
         }
         s
@@ -525,6 +600,7 @@ pub fn spawn_corpse(
     let f = Feature {
         def: fdef,
         rect,
+        replacement_center: r.center(),
         heading,
         health: d.damage,
         origin: Origin::Corpse(def),
@@ -546,6 +622,139 @@ pub fn remove(world: &mut World, id: FeatureId) -> Option<Feature> {
         pathfinding::remove_obstacle(world, f.rect);
     }
     Some(f)
+}
+
+/// Stamp all initial placed blockers before movement layers exist. Calls
+/// do not rebuild grids or allocate combined planes during initialization.
+pub(crate) fn initialize_obstacles(world: &mut World) {
+    let rects: Vec<_> = world
+        .features
+        .iter()
+        .filter(|(_, f)| f.obstacle)
+        .map(|(_, f)| f.rect)
+        .collect();
+    for rect in rects {
+        pathfinding::add_obstacle(world, rect);
+    }
+}
+
+/// Subtract positive weapon damage from a destructible feature. Returns
+/// whether health changed. Destruction retires the old generation and
+/// creates at most one `featuredead` successor; excess damage is discarded.
+/// Reclaimability is independent of damage and no economy credit is made.
+pub fn apply_damage(world: &mut World, id: FeatureId, amount: i32) -> bool {
+    let Some(f) = world.features.get(id).copied() else {
+        return false;
+    };
+    let Some(d) = world.features.def(&f) else {
+        return false;
+    };
+    if amount <= 0 || f.health <= 0 || d.indestructible {
+        return false;
+    }
+    if amount < f.health {
+        world.features.slots[id.index as usize]
+            .feature
+            .as_mut()
+            .expect("live")
+            .health -= amount;
+        return true;
+    }
+    let next = d.feature_dead;
+    remove(world, id);
+    let Some((def, d)) =
+        next.and_then(|n| world.features.setup.defs.get(n as usize).map(|d| (n, d)))
+    else {
+        return true;
+    };
+    // Keep the same world centre, snapped to the successor footprint like
+    // corpses. A replacement is a new lifetime even in a cyclic definition.
+    let r = Rect::around(f.replacement_center, d.footprint_x, d.footprint_z);
+    let successor = Feature {
+        def,
+        rect: CellRect {
+            x: r.x,
+            z: r.z,
+            w: r.w,
+            h: r.h,
+        },
+        replacement_center: f.replacement_center,
+        heading: f.heading,
+        health: d.damage,
+        origin: f.origin,
+        born: world.tick().0,
+        obstacle: d.blocking
+            && (matches!(f.origin, Origin::Corpse(_))
+                || world.features.setup.placed_features_block),
+    };
+    if world.features.insert(successor).is_some() && successor.obstacle {
+        pathfinding::add_obstacle(world, successor.rect);
+    }
+    true
+}
+
+/// Snapshot this impact's feature hits before any lifetime changes.
+/// Chosen: small impacts hit the first damage-eligible footprint in slot order, unless a
+/// unit already took the direct hit; blasts use footprint-edge distance
+/// and the existing unit falloff. Feature category modifiers are unknown,
+/// so only the weapon's authored default damage is used.
+pub(crate) fn impact_hits(
+    world: &World,
+    point: WorldPos,
+    aoe: i32,
+    damage: i32,
+    edge: Fx,
+    direct_unit: bool,
+) -> Vec<(FeatureId, i32)> {
+    if damage <= 0 {
+        return Vec::new();
+    }
+    let damageable =
+        |f: &Feature| f.health > 0 && world.features.def(f).is_some_and(|d| !d.indestructible);
+    if aoe <= 16 {
+        return if direct_unit {
+            Vec::new()
+        } else {
+            world
+                .features
+                .iter()
+                .find(|(_, f)| damageable(f) && f.contains(point))
+                .map(|(id, _)| vec![(id, damage)])
+                .unwrap_or_default()
+        };
+    }
+    let radius = aoe.max(0) / 2;
+    world
+        .features
+        .iter()
+        .filter(|(_, f)| damageable(f))
+        .filter_map(|(id, f)| {
+            let distance = f.distance_to(point).to_int_floor();
+            (distance < radius).then(|| {
+                (
+                    id,
+                    crate::combat::area_damage(damage, distance, radius, edge),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Placement's legacy `S` yard cell permits placed map-feature stamps, but
+/// not corpses or externally added obstacles. Count rather than exempting
+/// the whole cell so overlapping blockers remain independent.
+pub(crate) fn blocks_placement(world: &World, cx: i32, cz: i32, sacred_yard: bool) -> bool {
+    let cols = world.map().terrain.as_ref().map_or(0, |t| t.cols);
+    let count = world.pathing.obstacles_at(cx, cz, cols);
+    if count == 0 || !sacred_yard {
+        return count > 0;
+    }
+    let placed = world
+        .features
+        .iter()
+        .filter(|(_, f)| f.obstacle && matches!(f.origin, Origin::Map) && f.covers_cell(cx, cz))
+        .count() as u32;
+    count > placed
 }
 
 /// Per tick (called at the end of the combat lane): corpses whose
@@ -571,8 +780,7 @@ pub fn tick(world: &mut World) {
 }
 
 /// `true` if a live blocking feature covers attribute cell `(cx, cz)`
-/// (placed features through the terrain grid are not included; see
-/// [`crate::map::terrain::FEATURE`]).
+/// (placed map features and corpses).
 pub fn dynamic_block_at(world: &World, cx: i32, cz: i32) -> bool {
     pathfinding::is_obstacle(world, cx, cz)
 }

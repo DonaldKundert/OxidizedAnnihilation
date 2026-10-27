@@ -280,7 +280,7 @@ impl World {
             }
         }
         let static_digest = h.finish();
-        Ok(World {
+        let mut world = World {
             tick: Tick(0),
             rng: Rng::new(scenario.seed),
             map,
@@ -295,7 +295,9 @@ impl World {
             construction: Default::default(),
             features: crate::features::FeatureState::new(&scenario.features),
             victory: crate::victory::VictoryState::new(&scenario.victory, scenario.players.len()),
-        })
+        };
+        crate::features::initialize_obstacles(&mut world);
+        Ok(world)
     }
 
     /// The next tick to run (the number of ticks run so far).

@@ -124,7 +124,7 @@ impl Scenario {
             d.validate()?;
         }
         self.economy.validate()?;
-        self.features.validate(self.unit_defs.len())?;
+        self.features.validate(self.unit_defs.len(), &self.map)?;
         self.victory
             .validate(self.players.len(), self.unit_defs.len())?;
         if self.players.len() > MAX_PLAYERS {
