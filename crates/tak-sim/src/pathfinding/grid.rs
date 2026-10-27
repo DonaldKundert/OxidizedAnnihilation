@@ -106,7 +106,7 @@ impl ClassGrid {
         key: ClassKey,
         map: &MapInfo,
         t: &TerrainGrid,
-        obstacles: &[u16],
+        obstacles: &[u32],
     ) -> ClassGrid {
         let n = t.cols as usize * t.rows as usize;
         let mut g = ClassGrid {
@@ -124,13 +124,13 @@ impl ClassGrid {
     /// Re-stamp after the obstacles changed inside `r`: its cells, every
     /// anchor whose footprint or one-cell ring touches it, then the
     /// connected components (whole map; a flood fill is cheap).
-    pub fn restamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u16], r: CellRect) {
+    pub fn restamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u32], r: CellRect) {
         if t.cols == self.cols && t.rows == self.rows {
             self.stamp(map, t, obstacles, r);
         }
     }
 
-    fn stamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u16], r: CellRect) {
+    fn stamp(&mut self, map: &MapInfo, t: &TerrainGrid, obstacles: &[u32], r: CellRect) {
         let key = self.key;
         let (cols, rows) = (self.cols, self.rows);
         let n = cols as usize * rows as usize;

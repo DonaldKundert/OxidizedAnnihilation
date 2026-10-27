@@ -116,8 +116,7 @@ pub enum SiteError {
     /// A sacred-site structure (`yardmap = S`, the lodestones) is not on a
     /// free sacred site (WP-P).
     NotSacredSite,
-    /// A blocking feature that appeared during the match (a wreck) covers
-    /// a cell (WP-P).
+    /// A live blocking feature (placed obstacle or wreck) covers a cell.
     Feature,
 }
 
@@ -129,7 +128,7 @@ impl SiteError {
             SiteError::Terrain => "terrain is too steep, too deep or blocked",
             SiteError::Occupied => "another structure is in the way",
             SiteError::NotSacredSite => "must be built on a free sacred site",
-            SiteError::Feature => "a wreck is in the way",
+            SiteError::Feature => "a feature is in the way",
         }
     }
 }
@@ -177,7 +176,7 @@ pub fn check_site(
             if terrain_of_cell(world.map(), r.x + dx, r.z + dz) & blocks != 0 {
                 return Err(SiteError::Terrain);
             }
-            if crate::pathfinding::is_obstacle(world, r.x + dx, r.z + dz) {
+            if crate::features::blocks_placement(world, r.x + dx, r.z + dz, c == b'S') {
                 return Err(SiteError::Feature);
             }
         }

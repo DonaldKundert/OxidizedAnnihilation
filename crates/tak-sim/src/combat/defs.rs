@@ -132,6 +132,9 @@ pub struct WeaponStats {
     /// damage remains governed by the ordinary impact rules.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_air_weapon: bool,
+    /// FBI `unitsonly`: impacts never damage features.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub units_only: bool,
     /// `manapershot`. Non-zero marks a spell: only fired by `CastSpell`.
     #[serde(default)]
     pub mana_per_shot: i32,
@@ -176,6 +179,9 @@ impl WeaponStats {
         // Preserve hashes of older unrestricted synthetic scenarios.
         if self.no_air_weapon {
             h.bytes(b"NOAIR");
+        }
+        if self.units_only {
+            h.bytes(b"UNITSONLY");
         }
         h.i32(self.damage.default);
         h.len(self.damage.multipliers.len());
@@ -301,14 +307,14 @@ pub fn area_damage(base: i32, d: i32, r: i32, edge: Fx) -> i32 {
     if d <= 0 || r <= 0 {
         return base;
     }
-    let d = i64::from(d.min(r));
-    let r = i64::from(r);
-    let e = i64::from(edge.raw());
-    let one = i64::from(Fx::ONE_RAW);
+    let d = i128::from(d.min(r));
+    let r = i128::from(r);
+    let e = i128::from(edge.raw());
+    let one = i128::from(Fx::ONE_RAW);
     // falloff·2^16·r² = (1 - e)(r - d)² + e·r²
     let num = (one - e) * (r - d) * (r - d) + e * r * r;
-    let v = i64::from(base) * num / (one * r * r);
-    v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    let v = i128::from(base) * num / (one * r * r);
+    v.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
 }
 
 /// FBI unit → combat stats.
@@ -391,6 +397,7 @@ fn weapon_from_fbi(w: &tak_content::WeaponDef) -> WeaponStats {
             .aim_tolerance
             .map(|a| a.clamp(0, i32::from(u16::MAX)) as u16),
         no_air_weapon: w.no_air_weapon,
+        units_only: w.units_only,
         mana_per_shot: w.mana_per_shot.unwrap_or(0).max(0),
         damage_kind,
         damage: DamageStats {

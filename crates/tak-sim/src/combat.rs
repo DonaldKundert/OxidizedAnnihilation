@@ -1597,6 +1597,7 @@ fn impact(
         ws.damage_kind,
     );
     let damage = ws.damage.clone();
+    let units_only = ws.units_only;
     let body = |world: &World, id: UnitId| -> Option<Fx> {
         let u = world.unit(id)?;
         Some(u.pos.distance(point) - Fx::from_int(radius_of(world, id)))
@@ -1642,8 +1643,16 @@ fn impact(
             }
         }
     }
+    let feature_hits = if units_only {
+        Vec::new()
+    } else {
+        crate::features::impact_hits(world, point, aoe, damage.default, edge, direct.is_some())
+    };
     for (victim, amount) in hits {
         apply_damage(world, scripts, victim, amount, shooter, dkind, point, now);
+    }
+    for (feature, amount) in feature_hits {
+        crate::features::apply_damage(world, feature, amount);
     }
 }
 

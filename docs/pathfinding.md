@@ -55,8 +55,8 @@ slope 30, water depth 20, water slope 30). All five monarchs but Zhon are
 
 ## Dynamic obstacles (WP-P)
 
-The hook for things that block movement after the map loads (today:
-blocking corpses, `docs/combat.md`; structures use the yard plane below):
+The hook for owned feature blockers (placed features and corpses,
+`docs/combat.md`; structures use the yard plane below):
 
 ```rust
 pathfinding::add_obstacle(world, CellRect { x, z, w, h })    // one more blocker per cell
@@ -64,11 +64,14 @@ pathfinding::remove_obstacle(world, rect)                    // one fewer (never
 pathfinding::is_obstacle(world, cx, cz) -> bool
 ```
 
-- `PathState` keeps a blocker count per attribute cell (allocated on the
-  first add; hashed sparsely: index and count of every non-zero cell). A
+- `PathState` keeps an exact 32-bit blocker count per attribute cell (allocated
+  on the first add; hashed sparsely: index and full count of every non-zero cell). A
   cell with a non-zero count is classified exactly like a map `FEATURE`
   cell (blocked for every class). Counts make overlapping obstacles
-  independent.
+  independent, including more than 65,535 overlapping features. Placed features
+  are stamped before layers exist, without per-feature grid rebuilds or arena
+  free-slot scans. Content conversion removes only their old static `FEATURE`
+  stamps; all other terrain remains immutable.
 - Each call re-stamps every built layer at once (`ClassGrid::restamp`):
   the cells in the rectangle, every anchor whose footprint or one-cell ring
   touches it (so footprint folding and ring demotion stay exact), then the

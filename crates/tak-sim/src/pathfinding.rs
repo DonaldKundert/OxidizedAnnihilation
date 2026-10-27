@@ -361,7 +361,7 @@ pub struct PathState {
     pub stats: PathStats,
     /// Dynamic obstacles: blockers per attribute cell, row-major over the
     /// map's terrain grid (empty until the first [`add_obstacle`]).
-    obstacles: Vec<u16>,
+    obstacles: Vec<u32>,
     /// Yard-selected cells, kept separate from reclaimable feature blockers.
     structures: Vec<u16>,
     structure_stamps: Vec<structures::Stamp>,
@@ -447,14 +447,14 @@ impl PathState {
         for (i, &c) in self.obstacles.iter().enumerate() {
             if c > 0 {
                 h.u32(i as u32);
-                h.u16(c);
+                h.u32(c);
             }
         }
     }
 
     /// Dynamic feature blockers on attribute cell `(cx, cz)` (0 outside the map or
     /// on maps without terrain).
-    pub fn obstacles_at(&self, cx: i32, cz: i32, cols: u32) -> u16 {
+    pub fn obstacles_at(&self, cx: i32, cz: i32, cols: u32) -> u32 {
         if cx < 0 || cz < 0 || cx as u32 >= cols {
             return 0;
         }
@@ -474,14 +474,14 @@ impl PathState {
         self.built
     }
 
-    fn combined_obstacles(&self) -> Vec<u16> {
+    fn combined_obstacles(&self) -> Vec<u32> {
         (0..self.obstacles.len().max(self.structures.len()))
             .map(|i| {
                 self.obstacles
                     .get(i)
                     .copied()
                     .unwrap_or(0)
-                    .saturating_add(self.structures.get(i).copied().unwrap_or(0))
+                    .saturating_add(u32::from(self.structures.get(i).copied().unwrap_or(0)))
             })
             .collect()
     }
@@ -631,7 +631,8 @@ fn change_obstacle(world: &mut World, r: CellRect, add: bool) {
             };
         }
     }
-    if let Some(t) = world.map().terrain.as_ref() {
+    if !ps.grids.is_empty() {
+        let t = world.map().terrain.as_ref().expect("terrain checked");
         let blockers = ps.combined_obstacles();
         for g in &mut ps.grids {
             g.restamp(world.map(), t, &blockers, r);

@@ -169,33 +169,72 @@ Module `tak_sim::features`; state `World::features` (hashed); static data
 features, the corpse of each unit definition).
 
 - **Placed features**: every TNT feature-grid entry whose definition matters
-  to gameplay (`blocking`, `reclaimable`, `damage`, `energy` or
-  `sacredsite`), anchored top-left on its cell with its footprint, health =
-  `damage`. Their blocking is already in the map's terrain grid (`FEATURE`
-  flag), so they add no obstacle. Adamantine Gate: 85 such features, 10 of
-  them sacred stones.
-- **Corpses**: when a unit is removed after `Killed`, its FBI `corpse`
-  feature is spawned for corpse answer 1; for answers above 1 the
-  `featuredead` chain is followed `answer − 1` steps (Believed, TA corpse
-  depth); answer 0 (Kingdoms scripts answer 0 for explosion deaths, kind 3)
-  or no `corpse` key leaves nothing. The footprint is centred on the unit
-  and snapped like a structure (Chosen; `corpseadjustx/z` not applied);
-  heading kept; health = the feature's `damage`.
-- **Blocking**: Known from the data, 52 of 140 corpse features block
-  (`blocking = 1`): walls, towers, keeps, siege engines, ships, big
-  monsters (3x3 to 12x10); the 88 infantry/animal bodies (mostly 2x2) do
-  not. A blocking corpse adds a dynamic obstacle over its footprint
-  (`pathfinding::add_obstacle`, `docs/pathfinding.md`): movement layers
-  route around it at once and placement refuses its cells
-  (`SiteError::Feature`).
-- **Decay**: a corpse with `decompose_time` vanishes that many seconds
-  after it appeared (**Believed**: the key, 30 on infantry bodies, is
-  absent on every blocking wreck). Runs at the end of the combat lane.
-- `CombatState.corpses` (the death log) is kept as before.
-- Not yet: reclaim (`reclaimable`, `energy` → mana via `economy::credit`),
-  damaging/burning features, resurrection, removing placed features (their
-  block lives in the static terrain grid; removal will need a "cleared"
-  overlay).
+  to gameplay (`blocking`, `reclaimable`, `damage`, `energy` or `sacredsite`)
+  is a live feature, with health = `damage`. The content passability rule's
+  top-left/center anchoring is retained. Content conversion transfers its
+  static `FEATURE` stamps to counted live ownership only after the complete
+  placed set is represented; capacity exhaustion fails closed. Other terrain
+  flags and unmanaged cells remain untouched. Authored Scenario terrain is
+  never normalized: an explicit static `FEATURE` remains an independent blocker.
+- **Corpses**: after `Killed`, corpse answer 1 spawns the FBI `corpse`;
+  higher answers follow up to four `featuredead` links (Believed, TA corpse
+  depth). Answer 0 or no `corpse` leaves nothing. The footprint is centred
+  and snapped like a structure (Chosen; `corpseadjustx/z` not applied), with
+  the unit's heading and health = `damage`.
+- **Blocking**: live blocking placed features and corpses each own one
+  counted obstacle over their clipped footprint. Removal/restamping affects
+  neither overlapping live features, structure yards nor slope/water. Layers
+  built later see the same counts; existing layers and active searches are
+  invalidated immediately. `S` placement keeps its previous placed-map-feature
+  exemption, but overlapping corpses/external obstacles still refuse the site.
+  Content `features_block = false` disables only placed-feature occupancy.
+- **Decay**: a corpse with `decompose_time` vanishes that many seconds after
+  it appeared (Believed). Runs at the end of the combat lane.
+- `CombatState.corpses` (the unit death log) is kept as before.
+
+### Weapon-impact clearing (bounded first slice)
+
+Existing ground attacks and weapon explosions can damage and destroy features.
+This is **not** the builder's Clear/reclaim action and awards **no mana**.
+`reclaimable` does not confer damage immunity. Positive-health features are
+eligible unless `indestructible`; zero/negative damage is ignored. FBI
+`unitsonly` now reaches the sim and excludes all feature damage, including splash.
+
+The following are **Chosen**, centralized in `features::impact_hits` and
+`features::apply_damage`, rather than claims of exact retail behavior:
+
+- `areaofeffect <= 16`: preserve the existing direct-unit priority; otherwise
+  hit the first eligible feature in stable slot order whose half-open footprint
+  contains the impact point. Zero-health/indestructible scenery does not shield
+  an overlapping eligible feature. No automatic feature targeting is added.
+- Larger blasts: distance is to the nearest point of the feature footprint;
+  use the existing integer quadratic `area_damage` falloff within the radius.
+  Feature damage uses the weapon's authored **default**, not an invented mapping
+  from feature `category` to unit damage multipliers. Falloff intermediates are
+  wide enough for validated extreme authored values.
+- Snapshot `(FeatureId, damage)` hits before applying them. A lethal hit retires
+  the old generation and spawns at most one `featuredead` successor. Discard
+  overkill: the same impact cannot damage its own successor. Separate impacts
+  in the same tick remain ordered and may hit later generations.
+- Successors keep origin/heading, start at their own full `damage` and reset
+  decay age. Their footprints snap around the original stable replacement
+  centre, so odd/even footprint cycles cannot drift across the map. Each new
+  generation causes the existing client feature renderer to replace its art.
+
+**Unknown/deferred:** retail feature hit volumes/density and blast falloff,
+feature-category damage modifiers, projectile interception/occlusion, burning
+and `featureburnt`, reclaim timing/payout/damaged value/concurrency and
+`featurereclamate`, resurrection. No original reclaim formula is inferred from
+`damage` or `energy`. Ground attacks continue until stopped, as before; a melee
+unit aiming deep inside a large blocking footprint may not reach the point.
+
+Replay checkpoints use **rules version 6**; versions 1–5 are rejected rather
+than silently changing their future combat or obstacle ownership. Command JSON
+is unchanged. Synthetic coverage is in `feature_damage.rs` (including
+cross-process command replay) and `feature_content.rs`; `tak-headless/tests/feature_damage_checkpoint.rs`
+checks partial-damage/successor/cleared checkpoint continuations against fresh
+command replay. No retail assets are included in fixtures. Retail graphical behavior still requires the user's
+licensed install and a graphics-capable runtime.
 
 ## Orders
 

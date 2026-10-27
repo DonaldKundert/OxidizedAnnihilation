@@ -180,6 +180,7 @@ fn scenario() -> Scenario {
         defs: vec![wreck, body],
         placed: vec![],
         corpses: vec![None, None, None, Some(1), None, None, Some(0)],
+        ..FeatureSetup::default()
     };
     Scenario {
         version: SCENARIO_FORMAT_VERSION,

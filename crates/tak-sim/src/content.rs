@@ -196,7 +196,7 @@ impl Scenario {
         rs: &Ruleset,
         players: &[PlayerSetup],
     ) -> Result<Scenario, ScenarioError> {
-        let info = map_from_content(map)?;
+        let mut info = map_from_content(map)?;
         if players.len() > info.start_positions.len() {
             return Err(ScenarioError::Invalid(format!(
                 "{} players but map {} has {} start positions",
@@ -233,7 +233,26 @@ impl Scenario {
         }
         let features = Box::new(crate::features::FeatureSetup::from_content(
             map, rs, &unit_defs,
-        ));
+        )?);
+        // This content grid's FEATURE stamps come from the same complete
+        // placed-feature list. Transfer only those stamps to live feature
+        // ownership; never erase water/slope/paving or unmanaged cells.
+        // Manually authored Scenario terrain is not normalized here.
+        if features.placed_features_block {
+            if let Some(t) = &mut info.terrain {
+                for p in &features.placed {
+                    let d = &features.defs[p.def as usize];
+                    if !d.blocking {
+                        continue;
+                    }
+                    for z in p.z..p.z.saturating_add(u32::from(d.footprint_z)).min(t.rows) {
+                        for x in p.x..p.x.saturating_add(u32::from(d.footprint_x)).min(t.cols) {
+                            t.flags[(z * t.cols + x) as usize] &= !crate::map::terrain::FEATURE;
+                        }
+                    }
+                }
+            }
+        }
         let sc = Scenario {
             version: SCENARIO_FORMAT_VERSION,
             initial_units: None,
