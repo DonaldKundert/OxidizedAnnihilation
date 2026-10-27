@@ -3,15 +3,17 @@
 //! and 100 units with random targets all finish within a bounded number of
 //! ticks under the per-tick step budget.
 
+mod map_common;
+
+use map_common::blocked;
 use tak_commands::{
     LoggedCommand, PlayerId, QueueMode, SimCommand, Tick, UnitDefId, UnitId, UnitSet,
 };
 use tak_math::{Angle, Fx, Rng, Vec2};
 use tak_sim::content::load_match;
-use tak_sim::map::{MapInfo, terrain};
 use tak_sim::pathfinding::{Outcome, PathStatus, STEPS_PER_TICK};
 use tak_sim::systems::ARRIVAL_TOLERANCE;
-use tak_sim::{Match, PlayerSetup, Sim, WorldPos};
+use tak_sim::{Match, PlayerSetup, Sim, World, WorldPos};
 
 const MAP: &str = "kmap/Adamantine Gate";
 
@@ -34,16 +36,12 @@ fn mv(tick: u32, player: u8, unit: UnitId, to: WorldPos) -> LoggedCommand {
     }
 }
 
-fn blocked(map: &MapInfo, p: WorldPos) -> bool {
-    map.terrain_at(p) & terrain::BLOCKS != 0
-}
-
 /// Blocked cells crossed by the straight line `a`–`b` (sampled every 4 units).
-fn blocked_on_line(map: &MapInfo, a: WorldPos, b: WorldPos) -> usize {
+fn blocked_on_line(world: &World, a: WorldPos, b: WorldPos) -> usize {
     let len = a.distance(b).to_int_floor().max(1);
     let d = (b - a).normalize().unwrap_or(Vec2::ZERO);
     (0..len / 4)
-        .filter(|k| blocked(map, a + d.scale(Fx::from_int(4 * k))))
+        .filter(|k| blocked(world, a + d.scale(Fx::from_int(4 * k))))
         .count()
 }
 
@@ -63,7 +61,7 @@ fn monarch_crosses_between_plateaus_through_the_canyon_gap() {
     // Player 1's plateau, a little off its start marker.
     let to = Vec2::from_ints(1000, 2400);
     assert!(
-        blocked_on_line(&sc.map, from, to) > 0,
+        blocked_on_line(sim.world(), from, to) > 0,
         "the straight line is blocked"
     );
     sim.step(&[mv(1, 0, id, to)]);
@@ -73,7 +71,7 @@ fn monarch_crosses_between_plateaus_through_the_canyon_gap() {
     for _ in 0..6000 {
         let u = sim.world().unit(id).unwrap();
         assert!(
-            !blocked(&sc.map, u.pos),
+            !blocked(sim.world(), u.pos),
             "entered a blocked cell at {:?}",
             u.pos
         );
@@ -122,7 +120,7 @@ fn hundred_units_with_random_targets_all_finish_under_budget() {
     let mut ids = Vec::new();
     while ids.len() < 100 {
         let p = Vec2::from_ints(rng.range_i32(64, w - 64), rng.range_i32(64, h - 64));
-        if blocked(&sc.map, p) {
+        if blocked(sim.world(), p) {
             continue;
         }
         let a = Angle::from_raw(rng.next_u32() as u16);

@@ -2,6 +2,9 @@
 
 #![allow(dead_code)]
 
+#[path = "../map_common/mod.rs"]
+mod map_common;
+
 use tak_commands::{
     CommandLog, PlayerId, QueueMode, SimCommand, Target, Tick, UnitDefId, UnitId, UnitSet,
 };
@@ -238,9 +241,7 @@ pub fn open_area(s: &Sim, map: &MapInfo, w: i32, h: i32, away: i32) -> Vec2 {
             if far && best.is_none_or(|(bd, _)| d < bd) {
                 let open = (0..=h / 8).all(|j| {
                     (0..=w / 8).all(|i| {
-                        map.terrain_at(Vec2::from_ints(x + 8 * i, y + 8 * j))
-                            & tak_sim::map::terrain::BLOCKS
-                            == 0
+                        !map_common::blocked(s.world(), Vec2::from_ints(x + 8 * i, y + 8 * j))
                     })
                 });
                 if open {
