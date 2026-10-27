@@ -3,6 +3,8 @@
 //! running (the keep's own script sees port 17 count 100 -> 0), then the
 //! keep trains two swordsmen that appear at its build piece and walk out.
 
+mod map_common;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -153,7 +155,6 @@ fn monarch_builds_a_keep_and_the_keep_trains_two_swordsmen() {
     let start = sim.world().unit(king_id).unwrap().pos;
 
     // A free site 400-650 units away with open ground on the way there.
-    let map = sim.world().map().clone();
     let site = (0..64)
         .flat_map(|ring| (0..32).map(move |k| (ring, k)))
         .filter_map(|(ring, k)| {
@@ -164,7 +165,7 @@ fn monarch_builds_a_keep_and_the_keep_trains_two_swordsmen() {
             placement::check_site(sim.world(), keep_def, s, None).ok()?;
             let open = (0..=40).all(|i| {
                 let q = start + (s - start).scale(Fx::from_ratio(i, 40).unwrap());
-                map.terrain_at(q) & tak_sim::map::terrain::BLOCKS == 0
+                !map_common::blocked(sim.world(), q)
             });
             open.then_some(s)
         })

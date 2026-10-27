@@ -196,6 +196,16 @@ construction use it.
   and every unit is done by tick 3,486. No tick exceeds 1,333 steps; the
   budget is the limit while the queue drains. About 5,900 ticks/s in a
   release build without scripts while all 100 move (310 in a debug build).
+- **Fixture occupancy (October 2026)**: real-map spawn, open-ray and combat-arena
+  selection combines immutable terrain flags with live feature obstacle counts
+  (`tests/map_common`). After placed features became owned obstacles, a
+  static-only query incorrectly admitted feature-covered cells and changed the
+  seeded sample; three units then abandoned their moves. Restoring the original
+  centre-cell eligibility restores the 80/20 result above, including the 3,486
+  ticks and 717,256 pops, without changing the planner, budget or success criteria.
+  Synthetic helper tests cover static flags, live addition/removal and overlapping
+  blockers. This fixture predicate is not a movement-class footprint or
+  structure-yard check.
 - **Determinism**: `path_synthetic.rs` re-runs a 40-unit maze run with moves
   and patrols in a child process and compares all 2,999 hashes; the
   `tak-headless` real-map two-process test now runs with pathing too.

@@ -3,12 +3,15 @@
 //! map's start markers, walk under their FBI stats, route around impassable
 //! terrain, and their scripts see "moving" (port 29) while walking.
 
+mod map_common;
+
+use map_common::blocked;
 use tak_commands::{LoggedCommand, PlayerId, QueueMode, SimCommand, Tick, UnitId, UnitSet};
 use tak_math::{Angle, Fx, Vec2};
 use tak_sim::content::{cell_center, load_match};
-use tak_sim::map::{MapInfo, terrain};
+use tak_sim::map::MapInfo;
 use tak_sim::systems::ARRIVAL_TOLERANCE;
-use tak_sim::{Match, PlayerSetup, ScriptHost, Sim, WorldPos};
+use tak_sim::{Match, PlayerSetup, ScriptHost, Sim, World, WorldPos};
 
 const MAP: &str = "kmap/Adamantine Gate";
 
@@ -31,10 +34,6 @@ fn mv(tick: u32, player: u8, unit: UnitId, to: WorldPos) -> LoggedCommand {
     }
 }
 
-fn blocked(map: &MapInfo, p: WorldPos) -> bool {
-    map.terrain_at(p) & terrain::BLOCKS != 0
-}
-
 /// Points every 4 units from `a` toward angle `dir`, up to `len`.
 fn ray(a: WorldPos, dir: Angle, len: i32) -> impl Iterator<Item = WorldPos> {
     (1..=len / 4).map(move |k| a + Vec2::from_angle(dir).scale(Fx::from_int(4 * k)))
@@ -49,12 +48,12 @@ fn inside(map: &MapInfo, p: WorldPos) -> bool {
 
 /// A direction (of 32) whose straight line of `len` units from `from` is
 /// open ground inside the map, with a margin of open cells around it.
-fn open_line(map: &MapInfo, from: WorldPos, len: i32) -> Option<WorldPos> {
+fn open_line(world: &World, from: WorldPos, len: i32) -> Option<WorldPos> {
     (0..32u16).map(|i| Angle::from_raw(i * 2048)).find_map(|d| {
-        let ok = ray(from, d, len + 24).all(|p| inside(map, p) && !blocked(map, p))
+        let ok = ray(from, d, len + 24).all(|p| inside(world.map(), p) && !blocked(world, p))
             && [-0x300i32, 0x300].iter().all(|off| {
                 let side = Angle::from_raw((i32::from(d.raw()) + off) as u16);
-                ray(from, side, len).all(|p| inside(map, p) && !blocked(map, p))
+                ray(from, side, len).all(|p| inside(world.map(), p) && !blocked(world, p))
             });
         ok.then(|| from + Vec2::from_angle(d).scale(Fx::from_int(len)))
     })
@@ -63,16 +62,16 @@ fn open_line(map: &MapInfo, from: WorldPos, len: i32) -> Option<WorldPos> {
 /// A direction whose line from `from` runs over open ground and then hits
 /// a blocking cell between 48 and 400 units out. Returns a target 64 units
 /// past the first blocked point.
-fn line_into_blocker(map: &MapInfo, from: WorldPos) -> Option<WorldPos> {
+fn line_into_blocker(world: &World, from: WorldPos) -> Option<WorldPos> {
     (0..64u16).map(|i| Angle::from_raw(i * 1024)).find_map(|d| {
         let pts: Vec<_> = ray(from, d, 400).collect();
-        let first = pts.iter().position(|&p| blocked(map, p))?;
-        let ok = first >= 12 && pts[..first].iter().all(|&p| inside(map, p));
+        let first = pts.iter().position(|&p| blocked(world, p))?;
+        let ok = first >= 12 && pts[..first].iter().all(|&p| inside(world.map(), p));
         // The turn happens in place, so the walk follows the line closely;
         // require open ground on both sides of the line too.
         let sides_ok = [-0x200i32, 0x200].iter().all(|off| {
             let side = Angle::from_raw((i32::from(d.raw()) + off) as u16);
-            ray(from, side, 4 * first as i32 - 24).all(|p| !blocked(map, p))
+            ray(from, side, 4 * first as i32 - 24).all(|p| !blocked(world, p))
         });
         (ok && sides_ok).then(|| pts[first] + Vec2::from_angle(d).scale(Fx::from_int(64)))
     })
@@ -134,7 +133,7 @@ fn monarchs_spawn_walk_and_their_scripts_see_moving() {
     for i in 0..2u32 {
         let id = UnitId::new(i, 0);
         let from = sim.world().unit(id).unwrap().pos;
-        let to = open_line(&sc.map, from, 160).expect("an open line near the start");
+        let to = open_line(sim.world(), from, 160).expect("an open line near the start");
         targets.push((id, to));
     }
     let t = sim.tick().0;
@@ -147,7 +146,7 @@ fn monarchs_spawn_walk_and_their_scripts_see_moving() {
         for (i, (id, _)) in targets.iter().enumerate() {
             let u = sim.world().unit(*id).unwrap();
             top[i] = top[i].max(u.speed);
-            assert!(!blocked(&sc.map, u.pos));
+            assert!(!blocked(sim.world(), u.pos));
         }
         if targets
             .iter()
@@ -201,7 +200,7 @@ fn every_mobile_unit_script_walks_without_runaways() {
         let id = UnitId::new(0, 0);
         sim.step(&[]);
         let from = sim.world().unit(id).unwrap().pos;
-        let to = open_line(&sc.map, from, 160).unwrap();
+        let to = open_line(sim.world(), from, 160).unwrap();
         sim.step(&[mv(1, 0, id, to)]);
         let mut moved = false;
         for _ in 0..600 {
@@ -243,8 +242,8 @@ fn monarch_routes_around_impassable_terrain() {
         .find_map(|k| {
             let a = Angle::from_raw(k * 4096);
             let p = start + Vec2::from_angle(a).scale(Fx::from_int(32 * i32::from(k % 4)));
-            (!blocked(&sc.map, p) && inside(&sc.map, p))
-                .then(|| line_into_blocker(&sc.map, p).map(|t| (p, t)))
+            (!blocked(sim.world(), p) && inside(&sc.map, p))
+                .then(|| line_into_blocker(sim.world(), p).map(|t| (p, t)))
                 .flatten()
         })
         .expect("a blocker near the start");
@@ -264,7 +263,7 @@ fn monarch_routes_around_impassable_terrain() {
     for _ in 0..3000 {
         let u = sim.world().unit(id).unwrap();
         assert!(
-            !blocked(&sc.map, u.pos),
+            !blocked(sim.world(), u.pos),
             "entered a blocked cell at {:?}",
             u.pos
         );
