@@ -170,9 +170,17 @@ fn classic_tak_session_exercises_every_binding() {
                 }],
                 "{ctx}"
             ),
-            "c_clear_is_reserved"
-            | "alt_1_formation_is_reserved"
-            | "ctrl_d_dismiss_is_reserved" => {
+            "c_clear_requires_capability" => {
+                assert!(out.is_empty(), "{ctx}");
+                assert!(
+                    fb.contains(&Feedback::Refused {
+                        reason: Refusal::CannotDo
+                    }),
+                    "{ctx}"
+                );
+                assert_eq!(m.mode(), Mode::None);
+            }
+            "alt_1_formation_is_reserved" | "ctrl_d_dismiss_is_reserved" => {
                 assert!(out.is_empty() && refused, "{ctx}");
             }
             "ctrl_1_creates_squad" => {

@@ -55,12 +55,7 @@ fn synthetic_keys_tdf_maps_reserves_and_reports() {
     assert_eq!(find(&p, "s", None), Some(Action::Stop));
     // Shift+S is the same order: Shift just queues, no extra binding.
     assert_eq!(find(&p, "s", Some("shift")), None);
-    assert_eq!(
-        find(&p, "c", None),
-        Some(Action::Reserved {
-            order: ReservedOrder::Clear
-        })
-    );
+    assert_eq!(find(&p, "c", None), Some(Action::ClearMode));
     // Unbound in the file: gone, even though Classic binds Z with nothing
     // but Ctrl+Z stays (the file leaves it alone).
     assert_eq!(find(&p, "z", None), None);
@@ -123,7 +118,7 @@ fn synthetic_keys_tdf_maps_reserves_and_reports() {
     assert_eq!(status("XCHAR_E9"), LineStatus::Skipped);
     assert_eq!(status("WIBBLE"), LineStatus::Skipped);
     assert_eq!(status("LOWER_Z"), LineStatus::Unbound);
-    assert_eq!(status("LOWER_C"), LineStatus::Reserved);
+    assert_eq!(status("LOWER_C"), LineStatus::Mapped);
     assert_eq!(status("F11"), LineStatus::Unsupported);
     // Mouse bindings are untouched.
     assert!(p.bindings.iter().any(|b| b.action == Action::DragSelect));

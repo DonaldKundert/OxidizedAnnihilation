@@ -159,6 +159,7 @@ fn apply_one(world: &mut World, player: PlayerId, cmd: &SimCommand) {
         | SimCommand::SetFactoryRepeat { .. } => {
             crate::construction::apply_factory_command(world, player, cmd);
         }
+        SimCommand::Clear { .. } => crate::construction::apply_clear_command(world, player, cmd),
         SimCommand::Heal { .. } => crate::construction::apply_heal_command(world, player, cmd),
         SimCommand::Patrol { .. } => crate::pathfinding::apply_command(world, player, cmd),
     }

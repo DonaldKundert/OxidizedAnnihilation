@@ -25,6 +25,7 @@ fn fixture(profile: Profile) -> Fixture {
     // The hand-authored training builder can build, heal and cast; no retail data.
     let mut scenario = tak_headless::bot::demo::scenario(false);
     scenario.unit_defs[0].economy.maxmana = 100;
+    scenario.unit_defs[0].build.canreclaim = true;
     scenario.economy.rules.monarch_start_mana_percent = 100;
     scenario.unit_defs[0]
         .combat
@@ -251,6 +252,7 @@ fn arm(app: &mut App, pad: Entity, wanted: Mode) {
         Mode::Patrol => key(app, pad, KeyCode::KeyP),
         Mode::Guard => key(app, pad, KeyCode::KeyG),
         Mode::Heal => key(app, pad, KeyCode::KeyH),
+        Mode::Clear => key(app, pad, KeyCode::KeyC),
         Mode::CastSpell(_) => tap(app, pad, GamepadButton::North),
         Mode::Build(_) => {
             button(app, pad, GamepadButton::LeftTrigger, true);
@@ -272,7 +274,7 @@ fn arm(app: &mut App, pad: Entity, wanted: Mode) {
     assert_eq!(mode(app), wanted);
 }
 
-fn modes() -> [Mode; 8] {
+fn modes() -> [Mode; 9] {
     [
         Mode::Attack,
         Mode::AttackMove,
@@ -280,6 +282,7 @@ fn modes() -> [Mode; 8] {
         Mode::Patrol,
         Mode::Guard,
         Mode::Heal,
+        Mode::Clear,
         Mode::Build(UnitDefId(1)),
         Mode::CastSpell(SpellId(0)),
     ]

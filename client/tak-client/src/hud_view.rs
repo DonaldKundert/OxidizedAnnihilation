@@ -739,6 +739,7 @@ pub(super) fn panel_system(
     let w = s.sim.world();
     let sel = own_selection(w, s.local, input.mapper.selection());
     let first = sel.first().map(|(_, u)| *u);
+    let has_clearer = !tak_input::clearers_for(&sim.view(), input.mapper.selection()).is_empty();
     let has_healer = !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty();
     let caster = crate::view::caster_spells(w, s.local, input.mapper.selection());
     let caster_def = caster
@@ -767,6 +768,7 @@ pub(super) fn panel_system(
             && match a {
                 Action::CastSpell { index } => spells.len() > usize::from(index),
                 Action::HealMode => has_healer,
+                Action::ClearMode => has_clearer,
                 _ => true,
             };
         let want = if shown {
@@ -792,6 +794,7 @@ pub(super) fn panel_system(
             Action::MoveMode => m == Mode::Move,
             Action::GuardMode => m == Mode::Guard,
             Action::HealMode => m == Mode::Heal,
+            Action::ClearMode => m == Mode::Clear,
             Action::PatrolMode => m == Mode::Patrol,
             Action::SetFireState { state } => first.is_some_and(|u| u.fire_state == state),
             Action::CastSpell { index } => spells
@@ -1302,6 +1305,13 @@ pub(super) fn bottom_bar_system(
         CursorKind::Attack => verb_line(&prompt, "Attack", target_name.as_deref()),
         CursorKind::Guard => verb_line(&prompt, "Guard", target_name.as_deref()),
         CursorKind::Heal => verb_line(&prompt, "Heal / repair", target_name.as_deref()),
+        CursorKind::Clear => {
+            let name = tak_input::WorldView::clear_target_at(&view, cursor)
+                .and_then(|id| w.features.get(id))
+                .and_then(|feature| w.features.def(feature))
+                .map(|d| d.name.as_str());
+            verb_line(&prompt, "Clear", name)
+        }
         CursorKind::Patrol => verb_line(&prompt, "Patrol", None),
         CursorKind::Cast => verb_line(&prompt, "Cast", target_name.as_deref()),
         CursorKind::Invalid => "Not possible here".into(),

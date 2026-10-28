@@ -508,12 +508,22 @@ pub fn tick(world: &mut World, _scripts: &mut dyn ScriptHost) {
     }
     world.economy.setup = setup;
 
+    let mut reclaim = vec![0i64; n];
+    for r in std::mem::take(&mut world.construction.reclaim_credits) {
+        if let Some(total) = reclaim.get_mut(r.player.0 as usize) {
+            *total = total.saturating_add(r.mana.max(0));
+        }
+    }
     for (i, p) in world.economy.players.iter_mut().enumerate() {
         let inc = income[i].saturating_add(percent(income[i], bonus_pct[i]));
         p.income = inc;
         p.storage = storage[i];
         let add = per_tick(inc, &mut p.carry);
-        p.mana = p.mana.saturating_add(add).clamp(0, p.storage);
+        p.mana = p
+            .mana
+            .saturating_add(add)
+            .saturating_add(reclaim[i])
+            .clamp(0, p.storage);
         // Shortage sharing for next tick: the fraction of this tick's demand
         // the stock now covers.
         p.ratio = if p.demand <= 0 || p.mana >= p.demand {

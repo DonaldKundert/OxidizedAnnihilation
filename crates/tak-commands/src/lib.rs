@@ -25,7 +25,7 @@ mod log;
 pub use command::{
     ClientCommand, FactoryRallyOrder, FireState, QueueMode, Scope, SimCommand, Target, UnitSet,
 };
-pub use ids::{ControlGroup, PlayerId, SpellId, Tick, UnitDefId, UnitId};
+pub use ids::{ControlGroup, FeatureId, PlayerId, SpellId, Tick, UnitDefId, UnitId};
 pub use log::{CommandLog, LOG_FORMAT_VERSION, LogError, LoggedCommand};
 
 /// A ground-plane position in world units (16.16 fixed point). Which way

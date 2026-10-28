@@ -11,7 +11,9 @@ use tak_math::{Fx, Vec2};
 
 use crate::binding::{Action, Category, GRID_KEYS, Gesture, Profile, Ring};
 use crate::brush::{brush_radius, drag_circle, units_in_circle};
-use crate::context::{Mode, builders_for, healers_for, own_units, pick_unit, resolve_context};
+use crate::context::{
+    Mode, builders_for, clearers_for, healers_for, own_units, pick_unit, resolve_context,
+};
 use crate::cursor::{
     Motion, approach_frac, cursor_motion, friction, pct, per_second, soft_snap, stick_vector,
     stick_vector_zones,
@@ -140,6 +142,8 @@ pub enum CursorKind {
     Attack,
     /// The context order would guard.
     Guard,
+    /// Clear a reclaimable map feature or wreck.
+    Clear,
     /// Heal an owned unit or assist its construction.
     Heal,
     /// Patrol mode.
@@ -763,6 +767,15 @@ impl Mapper {
                 Some(h) if !world.is_enemy(h.owner) => CursorKind::Guard,
                 _ => CursorKind::Invalid,
             },
+            Mode::Clear => {
+                if resolve_context(world, &units, pos, None, Mode::Clear, QueueMode::Replace)
+                    .is_some()
+                {
+                    CursorKind::Clear
+                } else {
+                    CursorKind::Invalid
+                }
+            }
             Mode::Heal => {
                 if resolve_context(
                     world,
@@ -1050,7 +1063,7 @@ impl Mapper {
     fn assist_targets<W: WorldView + ?Sized>(&self, world: &W) -> Vec<(UnitId, Vec2)> {
         let t = &self.tuning;
         let assist = t.magnet_radius_px > 0 || t.friction_pct < 100;
-        if !assist || self.map_pointer.is_some() {
+        if !assist || self.map_pointer.is_some() || self.mode == Mode::Clear {
             return Vec::new();
         }
         let me = world.local_player();
@@ -1069,7 +1082,7 @@ impl Mapper {
             }
             match self.mode {
                 Mode::Build(_) => u.owner == me && u.under_construction,
-                Mode::Patrol => false,
+                Mode::Patrol | Mode::Clear => false,
                 Mode::Guard => u.owner == me,
                 Mode::Heal => u.owner == me && healers.iter().any(|&id| id != u.id),
                 Mode::CastSpell(_) | Mode::Attack => true,
@@ -2249,9 +2262,10 @@ impl Mapper {
     /// the stick chooses, A / X confirms, B goes back one ring.
     fn open_ring<W: WorldView + ?Sized>(&mut self, input: &Input, ring: Ring, world: &W) {
         // Sub-rings keep their learned positions, even in non-fixed profiles.
-        let slots = heal_slots(
+        let slots = work_slots(
             ring_slots(ring),
             !healers_for(world, &self.selection).is_empty(),
+            !clearers_for(world, &self.selection).is_empty(),
             true,
         );
         self.wheel = Some((input.clone(), Wheel::open(WheelKind::of_ring(ring), slots)));
@@ -2367,7 +2381,12 @@ impl Mapper {
                     spells > 0,
                     builders,
                 );
-                let slots = heal_slots(slots, !healers_for(cx.world, &units).is_empty(), true);
+                let slots = work_slots(
+                    slots,
+                    !healers_for(cx.world, &units).is_empty(),
+                    !clearers_for(cx.world, &units).is_empty(),
+                    true,
+                );
                 self.open_wheel(input, WheelKind::Command, slots);
             }
             Action::BuildWheel if self.profile.fixed_slots => {
@@ -2414,9 +2433,10 @@ impl Mapper {
                 } else {
                     self.profile.command_wheel.clone()
                 };
-                let slots = heal_slots(
+                let slots = work_slots(
                     slots,
                     !healers_for(cx.world, &self.selection).is_empty(),
+                    !clearers_for(cx.world, &self.selection).is_empty(),
                     false,
                 );
                 self.open_wheel(input, WheelKind::Command, slots);
@@ -2772,6 +2792,7 @@ impl Mapper {
                 | Action::PatrolMode
                 | Action::GuardMode
                 | Action::HealMode
+                | Action::ClearMode
                 | Action::CastSpellMode
                 | Action::CastSpell { .. }
                 | Action::BuildOption { .. }
@@ -2885,6 +2906,16 @@ impl Mapper {
             }
             Action::PatrolMode => self.set_mode_if_units(Mode::Patrol, cx),
             Action::GuardMode => self.set_mode_if_units(Mode::Guard, cx),
+            Action::ClearMode => {
+                let units = own_units(cx.world, &self.selection);
+                if units.is_empty() {
+                    self.refuse(Refusal::NothingSelected);
+                } else if clearers_for(cx.world, &units).is_empty() {
+                    self.refuse(Refusal::CannotDo);
+                } else {
+                    self.mode = Mode::Clear;
+                }
+            }
             Action::HealMode => {
                 let units = own_units(cx.world, &self.selection);
                 if units.is_empty() {
@@ -3228,8 +3259,9 @@ impl Mapper {
 
     fn sim<W: WorldView + ?Sized>(&mut self, mut command: SimCommand, cx: &mut Cx<'_, W>) {
         // Only Move, Patrol and Guard have factory standing-order support.
-        // Never let another contextual/targeted order fall through to legacy
-        // queue replacement and silently discard factory production.
+        // Ordinary attack/heal/cast orders must not silently discard factory
+        // production. Clear is an explicit authored capability even on some
+        // immobile units; its production barrier is owned by the simulation.
         let targeted_units = match &mut command {
             SimCommand::Attack { units, .. }
             | SimCommand::AttackMove { units, .. }
@@ -3496,6 +3528,7 @@ fn is_order_action(action: Action) -> bool {
             | Action::PatrolMode
             | Action::GuardMode
             | Action::HealMode
+            | Action::ClearMode
             | Action::CastSpellMode
             | Action::CastSpell { .. }
             | Action::BuildOption { .. }
@@ -3512,15 +3545,17 @@ fn is_order_action(action: Action) -> bool {
     )
 }
 
-/// Hide unusable Heal slots without disturbing a fixed wheel's positions.
-fn heal_slots(slots: Vec<Action>, available: bool, fixed: bool) -> Vec<Action> {
-    if available {
-        return slots;
-    }
+/// Hide unusable work slots without disturbing a fixed wheel's positions.
+fn work_slots(slots: Vec<Action>, heal: bool, clear: bool, fixed: bool) -> Vec<Action> {
     slots
         .into_iter()
         .filter_map(|action| {
-            if action != Action::HealMode {
+            let available = match action {
+                Action::HealMode => heal,
+                Action::ClearMode => clear,
+                _ => true,
+            };
+            if available {
                 Some(action)
             } else if fixed {
                 Some(crate::wheel::BLANK)

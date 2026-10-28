@@ -19,6 +19,7 @@ original is unknown), **Unknown**.
 | `workertime` | `workertime` | work per second | Known: 10 for almost every builder and factory (30 `TARPRIE2`, 50 `ZONHURT`) |
 | `builddistance` | `builddistance` | world units | Believed identity |
 | `builder` | `builder` flag | | |
+| `canreclaim` | `canreclaim` flag | explicit Clear capability; independent of `builder` | Known key; supported with positive work/range |
 | `mobile` | `bmcode` flag | mobile builders place at a site; others are factories | TA-Known (the factory handler tests bmcode); Known in Kingdoms: `ARAKING`, `ARASWORD`, `ZONTRAIN` have it, `ARAKEEP`, `ARAWALL` do not |
 | `canbuild` | `canbuild*/<unit>/` menu of the active ruleset | ids, menu order | |
 | `yardmap` | `yardmap`, expanded per cell | | TA-Known expansion rule, below |
@@ -322,7 +323,7 @@ trip, and in two child processes, and compares hashes.
 - The original's sacred-site tolerance; per-definition slope limits;
   retail gate activation and footprint rotation (immobile structure yards
   now block movement; see `pathfinding.md`).
-- Repair, reclaim, resurrection; assisting allies.
+- Exact retail repair/reclaim calibration, resurrection; assisting allies.
 
 ## Real-map run (WP-P)
 
@@ -347,3 +348,99 @@ produce the same hashes.
   open_items_real_map`, then `tak-cli render --map "kmap/Adamantine Gate"
   --players ARA,TAR --world-seed 7 --log <file> --tick 8159 --out DIR`
   (now draws every unit, corpses and wrecks).
+
+
+## Builder Clear / reclaim
+
+Code: `construction/reclaim.rs`; commands: `SimCommand::Clear { units, target:
+FeatureId, queue }`. This is **not weapon Attack** and does not target live units,
+resurrect, or animate corpses. The UI calls it **Clear**.
+
+### Evidence and limits
+
+- **Known:** the Cavedog [Kingdoms manual](https://retrogamer.biz/wp-content/uploads/2015/10/Total_Annihilation_Kingdoms_Manual.pdf),
+  printed pp70–71, describes Stop, utility Clear of obstacles, and Shift queues.
+  The owned install's `ReadMe.txt` and `gamedata/keys.tdf` map C to Clear.
+- The [TA/TA:K Reference Document v2.5](https://downloads.ta3d.org/misc/modding/TAReferenceBible25.pdf)
+  (community reference, not engine source), PDF pp205/211/232, identifies
+  `canreclaim` with Clear, `workertime` with work speed, and corpse `reclaimable`.
+  Its mixed-game provenance is not evidence for an exact Kingdoms formula.
+- **Known, owned GOG corpus audit (2026-10-28, typed parser):** 1,344 unique
+  features, 1,057 reclaimable. Of those, 439 omit energy, 352 are also
+  indestructible, and 42 omit damage (all indestructible). 567 nonempty
+  `featurereclamate` links include 566 self-links and one non-self link.
+  Of 203 units, 24 carry `canreclaim`; 23 have positive work and range, including
+  two without `builder`. The remaining unit is unsupported without a rate/range.
+- **Unknown:** exact original duration, payout amount/cadence, damage adjustment,
+  multi-worker attribution, cancellation retention, and the meaning of
+  `featurereclamate` (including its misspelled alias). No original-runtime
+  timing comparison was available. The choices below are implementation
+  defaults, **not measured retail fidelity or an unnamed balance option**.
+
+### Centralized Chosen rules
+
+1. A complete live owned unit needs authored `canreclaim`, positive `workertime`
+   and positive `builddistance`. `builder`, a build menu, and mobility do not
+   confer or negate Clear. `cananimate` does not grant resurrection here.
+   Missing work/range disables Clear; no invented unit-stat default is used.
+2. A target must be the exact live generational feature ID with `reclaimable`.
+   `indestructible`, zero health, zero energy, and placed/corpse origin do not
+   prevent Clear. Invalid commands preserve existing orders.
+3. Work budget is `30 * max(definition.damage, definition.energy, 1)` whole work
+   units; the stored budget/progress are raw 16.16. Every tick a worker contributes
+   `workertime` work units, in unit slot order, capped by remaining work. Thus a
+   lone worker takes `ceil(30 * max(damage, energy, 1) / workertime)` ticks.
+   A damage-1,000, energy-250 feature with worker-time 10 takes **3,000 ticks /
+   100 seconds**, not 100 ticks. Both absent/zero uses one work unit (three ticks
+   at worker-time 10). This intentionally finite fallback and its scale are
+   isolated in `reclaim::total_work` for later observation-based correction.
+4. Range uses the same inclusive centre-distance minus both footprint pads as
+   construction, centralized in `reclaim::in_range`. Mobile (`bmcode`) workers
+   walk toward the feature centre and stop upon reaching range. Stationary
+   workers only act in range. A failed unchanged approach ends the order and
+   preserves its tail instead of retrying forever.
+5. Progress belongs to the feature lifetime and survives Stop/replacement/worker
+   death. Weapon health is separate: damage does not change its original work
+   budget, accelerate work, or reset progress. Weapon destruction/decay removes
+   the lifetime; queued old IDs never follow a successor. Weapon successors retain
+   the lineage's already-claimed mana counter, not the previous work progress.
+6. Yield is **authored nonnegative `energy` only**; damage never creates mana.
+   A contribution from `before` to `done` earns
+   `floor(energy_raw * done / total) - floor(energy_raw * before / total)`.
+   Shared cumulative rounding pays exactly one full yield for a completed fresh
+   single-stage feature, absent storage overflow. A **Chosen conservation cap**
+   also limits each slice to `max(energy_raw - lineage_claimed, 0)`; attempted
+   earnings increment `lineage_claimed`, even when storage rejects the income.
+   Weapon `featuredead` successors inherit that counter. A lower/equal-valued
+   stage cannot repay prior earnings; a higher-valued stage can offer only the
+   difference. Total attempted income along any replacement chain is therefore
+   bounded by its largest authored stage yield, including self/cyclic graphs.
+   Fresh map features and genuinely new corpses start at zero. Without this
+   rule, partial Clear followed by weapon destruction could repeatedly mint
+   mana (also across the retail data's finite equal-value stages). Same-owner
+   or cross-owner workers cannot duplicate income. The owner doing each capped
+   slice receives it, so slot order decides the final slice and raw rounding unit.
+7. Earnings settle in the same tick's economy lane **after live storage refresh**
+   (including tick-zero spawning and newly completed storage), before calculating
+   next-tick shortage ratios. They can be spent from the following tick. Income
+   is capped by production-pool storage, overflow is discarded, and personal
+   spell mana is untouched. Wide integer arithmetic supports yields above `Fx`.
+8. Completion removes exactly one lifetime and releases only its counted obstacle.
+   It follows **neither `featuredead` nor `featurereclamate`**. The latter remains
+   parsed in content but unused: blindly recreating its common self-link would
+   enable endlessly repeating resource yields. No successor rule is inferred.
+9. `StartBuilding`/`StopBuilding` bracket actual working intervals using existing
+   script callbacks, without adding resurrection or new effects. Stop,
+   replacement (even same-target), actor death/removal/defeat, target loss and
+   unreachable approaches tear down once. Owned temporary walks cannot consume a
+   player waypoint at equal coordinates. Shift appends within the shared queue
+   cap. A stationary capable factory treats Clear as a production barrier;
+   appended Clear waits for an active repeated product, then pauses future
+   production until its turn ends. Replacement cancels/refunds as existing
+   production rules require.
+
+Tests: `tak-sim/tests/clear.rs`, `clear_lineage.rs`, `clear_real_data.rs` (gated by `TAK_DATA_DIR`),
+command JSON property tests, and `tak-headless/tests/clear_checkpoint.rs` for
+cross-process replay and walking/partial/stopped/cleared checkpoint continuation.
+Replay rules are **version 7**; older checkpoint rules are rejected explicitly.
+Sparse default-free hash additions preserve unchanged synthetic no-Clear logs.

@@ -2,7 +2,7 @@
 //! and the camera geometry shared by rendering and input ([`ViewGeom`]).
 //! No Bevy types.
 
-use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId};
+use tak_commands::{FeatureId, PlayerId, SpellId, UnitDefId, UnitId};
 use tak_input::{BuilderKind, Camera, Category, PlacementCandidate, UnitInfo, WorldView};
 use tak_math::{Fx, Vec2};
 use tak_sim::World;
@@ -100,6 +100,35 @@ impl WorldView for SimView<'_> {
     fn can_heal(&self, unit: UnitId) -> bool {
         self.world.unit(unit).is_some_and(|u| u.owner == self.local)
             && tak_sim::construction::can_heal(self.world, unit)
+    }
+
+    fn can_clear(&self, unit: UnitId) -> bool {
+        self.world.unit(unit).is_some_and(|u| u.owner == self.local)
+            && tak_sim::construction::can_clear(self.world, unit)
+    }
+
+    fn clear_target_at(&self, pos: tak_commands::WorldPos) -> Option<FeatureId> {
+        // Current visibility, not remembered terrain, prevents target picking
+        // from revealing whether an unseen tree or corpse still exists.
+        if self
+            .fog
+            .is_some_and(|g| g.at(f(pos.x), f(pos.y)) != crate::fog::FogCell::Seen)
+        {
+            return None;
+        }
+        self.world.features.iter().find_map(|(id, feature)| {
+            (feature.contains(pos) && self.clear_target_pos(id).is_some()).then_some(id)
+        })
+    }
+
+    fn clear_target_pos(&self, target: FeatureId) -> Option<tak_commands::WorldPos> {
+        let feature = self.world.features.get(target)?;
+        let pos = feature.center();
+        (tak_sim::construction::can_clear_target(self.world, target)
+            && self
+                .fog
+                .is_none_or(|g| g.at(f(pos.x), f(pos.y)) == crate::fog::FogCell::Seen))
+        .then_some(pos)
     }
 
     fn build_options(&self, unit: UnitId) -> Vec<UnitDefId> {

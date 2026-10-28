@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::hash::Hash;
 
-use tak_commands::{FireState, PlayerId, Target, Tick, UnitDefId, UnitId};
+use tak_commands::{FeatureId, FireState, PlayerId, Target, Tick, UnitDefId, UnitId};
 use tak_math::{Angle, Fx, Rng};
 
 use crate::WorldPos;
@@ -51,6 +51,11 @@ pub enum Order {
     Heal {
         /// Unit to heal or assist.
         target: UnitId,
+    },
+    /// Clear a feature lifetime (construction lane).
+    Clear {
+        /// Tree or wreck to clear.
+        target: FeatureId,
     },
     /// Patrol leg toward a point; re-queued at the back when reached
     /// (pathfinding, WP-L).
@@ -104,6 +109,11 @@ impl Order {
             Order::AttackMove { to } => {
                 h.u8(5);
                 h.vec2(to);
+            }
+            Order::Clear { target } => {
+                h.u8(7);
+                h.u32(target.index);
+                h.u32(target.generation);
             }
             Order::Heal { target } => {
                 h.u8(6);
@@ -164,6 +174,10 @@ impl Unit {
             self.build.factory.cancel_product = true;
         }
         self.combat.cancel_orders();
+        if let Some(clear) = &mut self.build.clear {
+            clear.cancelled = true;
+            clear.walking = false;
+        }
         if let Some(heal) = &mut self.build.heal {
             heal.cancelled = true;
             heal.work.walking = false;

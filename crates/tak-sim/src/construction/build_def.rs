@@ -31,6 +31,8 @@ pub struct BuildDef {
     pub builddistance: i32,
     /// FBI `builder`.
     pub builder: bool,
+    /// FBI `canreclaim`: explicit Clear capability, independent of the build menu.
+    pub canreclaim: bool,
     /// FBI `bmcode`: set on mobile units. A builder with it places what it
     /// builds at a site (`Build { at: Some }`); one without it is a factory
     /// with a production queue (`Build { at: None }`). **Known** for TA
@@ -84,11 +86,15 @@ impl BuildDef {
         h.i32(self.builddistance);
         h.bool(self.builder);
         h.bool(self.mobile);
+
         h.len(self.canbuild.len());
         for &d in &self.canbuild {
             h.unit_def(d);
         }
         h.bytes(self.yardmap.as_bytes());
+        if self.canreclaim {
+            h.bytes(b"CAN_CLEAR");
+        }
     }
 
     /// Yard character of footprint cell `(cx, cz)`, `o` if none.
@@ -141,6 +147,7 @@ pub fn build_def_from_fbi(u: &tak_content::UnitDef) -> BuildDef {
         workertime: e.worker_time.unwrap_or(0).max(0),
         builddistance: e.build_distance.unwrap_or(0).max(0),
         builder: u.has_flag("builder"),
+        canreclaim: u.has_flag("canreclaim"),
         mobile: u.has_flag("bmcode"),
         canbuild: Vec::new(),
         yardmap: expand_yardmap(u.footprint.yardmap.as_deref(), fx, fz),

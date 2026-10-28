@@ -44,7 +44,8 @@ pub use binding::{
 };
 pub use brush::{brush_radius, drag_circle, units_in_circle};
 pub use context::{
-    Mode, builders_for, casters_for, healers_for, own_units, pick_unit, resolve_context,
+    Mode, builders_for, casters_for, clearers_for, healers_for, own_units, pick_unit,
+    resolve_context,
 };
 pub use cursor::{
     AXIS_MAX, Motion, approach_frac, cursor_motion, cursor_step, curve, friction, magnetize, pct,

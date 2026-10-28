@@ -48,7 +48,7 @@
     {"type": "open_ring", "ring": "unit"},
     {"type": "guard_mode"},
     {"type": "patrol_mode"},
-    {"type": "reserved", "order": "clear"}
+    {"type": "clear_mode"}
   ],
   "idle_wheel": [
     {"type": "recall_group", "group": 5},

@@ -45,6 +45,23 @@ impl UnitId {
     }
 }
 
+/// Generational feature handle. Removing or replacing a tree/wreck retires its
+/// lifetime, so queued Clear commands cannot target a successor in the same slot.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct FeatureId {
+    /// Arena slot.
+    pub index: u32,
+    /// Slot generation at the time this ID was issued.
+    pub generation: u32,
+}
+
+impl FeatureId {
+    /// Construct from slot index and generation.
+    pub const fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+}
+
 /// Opaque reference to a unit definition (a unit type). Its meaning is
 /// assigned by the content layer (`tak-content`) when definitions load; this
 /// crate only carries it.

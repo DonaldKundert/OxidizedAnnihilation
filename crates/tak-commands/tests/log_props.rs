@@ -104,6 +104,13 @@ fn sim_command() -> impl Strategy<Value = SimCommand> {
             target,
             queue
         }),
+        (units(), any::<u32>(), any::<u32>(), queue()).prop_map(
+            |(units, index, generation, queue)| SimCommand::Clear {
+                units,
+                target: FeatureId::new(index, generation),
+                queue,
+            }
+        ),
         (units(), pos(), queue()).prop_map(|(units, to, queue)| SimCommand::Patrol {
             units,
             to,

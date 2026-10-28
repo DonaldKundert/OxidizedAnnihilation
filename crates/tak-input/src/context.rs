@@ -16,6 +16,8 @@ pub enum Mode {
     Patrol,
     /// Guard the unit under the cursor.
     Guard,
+    /// Clear a reclaimable map feature or wreck.
+    Clear,
     /// Heal an owned unit, or assist its construction.
     Heal,
     /// Cast this spell at the cursor.
@@ -100,6 +102,22 @@ pub fn healers_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> UnitSet
         .collect()
 }
 
+/// Complete, selectable owned units with explicit Clear capability.
+/// Unlike Heal this may include nonbuilders or immobile units: the sim decides range.
+pub fn clearers_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet) -> UnitSet {
+    let me = world.local_player();
+    units
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .unit(id)
+                .is_some_and(|u| u.owner == me && u.selectable && !u.under_construction)
+                && world.can_clear(id)
+        })
+        .collect()
+}
+
 /// Units of `units` that can cast `spell`.
 pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: SpellId) -> UnitSet {
     units
@@ -117,6 +135,8 @@ pub fn casters_for<W: WorldView + ?Sized>(world: &W, units: &UnitSet, spell: Spe
 /// - `Mode::Patrol`: `Patrol { to: cursor }`.
 /// - `Mode::Guard`: `Guard` the hovered non-enemy unit; nothing over ground
 ///   or an enemy.
+/// - `Mode::Clear`: clear the current reclaimable feature under the cursor;
+///   invalid clicks never fall back to moving or attacking.
 /// - `Mode::Heal`: heal an owned hovered unit (including unfinished frames),
 ///   by complete mobile builders other than the target; nothing over ground,
 ///   another player's unit or the only selected healer itself.
@@ -162,6 +182,11 @@ pub fn resolve_context<W: WorldView + ?Sized>(
                 queue,
             })
         }
+        Mode::Clear => Some(SimCommand::Clear {
+            units: nonempty(clearers_for(world, units))?,
+            target: world.clear_target_at(cursor)?,
+            queue,
+        }),
         Mode::Heal => {
             // Resolve the handle again so direct callers cannot target a stale
             // snapshot that has disappeared or changed ownership.

@@ -220,18 +220,23 @@ The following are **Chosen**, centralized in `features::impact_hits` and
   decay age. Their footprints snap around the original stable replacement
   centre, so odd/even footprint cycles cannot drift across the map. Each new
   generation causes the existing client feature renderer to replace its art.
+- Weapon successors inherit any raw Clear earnings already claimed by the
+  replacement lineage, including storage overflow. This Chosen conservation
+  cap prevents partial Clear/weapon cycles from resetting mana entitlement;
+  work progress itself resets for the new lifetime (see construction rules).
 
 **Unknown/deferred:** retail feature hit volumes/density and blast falloff,
 feature-category damage modifiers, projectile interception/occlusion, burning
-and `featureburnt`, reclaim timing/payout/damaged value/concurrency and
-`featurereclamate`, resurrection. No original reclaim formula is inferred from
-`damage` or `energy`. Ground attacks continue until stopped, as before; a melee
+and `featureburnt`, original reclaim timing/payout/damaged value/concurrency and
+`featurereclamate`, resurrection. The separate builder Clear implementation has
+explicitly Chosen rules in [construction.md](construction.md#builder-clear--reclaim);
+no exact original formula is inferred from `damage` or `energy`. Ground attacks continue until stopped, as before; a melee
 unit aiming deep inside a large blocking footprint may not reach the point.
 
-Replay checkpoints use **rules version 6**; versions 1–5 are rejected rather
-than silently changing their future combat or obstacle ownership. Command JSON
-is unchanged. Synthetic coverage is in `feature_damage.rs` (including
-cross-process command replay) and `feature_content.rs`; `tak-headless/tests/feature_damage_checkpoint.rs`
+Replay checkpoints use **rules version 7**; versions 1–6 are rejected rather
+than silently changing their future combat or obstacle ownership. Existing
+weapon-command JSON encoding is unchanged; Clear is an additive command variant.
+Synthetic coverage is in `feature_damage.rs` (including cross-process command replay) and `feature_content.rs`; `tak-headless/tests/feature_damage_checkpoint.rs`
 checks partial-damage/successor/cleared checkpoint continuations against fresh
 command replay. No retail assets are included in fixtures. Retail graphical behavior still requires the user's
 licensed install and a graphics-capable runtime.
