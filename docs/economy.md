@@ -233,5 +233,6 @@ scenario in two processes and compares every hash.
 - How the original shares mana in a shortage (TA proportional assumed).
 - Whether a site's multiplier also scales the lodestone's storage (assumed
   not).
-- Reclaim rates for `energy` features (construction/reclaim package).
+- Original reclaim timing/payout cadence. Clear now uses explicitly Chosen
+  contribution-based `energy` income; see [construction.md](construction.md#builder-clear--reclaim).
 - Allied mana sharing.

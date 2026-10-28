@@ -466,8 +466,9 @@ The layout follows design system section 6 (`hud_view.rs`, logic in
   stances Offensive, Defensive, Passive; the weapon buttons Primary,
   Secondary, Special as spells 1-3 (numbered; the plates are blank).
   Frames: 0 dark (unusable), 1 up, 2 lit (hover), 3 down (the active mode,
-  stance or cast). Clear remains reserved; Heal / repair is available for
-  an eligible healer or builder and otherwise leaves its well empty.
+  stance or cast). Clear uses the original `ClearButton` for eligible units;
+  Heal / repair is available for an eligible healer or builder. Unavailable
+  actions leave their wells empty.
 - **Build menu** in a column left of the side panel: the first own builder's options as
   `anims/buildpic/<unit>.jpg` portraits (171 files, 64×48, **Known**) with
   the cost (and the Grid key when on), greyed when the player's mana is
@@ -672,3 +673,19 @@ without replacing the attacking army's selection. The red rectangle and Classic
 hint show the gesture; Shift appends targets. See
 [Attack boxes](controller.md#explicit-attack-box-by-mouse) for deterministic
 ordering, the 64-target cap, visibility rules and interrupted-gesture behavior.
+
+
+### Clear controls
+
+C, the original ClearButton (panel index 5), or the console wheel's Clear slot
+enters explicit feature targeting. Eligibility comes from sim `can_clear`:
+owned, live, complete, authored capability with supported positive rate/range;
+not all builders qualify and some non-builders do. The original
+`Cursorreclamate` cursor is used. Click a currently visible reclaimable feature
+footprint; overlapping candidates choose the lowest live ID. The command retains
+its full generation, so destruction/replacement cannot redirect an old click.
+No ordinary context-click automatically reclaims, and units are never Clear targets.
+Shift appends and retains targeting; Escape exits targeting; Stop cancels work.
+The HUD reports `Clearing <feature name>` and an orange order line, hiding the
+owned temporary approach Move. Input/HUD tests also cover repeated/invalid clicks,
+visibility, stale IDs, non-builders, stationary capability and cancellation.

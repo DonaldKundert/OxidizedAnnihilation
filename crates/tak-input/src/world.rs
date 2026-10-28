@@ -2,7 +2,7 @@
 //! and a screen/world [`Camera`]. Nothing here can change sim state.
 
 use serde::{Deserialize, Serialize};
-use tak_commands::{PlayerId, SpellId, UnitDefId, UnitId, WorldPos};
+use tak_commands::{FeatureId, PlayerId, SpellId, UnitDefId, UnitId, WorldPos};
 use tak_math::{Fx, Vec2};
 
 use crate::binding::Category;
@@ -114,6 +114,29 @@ pub trait WorldView {
                 && !u.under_construction
                 && u.builder == Some(BuilderKind::Mobile)
         })
+    }
+
+    /// Explicit Clear capability. Defaults to false: builder status alone
+    /// must not invent an authored `canreclaim` flag. Nonbuilders may have it. Adapters additionally
+    /// check the live unit's completion, work rate, range and lifecycle.
+    fn can_clear(&self, unit: UnitId) -> bool {
+        let _ = unit;
+        false
+    }
+
+    /// A currently visible, reclaimable feature whose footprint contains
+    /// `pos`. Resolve live generational handles and break overlap ties by ID.
+    /// Unit picking does not override this explicit feature-targeting mode.
+    fn clear_target_at(&self, pos: WorldPos) -> Option<FeatureId> {
+        let _ = pos;
+        None
+    }
+
+    /// A Clear target's currently visible exact-generation centre, for order
+    /// lines. Never return a replacement feature occupying the same slot.
+    fn clear_target_pos(&self, target: FeatureId) -> Option<WorldPos> {
+        let _ = target;
+        None
     }
 
     /// Whether a unit may receive factory rally/production controls. Adapters

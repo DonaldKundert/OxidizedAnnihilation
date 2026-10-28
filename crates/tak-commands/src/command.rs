@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tak_math::Fx;
 
-use crate::{ControlGroup, SpellId, UnitDefId, UnitId, WorldPos};
+use crate::{ControlGroup, FeatureId, SpellId, UnitDefId, UnitId, WorldPos};
 
 /// A set of units an order applies to: always sorted by [`UnitId`] and free
 /// of duplicates, so two clients that select the same units in a different
@@ -232,6 +232,15 @@ pub enum SimCommand {
         /// Replace or append.
         queue: QueueMode,
     },
+    /// Clear a reclaimable map feature or wreck (not a weapon attack).
+    Clear {
+        /// Units with the authored Clear capability.
+        units: UnitSet,
+        /// Exact feature lifetime; successors require a new command.
+        target: FeatureId,
+        /// Replace or append.
+        queue: QueueMode,
+    },
     /// Patrol between the unit's position (or previous patrol point) and `to`.
     Patrol {
         /// Patrollers.
@@ -308,6 +317,7 @@ impl SimCommand {
             | SimCommand::SetFactoryRepeat { units, .. }
             | SimCommand::Guard { units, .. }
             | SimCommand::Heal { units, .. }
+            | SimCommand::Clear { units, .. }
             | SimCommand::Patrol { units, .. }
             | SimCommand::CastSpell { units, .. }
             | SimCommand::Stop { units }
@@ -326,6 +336,7 @@ impl SimCommand {
             | SimCommand::SetFactoryRally { queue, .. }
             | SimCommand::Guard { queue, .. }
             | SimCommand::Heal { queue, .. }
+            | SimCommand::Clear { queue, .. }
             | SimCommand::Patrol { queue, .. }
             | SimCommand::CastSpell { queue, .. } => Some(*queue),
             SimCommand::Stop { .. }

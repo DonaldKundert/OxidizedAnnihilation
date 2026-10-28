@@ -177,17 +177,15 @@ pub const PANEL_BUTTONS: [&str; 13] = [
     "AgPassiveButton",
 ];
 
-/// What each panel button does, in [`PANEL_BUTTONS`] order. Clear remains
-/// reserved; Heal keeps the original RepairButton well and art.
+/// What each panel button does, in [`PANEL_BUTTONS`] order. Clear and Heal
+/// retain the original ClearButton and RepairButton wells and art.
 pub const PANEL_ACTIONS: [Action; 13] = [
     Action::AttackMode,
     Action::MoveMode,
     Action::GuardMode,
     Action::PatrolMode,
     Action::Stop,
-    Action::Reserved {
-        order: tak_input::ReservedOrder::Clear,
-    },
+    Action::ClearMode,
     Action::HealMode,
     Action::CastSpell { index: 0 },
     Action::CastSpell { index: 1 },
@@ -230,6 +228,7 @@ pub fn cursor_seq(kind: CursorKind) -> &'static str {
         CursorKind::Attack => "CursorAttack",
         CursorKind::Guard => "CursorDefend",
         CursorKind::Heal => "CursorRepair",
+        CursorKind::Clear => "Cursorreclamate",
         CursorKind::Patrol => "CursorPatrol",
         CursorKind::Build => "cursorgrn",
         CursorKind::BuildBlocked => "cursorred",
@@ -238,14 +237,15 @@ pub fn cursor_seq(kind: CursorKind) -> &'static str {
     }
 }
 
-/// All cursor contexts to preload, including explicit Heal.
-pub const CURSOR_KINDS: [CursorKind; 11] = [
+/// All cursor contexts to preload, including explicit Heal and Clear.
+pub const CURSOR_KINDS: [CursorKind; 12] = [
     CursorKind::Normal,
     CursorKind::Select,
     CursorKind::Move,
     CursorKind::Attack,
     CursorKind::Guard,
     CursorKind::Heal,
+    CursorKind::Clear,
     CursorKind::Patrol,
     CursorKind::Build,
     CursorKind::BuildBlocked,
@@ -254,12 +254,12 @@ pub const CURSOR_KINDS: [CursorKind; 11] = [
 ];
 
 /// The acknowledgement for an order (**Chosen** for orders without their
-/// own sound: build walks like a move, a spell attacks, Heal assists like
+/// own sound: Build/Clear walk like Move, a spell attacks, Heal assists like
 /// Guard, a stance has none).
 pub fn order_sound(c: &tak_commands::SimCommand) -> Option<&'static str> {
     use tak_commands::SimCommand as C;
     Some(match c {
-        C::Move { .. } | C::Build { .. } => "MOVE",
+        C::Move { .. } | C::Build { .. } | C::Clear { .. } => "MOVE",
         C::Attack { .. } | C::AttackMove { .. } | C::CastSpell { .. } => "ATTACK",
         C::Guard { .. } | C::Heal { .. } => "GUARD",
         C::Patrol { .. } => "PATROL",
@@ -299,6 +299,7 @@ pub fn order_goal(w: &tak_sim::World, order: &tak_sim::Order) -> Option<tak_comm
         }
         | Order::Guard { target: id }
         | Order::Heal { target: id } => w.unit(*id).map(|t| t.pos),
+        Order::Clear { target } => w.features.get(*target).map(|feature| feature.center()),
     }
 }
 
@@ -323,6 +324,7 @@ pub fn visible_order_goal(
             .unit(*id)
             .filter(|u| u.id == *id && u.selectable)
             .map(|u| u.pos),
+        Order::Clear { target } => view.clear_target_pos(*target),
     }
 }
 
@@ -391,17 +393,19 @@ pub fn active_guard_goal(
         .map(|t| t.pos)
 }
 
-/// Heal goals use green/cyan, distinct from the ordinary yellow order line.
+/// Heal goals use green/cyan and Clear orange, distinct from ordinary yellow.
 pub fn order_rgba(order: &tak_sim::Order) -> [f32; 4] {
     if matches!(order, tak_sim::Order::Heal { .. }) {
         [0.3, 1.0, 0.7, 0.8]
+    } else if matches!(order, tak_sim::Order::Clear { .. }) {
+        [1.0, 0.6, 0.2, 0.8]
     } else {
         [1.0, 1.0, 0.4, 0.6]
     }
 }
 
-/// Player-visible orders, hiding the temporary Move which an active Heal
-/// inserts in front of its own order while the healer walks into range.
+/// Player-visible orders, hiding the temporary Move which active Heal/Clear
+/// inserts in front of its own order while the builder walks into range.
 /// Also hide active Guard's temporary steering Move. Keeping these details
 /// out of the HUD preserves the target line, verb and player queue count.
 pub fn orders_for_display(u: &tak_sim::world::Unit) -> impl Iterator<Item = &tak_sim::Order> {
@@ -416,6 +420,13 @@ pub fn orders_for_display(u: &tak_sim::world::Unit) -> impl Iterator<Item = &tak
                     target: j.work.target,
                 })
     });
+    let hide_clear_walk = u.build.clear.is_some_and(|j| {
+        !j.cancelled
+            && j.walking
+            && j.walk_to
+                .is_some_and(|to| u.orders.front() == Some(&tak_sim::Order::Move { to }))
+            && u.orders.get(1) == Some(&tak_sim::Order::Clear { target: j.target })
+    });
     let hide_guard_walk = matches!(u.combat.order, Some(tak_sim::combat::CombatOrder::Guard(_)))
         && (u
             .combat
@@ -427,9 +438,9 @@ pub fn orders_for_display(u: &tak_sim::world::Unit) -> impl Iterator<Item = &tak
                         .walk_to
                         .is_some_and(|to| u.orders.front() == Some(&tak_sim::Order::Move { to }))
             }));
-    u.orders
-        .iter()
-        .skip(usize::from(hide_heal_walk || hide_guard_walk))
+    u.orders.iter().skip(usize::from(
+        hide_heal_walk || hide_clear_walk || hide_guard_walk,
+    ))
 }
 
 /// Current Guard-assistance assignment, not evidence of paid progress. The
@@ -509,6 +520,14 @@ pub fn order_text(
             Some(tak_sim::Order::AttackMove { .. }) => "Attack-moving".into(),
             Some(tak_sim::Order::Patrol { .. }) => "Patrolling".into(),
             Some(tak_sim::Order::Guard { target }) => format!("Guarding {}", name(*target)),
+            Some(tak_sim::Order::Clear { target }) => {
+                let name = w
+                    .features
+                    .get(*target)
+                    .and_then(|f| w.features.def(f))
+                    .map_or("?", |d| d.name.as_str());
+                format!("Clearing {name}")
+            }
             Some(tak_sim::Order::Heal { target }) => {
                 let verb = w.unit(*target).map_or("Healing", |t| {
                     if !t.build.is_complete() {

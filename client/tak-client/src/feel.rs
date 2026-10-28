@@ -342,6 +342,8 @@ pub struct HintCx {
     pub has_builder: bool,
     /// An eligible factory whose production portraits support queue editing.
     pub has_factory: bool,
+    /// An operational unit with explicit Clear capability among them.
+    pub has_clearer: bool,
     /// An operational explicit healer among them, even without a build menu.
     pub has_healer: bool,
     /// A spellcaster among them.
@@ -405,6 +407,7 @@ pub fn hints(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             Mode::Patrol => "patrol here",
             Mode::Guard => "guard",
             Mode::Heal => "heal / repair",
+            Mode::Clear => "clear feature",
             Mode::CastSpell(_) => "cast",
             Mode::Attack => "attack",
             Mode::AttackMove => "attack-move here",
@@ -523,6 +526,8 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
             Some("LMB".into()),
             if m.mode() == Mode::Heal {
                 "heal / repair"
+            } else if m.mode() == Mode::Clear {
+                "clear feature"
             } else {
                 "confirm"
             },
@@ -571,6 +576,12 @@ pub fn hints_classic(m: &Mapper, cx: HintCx) -> Vec<Hint> {
         ));
         v.push((key_name_for(p, |a| matches!(a, Action::MoveMode)), "move"));
         v.push((key_name_for(p, |a| matches!(a, Action::GuardMode)), "guard"));
+        if cx.has_clearer {
+            v.push((
+                key_name_for(p, |a| matches!(a, Action::ClearMode)),
+                "clear feature",
+            ));
+        }
         if cx.has_healer {
             v.push((
                 key_name_for(p, |a| matches!(a, Action::HealMode)),
@@ -628,6 +639,7 @@ pub fn action_label(a: &Action) -> String {
         Action::PatrolMode => "Patrol".into(),
         Action::GuardMode => "Guard".into(),
         Action::HealMode => "Heal / repair".into(),
+        Action::ClearMode => "Clear".into(),
         Action::CastSpellMode => "Cast spell".into(),
         Action::CastSpell { index } => format!("Spell {}", index + 1),
         Action::SetFireState { state } => crate::hud::stance_name(*state).into(),

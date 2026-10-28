@@ -121,6 +121,8 @@ pub enum Action {
     PatrolMode,
     /// Next context order is a guard.
     GuardMode,
+    /// Next context order clears a reclaimable map feature or wreck.
+    ClearMode,
     /// Next context order heals an owned unit or assists its construction.
     HealMode,
     /// Next context order casts the selection's first spell.
@@ -316,7 +318,7 @@ pub enum Ring {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReservedOrder {
-    /// Cancel queued orders (TA C).
+    /// Legacy reserved Clear slot; new profiles use [`Action::ClearMode`].
     Clear,
     /// Legacy reserved Heal / repair slot; new profiles use [`Action::HealMode`].
     Heal,

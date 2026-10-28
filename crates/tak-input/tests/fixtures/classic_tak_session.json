@@ -369,7 +369,7 @@
    ]
   },
   {
-   "label": "c_clear_is_reserved",
+   "label": "c_clear_requires_capability",
    "events": [
     {
      "type": "key_down",

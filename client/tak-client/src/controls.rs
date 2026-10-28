@@ -852,7 +852,7 @@ fn chip_for(art: &mut GlyphArt, images: &mut Assets<Image>, g: &Glyph) -> Handle
         .clone()
 }
 
-const HINTS: usize = 9;
+const HINTS: usize = 10;
 
 #[derive(Component)]
 pub(super) struct HintBar;
@@ -985,6 +985,7 @@ pub(super) fn hints_system(
             w.unit(*id).is_some_and(|u| u.owner == me)
                 && tak_sim::construction::can_factory_control(w, *id)
         }),
+        has_clearer: !tak_input::clearers_for(&sim.view(), input.mapper.selection()).is_empty(),
         has_healer: !tak_input::healers_for(&sim.view(), input.mapper.selection()).is_empty(),
         has_builder: first_builder(&sim.session, input.mapper.selection()).is_some(),
         has_caster: sel.iter().any(|u| {
@@ -1354,6 +1355,10 @@ fn wheel_slot_view(
         }
         Action::MoveMode => v.info = format!("Move\nthen {order_prompt} on the ground"),
         Action::GuardMode => v.info = format!("Guard\nthen {order_prompt} on a friend"),
+        Action::ClearMode => {
+            v.usable = !tak_input::clearers_for(&s.view(), sel).is_empty();
+            v.info = format!("Clear\nthen {order_prompt} on a tree or wreck");
+        }
         Action::HealMode => {
             v.usable = !tak_input::healers_for(&s.view(), sel).is_empty();
             v.info = format!("Heal / repair\nthen {order_prompt} on another own unit or frame");

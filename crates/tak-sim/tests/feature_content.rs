@@ -212,3 +212,80 @@ fn extreme_blast_falloff_uses_wide_intermediates() {
         }
     }
 }
+
+#[test]
+fn clear_capability_is_authored_hashed_and_independent_of_builder_flag() {
+    let unit = |clear| {
+        let text = format!(
+            "[UNITINFO]\n{{\nUnitName=Test;\ncanreclaim={clear};\nworkertime=10;\nbuilddistance=80;\n}}\n"
+        );
+        let doc = tak_formats::tdf::parse(text.as_bytes()).unwrap();
+        let u = tak_content::unit::unit_from_fbi(&doc, "synthetic.fbi", &mut Default::default())
+            .unwrap();
+        tak_sim::content::unit_def_from_fbi(&u)
+    };
+    let a = unit(0);
+    let b = unit(1);
+    assert!(!a.build.canreclaim && b.build.canreclaim);
+    assert!(!b.build.builder);
+    let mut sc = tak_sim::testing::example_scenario(1, 1);
+    sc.unit_defs[0] = a;
+    let before = Sim::new(&sc).unwrap().state_hash();
+    sc.unit_defs[0] = b;
+    assert_ne!(Sim::new(&sc).unwrap().state_hash(), before);
+    let sc = Scenario::from_json(&sc.to_json_pretty()).unwrap();
+    let mut sim = Sim::new(&sc).unwrap();
+    sim.step(&[]);
+    assert!(tak_sim::construction::can_clear(
+        sim.world(),
+        tak_sim::UnitId::new(0, 0)
+    ));
+}
+
+#[test]
+fn authored_reclamate_self_and_cycle_links_do_not_spawn_clear_successors() {
+    let src = "[synthetic_a]\n{\nreclaimable=1;\nenergy=1;\nfeaturereclamate=synthetic_a;\n}\n[synthetic_b]\n{\nreclaimable=1;\nenergy=1;\nfeaturereclamamate=synthetic_c;\n}\n[synthetic_c]\n{\nreclaimable=1;\nenergy=1;\nfeaturereclamate=synthetic_b;\n}\n";
+    let doc = tak_formats::tdf::parse(src.as_bytes()).unwrap();
+    let defs =
+        tak_content::feature::features_from_tdf(&doc, "synthetic.tdf", &mut Default::default());
+    assert!(defs.iter().all(|d| d.feature_reclamate.is_some()));
+    for def in defs {
+        let mut sc = tak_sim::testing::example_scenario(1, 1);
+        let d = &mut sc.unit_defs[0];
+        d.build.canreclaim = true;
+        d.build.workertime = 1000;
+        d.build.builddistance = 100;
+        d.economy.mogriumstorage = 100;
+        sc.economy.rules.start_mana = 0;
+        *sc.features = FeatureSetup {
+            defs: vec![features::FeatureDef::from_content(&def)],
+            placed: vec![features::PlacedFeature {
+                def: 0,
+                x: 18,
+                z: 16,
+            }],
+            ..Default::default()
+        };
+        let mut sim = Sim::new(&sc).unwrap();
+        let mut log = tak_commands::CommandLog::new();
+        log.record(
+            tak_commands::Tick(0),
+            tak_commands::PlayerId(0),
+            tak_commands::SimCommand::Clear {
+                units: tak_commands::UnitSet::single(tak_sim::UnitId::new(0, 0)),
+                target: tak_commands::FeatureId::new(0, 0),
+                queue: tak_commands::QueueMode::Replace,
+            },
+        );
+        for _ in 0..3 {
+            sim.step(log.for_tick(sim.tick()));
+        }
+        assert!(sim.world().features.is_empty());
+        assert_eq!(
+            tak_sim::economy::player(sim.world(), tak_commands::PlayerId(0))
+                .unwrap()
+                .mana,
+            1 << 16
+        );
+    }
+}

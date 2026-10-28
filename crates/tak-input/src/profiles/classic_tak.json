@@ -8,7 +8,7 @@
     {"input": {"key": "escape"}, "gesture": "press", "action": {"type": "cancel"}},
     {"input": {"key": "a"}, "gesture": "press", "action": {"type": "attack_mode"}},
     {"input": {"key": "a"}, "with": {"key": "alt"}, "gesture": "press", "action": {"type": "attack_move_mode"}},
-    {"input": {"key": "c"}, "gesture": "press", "action": {"type": "reserved", "order": "clear"}},
+    {"input": {"key": "c"}, "gesture": "press", "action": {"type": "clear_mode"}},
     {"input": {"key": "g"}, "gesture": "press", "action": {"type": "guard_mode"}},
     {"input": {"key": "h"}, "gesture": "press", "action": {"type": "heal_mode"}},
     {"input": {"key": "k"}, "gesture": "press", "action": {"type": "reserved", "order": "cloak"}},

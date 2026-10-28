@@ -448,6 +448,7 @@ fn scripted_intents_match_and_issue_orders() {
             SimCommand::Build { at: None, .. } => "produce",
             SimCommand::Guard { .. } => "guard",
             SimCommand::Heal { .. } => "heal",
+            SimCommand::Clear { .. } => "clear",
             SimCommand::Patrol { .. } => "patrol",
             SimCommand::CastSpell { .. } => "cast",
             SimCommand::Stop { .. } => "stop",

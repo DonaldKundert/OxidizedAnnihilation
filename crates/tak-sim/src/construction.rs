@@ -18,7 +18,9 @@ mod build_def;
 pub mod content;
 pub mod placement;
 pub mod progress;
+pub mod reclaim;
 pub mod repair;
+pub use reclaim::{ClearJob, apply_clear_command, can_clear, can_clear_target};
 
 pub use build_def::{BuildDef, MAX_BUILD_OPTIONS, YARD_CHARS, build_def_from_fbi, expand_yardmap};
 pub use progress::Frame;
@@ -105,6 +107,8 @@ pub struct UnitBuild {
     pub assist: Option<Assist>,
     /// Explicit queued Heal action, independent of Guard assistance.
     pub heal: Option<HealJob>,
+    /// Explicit feature Clear interval and owned temporary steering.
+    pub clear: Option<ClearJob>,
     /// Target-owned fractional repair and production-mana credit.
     pub repair: Option<repair::RepairCredit>,
 }
@@ -194,6 +198,10 @@ impl UnitBuild {
             h.bool(j.work.building);
             h.bool(j.cancelled);
         }
+        if let Some(j) = self.clear {
+            h.bytes(b"CLEAR");
+            j.hash(h);
+        }
         if let Some(r) = self.repair {
             h.bytes(b"REPAIR");
             r.hash(h);
@@ -269,6 +277,8 @@ pub const MAX_REJECTIONS: usize = 64;
 pub struct ConstructionState {
     /// Refunds not yet credited by the economy.
     pub refunds: Vec<Refund>,
+    /// Clear income, settled after this tick's live storage refresh.
+    pub reclaim_credits: Vec<Refund>,
     /// The latest refused build orders, oldest first (at most
     /// [`MAX_REJECTIONS`]).
     pub rejections: Vec<Rejection>,
@@ -286,6 +296,14 @@ impl ConstructionState {
         for r in &self.refunds {
             h.player(r.player);
             h.u64(r.mana as u64);
+        }
+        if !self.reclaim_credits.is_empty() {
+            h.bytes(b"RECLAIM_CREDITS");
+            h.len(self.reclaim_credits.len());
+            for r in &self.reclaim_credits {
+                h.player(r.player);
+                h.u64(r.mana as u64);
+            }
         }
         h.len(self.rejections.len());
         for r in &self.rejections {
@@ -371,13 +389,15 @@ pub(crate) fn is_work_move(u: &crate::world::Unit) -> bool {
             && a.walk_to
                 .is_some_and(|to| u.orders.front() == Some(&Order::Move { to }))
     };
-    u.build.assist.is_some_and(owns) || u.build.heal.is_some_and(|j| !j.cancelled && owns(j.work))
+    u.build.assist.is_some_and(owns)
+        || u.build.heal.is_some_and(|j| !j.cancelled && owns(j.work))
+        || reclaim::is_work_move(u)
 }
 
 /// Consume temporary-work steering ownership before popping the front Move.
 pub(crate) fn consume_work_move(u: &mut crate::world::Unit) -> bool {
     let front = u.orders.front().copied();
-    let mut consumed = false;
+    let mut consumed = reclaim::consume_work_move(u);
     if let Some(a) = &mut u.build.assist {
         if a.walking
             && a.walk_to
@@ -925,6 +945,7 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
         // Retire the old explicit interval before another action starts its
         // callbacks; a replacing Build must not be stopped by stale Heal.
         sync_heal_job(world, scripts, id);
+        reclaim::sync_job(world, scripts, id);
         match builder_kind(world, id) {
             Some(true) => {
                 mobile_step(world, scripts, id);
@@ -939,9 +960,11 @@ pub fn tick(world: &mut World, scripts: &mut dyn ScriptHost) {
         }
         // Conversely, Build/Guard cleanup precedes a newly activated Heal.
         heal_step(world, scripts, id);
+        reclaim::step(world, scripts, id);
     }
     for &id in &ids {
         heal_finish(world, scripts, id);
+        reclaim::finish(world, scripts, id);
         match builder_kind(world, id) {
             Some(true) => {
                 mobile_finish(world, scripts, id);
@@ -1372,10 +1395,14 @@ fn mobile_finish(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
 
 /// Index and def of a factory's first production order.
 fn first_production(orders: &std::collections::VecDeque<Order>) -> Option<(usize, UnitDefId)> {
-    orders.iter().enumerate().find_map(|(i, o)| match *o {
-        Order::Build { def, at: None } => Some((i, def)),
-        _ => None,
-    })
+    orders
+        .iter()
+        .take_while(|o| !matches!(o, Order::Clear { .. }))
+        .enumerate()
+        .find_map(|(i, o)| match *o {
+            Order::Build { def, at: None } => Some((i, def)),
+            _ => None,
+        })
 }
 
 fn set_factory(world: &mut World, id: UnitId, f: FactoryState) {
@@ -1419,9 +1446,12 @@ fn factory_step(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     let mut f = u.build.factory;
     let repeat_controlled = f.product_from_repeat || u.build.factory_repeat.is_some();
     let finite = first_production(&u.orders);
-    let next = finite
-        .map(|(_, def)| (def, false))
-        .or_else(|| u.build.factory_repeat.map(|def| (def, true)));
+    let next = finite.map(|(_, def)| (def, false)).or_else(|| {
+        u.build
+            .factory_repeat
+            .filter(|_| !u.orders.iter().any(|o| matches!(o, Order::Clear { .. })))
+            .map(|def| (def, true))
+    });
     let Some(fd) = world.defs().get(u.def) else {
         return;
     };
@@ -1697,6 +1727,7 @@ fn release(world: &mut World, p: UnitId, fpos: WorldPos, fdef: UnitDefId, rally:
 /// or advancing their remaining frames. They no longer own active work.
 pub(crate) fn halt_defeated_unit(world: &mut World, scripts: &mut dyn ScriptHost, id: UnitId) {
     cancel_heal(world, scripts, id);
+    reclaim::cancel(world, scripts, id);
     let Some(u) = world.unit_mut(id) else { return };
     let building = u.build.job.take().is_some_and(|j| j.building)
         | u.build.assist.take().is_some_and(|a| a.building);

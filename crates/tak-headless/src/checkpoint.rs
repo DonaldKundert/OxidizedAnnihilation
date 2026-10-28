@@ -25,9 +25,9 @@ pub mod driver;
 /// Checkpoint wire format, independent of the command/scenario versions.
 pub const CHECKPOINT_FORMAT_VERSION: u32 = 1;
 /// Replay-rule compatibility gate. Bump when simulation changes invalidate saves.
-// Rules 6 adds weapon-impact feature damage and owned placed-feature blockers.
+// Rules 7 adds explicit builder Clear and target-owned reclaim progress/payout.
 // Reject older behavioral snapshots rather than silently changing their future.
-pub const REPLAY_RULES_VERSION: u32 = 6;
+pub const REPLAY_RULES_VERSION: u32 = 7;
 /// Maximum serialized checkpoint size, checked before JSON deserialization.
 pub const MAX_CHECKPOINT_BYTES: usize = 32 * 1024 * 1024;
 /// Hard limit on executed commands stored in one checkpoint.
@@ -1073,30 +1073,16 @@ mod tests {
         let wire = format!(
             r#"{{"format":"tak-replay-checkpoint","version":1,"replay_rules_version":1,"payload":{legacy},"checksum":"{checksum}"}}"#
         );
-        assert!(matches!(
-            Checkpoint::from_json(&wire),
-            Err(CheckpointError::UnsupportedRules(1))
-        ));
-        let previous = wire.replace("\"replay_rules_version\":1", "\"replay_rules_version\":2");
-        assert!(matches!(
-            Checkpoint::from_json(&previous),
-            Err(CheckpointError::UnsupportedRules(2))
-        ));
-        let previous = wire.replace("\"replay_rules_version\":1", "\"replay_rules_version\":3");
-        assert!(matches!(
-            Checkpoint::from_json(&previous),
-            Err(CheckpointError::UnsupportedRules(3))
-        ));
-        let previous = wire.replace("\"replay_rules_version\":1", "\"replay_rules_version\":4");
-        assert!(matches!(
-            Checkpoint::from_json(&previous),
-            Err(CheckpointError::UnsupportedRules(4))
-        ));
-        let previous = wire.replace("\"replay_rules_version\":1", "\"replay_rules_version\":5");
-        assert!(matches!(
-            Checkpoint::from_json(&previous),
-            Err(CheckpointError::UnsupportedRules(5))
-        ));
+        for rules in 0..REPLAY_RULES_VERSION {
+            let previous = wire.replace(
+                "\"replay_rules_version\":1",
+                &format!("\"replay_rules_version\":{rules}"),
+            );
+            assert!(matches!(
+                Checkpoint::from_json(&previous),
+                Err(CheckpointError::UnsupportedRules(found)) if found == rules
+            ));
+        }
         let current = wire.replace(
             "\"replay_rules_version\":1",
             &format!("\"replay_rules_version\":{REPLAY_RULES_VERSION}"),
@@ -1105,7 +1091,7 @@ mod tests {
         assert_eq!(parsed.source(), &payload.source);
         assert_eq!(parsed.checksum, checksum);
         assert_eq!(CHECKPOINT_FORMAT_VERSION, 1);
-        assert_eq!(REPLAY_RULES_VERSION, 6);
+        assert_eq!(REPLAY_RULES_VERSION, 7);
     }
 
     #[test]

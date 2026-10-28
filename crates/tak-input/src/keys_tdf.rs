@@ -209,7 +209,7 @@ fn command(value: &str) -> Cmd {
             "passive" => Cmd::Do(Action::SetFireState {
                 state: FireState::HoldFire,
             }),
-            "clear" => reserved(ReservedOrder::Clear),
+            "clear" => Cmd::Do(Action::ClearMode),
             "heal" | "repair" => Cmd::Do(Action::HealMode),
             "togglecloak" => reserved(ReservedOrder::Cloak),
             "load" => reserved(ReservedOrder::Load),

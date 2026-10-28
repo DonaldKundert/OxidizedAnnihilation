@@ -16,10 +16,12 @@
 //! - Positive weapon impacts subtract health, then replace a destroyed
 //!   feature with at most one `featuredead` successor. No mana is awarded.
 //!
-//! Not yet: builder Clear/reclaim (`reclaimable`, `energy`), burning,
-//! resurrection or projectile/feature collision along the flight path.
+//! Builder Clear is a separate construction action with feature-owned progress;
+//! it removes a lifetime without following `featuredead` or `featurereclamate`.
+//! Not yet: burning, resurrection or projectile/feature flight-path collision.
 
 use serde::{Deserialize, Serialize};
+pub use tak_commands::FeatureId;
 use tak_commands::UnitDefId;
 use tak_math::{Angle, Fx};
 
@@ -58,7 +60,7 @@ pub struct FeatureDef {
     pub indestructible: bool,
     /// `reclaimable`.
     pub reclaimable: bool,
-    /// `energy`: mana from reclaiming (Believed; not used yet).
+    /// `energy`: authored Clear mana yield (Chosen interpretation; see construction docs).
     pub energy: i32,
     /// `sacredsite`: lodestone multiplier (0 = not a site).
     pub sacred_site: Fx,
@@ -263,6 +265,7 @@ impl FeatureSetup {
                 || d.footprint_z == 0
                 || d.name.len() > 256
                 || d.feature_dead.is_some_and(|j| j >= n)
+                || !(0..=1_000_000).contains(&d.energy)
                 || !(0..=1_000_000).contains(&d.damage)
                 || !(0..=100_000).contains(&d.decompose_time)
                 || d.sacred_site < Fx::ZERO
@@ -329,6 +332,11 @@ pub struct Feature {
     pub heading: Angle,
     /// Hit points (the definition's `damage`).
     pub health: i32,
+    /// Clear work accumulated across builders and cancellation; never weapon HP.
+    pub reclaim_done: i64,
+    /// Raw mana already earned by this weapon-replacement lineage, including
+    /// storage overflow. Carried to weapon successors to prevent cyclic farming.
+    pub reclaim_claimed: i64,
     /// Placed or corpse.
     pub origin: Origin,
     /// Tick it appeared.
@@ -396,16 +404,15 @@ impl Feature {
         }
         h.u32(self.born);
         h.bool(self.obstacle);
+        if self.reclaim_done != 0 {
+            h.bytes(b"RECLAIM_DONE");
+            h.u64(self.reclaim_done as u64);
+        }
+        if self.reclaim_claimed != 0 {
+            h.bytes(b"RECLAIM_CLAIMED");
+            h.u64(self.reclaim_claimed as u64);
+        }
     }
-}
-
-/// Handle to a live feature (slot plus generation, like `UnitId`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FeatureId {
-    /// Slot.
-    pub index: u32,
-    /// Bumped whenever the slot is freed.
-    pub generation: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -455,6 +462,8 @@ impl FeatureState {
                     ),
                     heading: Angle::ZERO,
                     health: d.damage,
+                    reclaim_done: 0,
+                    reclaim_claimed: 0,
                     origin: Origin::Map,
                     born: 0,
                     obstacle: d.blocking && setup.placed_features_block,
@@ -480,6 +489,18 @@ impl FeatureState {
         (s.generation == id.generation)
             .then_some(s.feature.as_ref())
             .flatten()
+    }
+
+    /// Update Clear work and lineage earnings for a still-live lifetime.
+    pub(crate) fn set_reclaim_progress(&mut self, id: FeatureId, done: i64, claimed: i64) {
+        if let Some(s) = self.slots.get_mut(id.index as usize) {
+            if s.generation == id.generation {
+                if let Some(f) = &mut s.feature {
+                    f.reclaim_done = done;
+                    f.reclaim_claimed = claimed;
+                }
+            }
+        }
     }
 
     /// Live features in slot order.
@@ -603,6 +624,8 @@ pub fn spawn_corpse(
         replacement_center: r.center(),
         heading,
         health: d.damage,
+        reclaim_done: 0,
+        reclaim_claimed: 0,
         origin: Origin::Corpse(def),
         born: world.tick().0,
         obstacle: d.blocking,
@@ -681,6 +704,8 @@ pub fn apply_damage(world: &mut World, id: FeatureId, amount: i32) -> bool {
         replacement_center: f.replacement_center,
         heading: f.heading,
         health: d.damage,
+        reclaim_done: 0,
+        reclaim_claimed: f.reclaim_claimed,
         origin: f.origin,
         born: world.tick().0,
         obstacle: d.blocking
